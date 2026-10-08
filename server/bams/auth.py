@@ -80,7 +80,34 @@ def user_count(con: sqlite3.Connection) -> int:
 
 
 # Each user's display preferences: name -> default. Unknown names are ignored when saving.
-PREFS: dict[str, bool] = {"home_hero": True}   # the rotating "Recently added" banner at the top of Home
+PREFS: dict[str, object] = {
+    "home_hero": True,   # the rotating "Recently added" banner at the top of Home
+    # Home's rows in the user's order, each {"id", "show"}: "continue", "recent", "lib:<id>", "top_rated", "genres".
+    # Empty = the default layout; rows missing from the list (a new library) are shown at their default place.
+    "home_rows": [],
+}
+MAX_HOME_ROWS = 200
+
+
+def _home_rows(v) -> list | None:
+    if not isinstance(v, list) or len(v) > MAX_HOME_ROWS:
+        return None
+    rows, seen = [], set()
+    for r in v:
+        if not (isinstance(r, dict) and isinstance(r.get("id"), str) and 0 < len(r["id"]) <= 100
+                and isinstance(r.get("show"), bool)):
+            return None
+        if r["id"] not in seen:
+            seen.add(r["id"])
+            rows.append({"id": r["id"], "show": r["show"]})
+    return rows
+
+
+def _valid(k: str, v):
+    """The value to store for pref k, or None when it isn't a valid one."""
+    if k == "home_rows":
+        return _home_rows(v)
+    return v if isinstance(v, type(PREFS[k])) else None
 
 
 def prefs(u: sqlite3.Row) -> dict:
@@ -90,7 +117,8 @@ def prefs(u: sqlite3.Row) -> dict:
 
 def set_prefs(con: sqlite3.Connection, user_id: int, changes: dict) -> dict:
     u = get_user(con, user_id)
-    new = {**prefs(u), **{k: v for k, v in changes.items() if k in PREFS and isinstance(v, type(PREFS[k]))}}
+    ok = {k: _valid(k, v) for k, v in changes.items() if k in PREFS}
+    new = {**prefs(u), **{k: v for k, v in ok.items() if v is not None}}
     con.execute("UPDATE users SET prefs=? WHERE id=?", (jdump(new), user_id))
     return new
 

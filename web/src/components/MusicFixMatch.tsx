@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, type ItemDetail, type MbResult } from "../api";
 import Icon from "./Icon";
 
@@ -10,6 +11,7 @@ export default function MusicFixMatch({ item, onClose }: { item: ItemDetail; onC
   const [results, setResults] = useState<MbResult[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const search = async () => {
     setBusy("search");
@@ -29,8 +31,10 @@ export default function MusicFixMatch({ item, onClose }: { item: ItemDetail; onC
     setBusy(r.mbid);
     setErr(null);
     try {
-      await api.post(`/api/items/${item.id}/music-match`, { mbid: r.mbid });
+      const d = await api.post<ItemDetail>(`/api/items/${item.id}/music-match`, { mbid: r.mbid });
       onClose(true);
+      // merged into another copy of the same release: that album is this one now
+      if (d.id !== item.id) navigate(`/title/${d.id}`, { replace: true });
     } catch (e) {
       setErr((e as Error).message);
       setBusy(null);

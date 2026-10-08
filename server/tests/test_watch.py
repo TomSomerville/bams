@@ -135,9 +135,28 @@ def test_watch_thresholds_are_settings(tv):
 
 def test_prefs_are_per_user(tv):
     app, c, _, _ = tv
-    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True}
-    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False}
-    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": False}
+    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True, "home_rows": []}
+    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False, "home_rows": []}
+    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": False, "home_rows": []}
     kid = signed_in(app, "Kid", admin=False)
-    assert kid.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True}
-    assert kid.put("/api/me/prefs", json={"nonsense": 1}).json() == {"home_hero": True}
+    assert kid.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True, "home_rows": []}
+    assert kid.put("/api/me/prefs", json={"nonsense": 1}).json() == {"home_hero": True, "home_rows": []}
+
+
+def test_home_rows_pref(tv):
+    app, c, _, _ = tv
+    rows = [{"id": "genres", "show": True}, {"id": "continue", "show": False}, {"id": "lib:1", "show": True}]
+    assert c.put("/api/me/prefs", json={"home_rows": rows}).json()["home_rows"] == rows
+    # the other pref is untouched, and changing it keeps the rows
+    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False, "home_rows": rows}
+    assert c.get("/api/auth/state").json()["user"]["prefs"]["home_rows"] == rows
+    # duplicates are dropped (first wins); bad shapes are refused
+    dup = c.put("/api/me/prefs", json={"home_rows": rows + [{"id": "genres", "show": False}]}).json()
+    assert dup["home_rows"] == rows
+    assert c.put("/api/me/prefs", json={"home_rows": [{"id": "", "show": True}]}).status_code == 422
+    assert c.put("/api/me/prefs", json={"home_rows": [{"id": "x"}]}).status_code == 422
+    assert c.put("/api/me/prefs", json={"home_rows": [{"id": f"r{i}", "show": True} for i in range(201)]}).status_code == 422
+    # each account has its own
+    kid = signed_in(app, "Kid", admin=False)
+    assert kid.get("/api/auth/state").json()["user"]["prefs"]["home_rows"] == []
+    assert c.put("/api/me/prefs", json={"home_rows": []}).json()["home_rows"] == []  # back to the default

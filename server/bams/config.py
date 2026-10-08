@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "BAMS"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 DEFAULT_HOST = "127.0.0.1"  # this computer only; `serve --host 0.0.0.0` opens it to the network (login required)
 DEFAULT_PORT = 8484
 
@@ -31,6 +31,9 @@ AUDIO_EXTS = frozenset({
 ALBUM_ART_NAMES = ("cover", "folder", "front", "album", "albumart", "albumartsmall")
 ARTIST_ART_NAMES = ("artist", "folder", "poster")
 ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+# Read next to the music too: cue sheets (one file = a whole album) and playlists to import.
+CUE_EXTS = frozenset({".cue"})
+PLAYLIST_EXTS = frozenset({".m3u", ".m3u8", ".pls"})
 # Folders skipped anywhere: OS / NAS housekeeping.
 SKIP_DIRS = frozenset(name.casefold() for name in {
     "$RECYCLE.BIN", "System Volume Information", "@eaDir", ".@__thumb", "#recycle", ".Trash-1000",
@@ -74,6 +77,16 @@ class Paths:
     def transcode(self) -> Path:
         """HLS segments being served (wiped at startup)."""
         return self.root / "transcode"
+
+    @property
+    def security_db(self) -> Path:
+        """The sign-in log and lockout state (security.py), apart from the main DB."""
+        return self.root / "security.db"
+
+    @property
+    def netflow(self) -> Path:
+        """Where the traffic log goes unless the admin picks another folder."""
+        return self.root / "netflow"
 
     @property
     def cache(self) -> Path:

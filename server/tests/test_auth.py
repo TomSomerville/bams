@@ -66,8 +66,8 @@ def test_sign_in_and_out(app):
 def test_wrong_passwords_are_throttled(app):
     signed_in(app, "Tom")
     c = TestClient(app, client=("10.0.0.9", 1))
-    for _ in range(auth.Throttle.MAX):
-        assert c.post("/api/auth/login", json={"name": "Tom", "password": "nope"}).status_code == 401
+    for n in range(auth.Throttle.MAX):  # a different name each time: each account has its own wait (test_security)
+        assert c.post("/api/auth/login", json={"name": f"guess{n}", "password": "nope"}).status_code == 401
     r = c.post("/api/auth/login", json={"name": "Tom", "password": PASSWORD})
     assert r.status_code == 429  # even the right password waits
     assert TestClient(app, client=("10.0.0.10", 1)).post(
@@ -133,7 +133,7 @@ def test_migration_to_v4_keeps_data(tmp_path):
     con.close()
     con = connect(p)
     db.migrate(con, backup_dir=tmp_path / "backups")
-    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 7
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 8
     assert db.get_setting(con, "tmdb_key") == "k" and auth.user_count(con) == 0
     assert "prefs" in [r[1] for r in con.execute("PRAGMA table_info(users)")]  # v5
     assert "manual" in [r[1] for r in con.execute("PRAGMA table_info(files)")]  # v6

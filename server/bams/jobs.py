@@ -54,12 +54,13 @@ def run_scan(paths: Paths, lib_id: int, trigger: str = "manual", *, do_match: bo
         lib = library.get(con, lib_id)
         name = lib["name"]
         log.info("scan start: %s (%s)", name, trigger)
-        result["scan"] = scanner.scan_library(con, lib_id, progress=progress).as_dict()
+        scanned = scanner.scan_library(con, lib_id, progress=progress)
+        result["scan"] = scanned.as_dict()
         if lib["type"] == "music":
             # Music is identified from its own tags (TMDB has no music); covers come from the files/folders.
             if progress:
                 progress("Reading album art")
-            result["artwork"] = music.fill_artwork(con, paths.images, lib_id).as_dict()
+            result["artwork"] = music.fill_artwork(con, paths.images, lib_id, scanned.side).as_dict()
             if do_match and music_lookup_enabled(con):
                 with MusicBrainz() as mb:
                     result["identify"] = music_match.match_music_library(

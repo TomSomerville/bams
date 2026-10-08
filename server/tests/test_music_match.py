@@ -129,7 +129,8 @@ def test_identifies_albums_and_artists(lib):
     with MusicBrainz(transport=fake(calls), min_interval=0) as mb:
         st = music_match.match_music_library(con, mb, paths.images, lib_id)
     assert st.as_dict() == {"albums_matched": 2, "albums_unmatched": 3, "artists_matched": 1,
-                            "artists_unmatched": 1, "covers": 1, "photos": 1, "errors": 0}
+                            "artists_unmatched": 1, "covers": 1, "photos": 1, "refreshed": 0,
+                            "merged": 0, "errors": 0}
 
     al = item(con, "album", "Real Album")
     assert (al["mbid"], al["match_status"], al["year"]) == (REL_ID, "matched", 2018)  # original release year

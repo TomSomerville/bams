@@ -14,7 +14,7 @@ type Auth = {
   setPrefs: (p: Partial<Prefs>) => Promise<void>;
 };
 
-const DEFAULT_PREFS: Prefs = { home_hero: true };
+const DEFAULT_PREFS: Prefs = { home_hero: true, home_rows: [] };
 
 const Ctx = createContext<Auth | null>(null);
 

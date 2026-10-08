@@ -7,6 +7,7 @@ import { useMusic } from "./music";
 import Home from "./pages/Home";
 import Library from "./pages/Library";
 import Detail from "./pages/Detail";
+import { PlaylistPage } from "./pages/Music";
 import Player from "./pages/Player";
 import Search from "./pages/Search";
 import Settings from "./pages/Settings";
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/library/:id" element={<Library />} />
           <Route path="/title/:id" element={<Detail />} />
+          <Route path="/playlist/:id" element={<PlaylistPage />} />
           <Route path="/search" element={<Search />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<div className="page"><h1>Nothing here</h1></div>} />

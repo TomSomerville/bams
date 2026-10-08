@@ -121,9 +121,12 @@ class FileEntry:
 
 
 def walk(root: Path, exts: frozenset[str], skip_dirs: frozenset[str],
-         nested_skip_dirs: frozenset[str] = frozenset()) -> Iterator[FileEntry]:
+         nested_skip_dirs: frozenset[str] = frozenset(), side_exts: frozenset[str] = frozenset(),
+         side: list[FileEntry] | None = None) -> Iterator[FileEntry]:
     """Yield media files under root. Never follows symlinked directories (loops, escapes).
-    `nested_skip_dirs` are only skipped below the top level (extras folders inside a title)."""
+    `nested_skip_dirs` are only skipped below the top level (extras folders inside a title).
+    Files with a `side_exts` extension (cue sheets, cover images, playlists) are appended to `side` instead:
+    they come from the same directory listing, so finding them costs nothing extra."""
     stack: list[tuple[Path, int]] = [(root, 0)]
     while stack:
         d, depth = stack.pop()
@@ -142,7 +145,9 @@ def walk(root: Path, exts: frozenset[str], skip_dirs: frozenset[str],
                                 and not (depth >= 1 and key in nested_skip_dirs)):
                             stack.append((Path(ent.path), depth + 1))
                         continue
-                    if os.path.splitext(name)[1].casefold() not in exts or name.startswith("._"):
+                    ext = os.path.splitext(name)[1].casefold()
+                    is_side = side is not None and ext in side_exts
+                    if (ext not in exts and not is_side) or name.startswith("._"):
                         continue
                     st = ent.stat()  # follows file symlinks: a linked file is still media
                     if not stat.S_ISREG(st.st_mode):
@@ -151,12 +156,36 @@ def walk(root: Path, exts: frozenset[str], skip_dirs: frozenset[str],
                     log.warning("cannot stat %s: %s", ent.path, e)
                     continue
                 p = Path(ent.path)
-                yield FileEntry(p, p.relative_to(root).as_posix(), st.st_size, st.st_mtime_ns)
+                fe = FileEntry(p, p.relative_to(root).as_posix(), st.st_size, st.st_mtime_ns)
+                if is_side:
+                    side.append(fe)  # type: ignore[union-attr]
+                else:
+                    yield fe
 
 
 def open_ro(path: Path):
     """Open a media file for reading. The only way BAMS code opens media files."""
     return open(path, "rb", buffering=0)
+
+
+def read_text(path: Path, limit: int = 1_000_000) -> str | None:
+    """A small text file next to the media (cue sheet, playlist) in whatever encoding it came in: UTF-8 (with
+    or without BOM), UTF-16, else Windows-1252. None if it's unreadable or bigger than `limit` bytes."""
+    try:
+        with open_ro(path) as f:
+            data = f.read(limit + 1)
+    except OSError as e:
+        log.warning("can't read %s: %s", path, e)
+        return None
+    if len(data) > limit:
+        log.warning("not reading %s: bigger than %d bytes", path, limit)
+        return None
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16", errors="replace")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace")
 
 
 def root_status(root: Path) -> dict:

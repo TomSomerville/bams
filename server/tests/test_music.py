@@ -307,7 +307,7 @@ def test_v1_database_migrates_keeping_everything(tmp_path):
     assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     assert con.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 3
     assert tuple(con.execute("SELECT tmdb_id, match_status FROM items WHERE id=1").fetchone()) == (42, "matched")
-    assert [tuple(r) for r in con.execute("SELECT * FROM file_items")] == [(1, 3)]  # not cascade-deleted by the rebuild
+    assert [tuple(r) for r in con.execute("SELECT file_id, item_id FROM file_items")] == [(1, 3)]  # not cascade-deleted by the rebuild
     assert con.execute("SELECT item_id FROM item_keys").fetchone()[0] == 1
     assert con.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     # the new kinds and columns exist, and cascades still work after the rename

@@ -88,7 +88,9 @@ export type ServerStatus = {
 export type BrowseResult = { path: string | null; parent: string | null; dirs: { name: string; path: string }[] };
 
 /** Each account's own display preferences (server: auth.PREFS). */
-export type Prefs = { home_hero: boolean };
+/** A row of Home in the user's order: "continue", "recent", "lib:<id>", "top_rated", "genres". */
+export type HomeRowPref = { id: string; show: boolean };
+export type Prefs = { home_hero: boolean; home_rows: HomeRowPref[] };
 export type User = {
   id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null; prefs?: Prefs;
 };
@@ -150,6 +152,8 @@ export type AudioTrack = { index: number; label: string; language: string | null
 
 /** A subtitle track: embedded ("e{n}") or a file next to the video ("x{n}"). Image tracks have no url: they
  *  can only be burned into a converted video (index = which subtitle stream). */
+/** id: "e{n}" embedded, "x{n}" a sidecar file, "x{n}-{k}" stream k of a VobSub .idx/.sub sidecar. Picture
+ *  tracks (image) have no url: they're burned in by sending the id as `burn`. */
 export type SubtitleTrack = { id: string; index: number; source: "embedded" | "file"; language: string | null;
   label: string; forced: boolean; sdh: boolean; image: boolean; codec: string | null; url: string | null };
 
@@ -190,6 +194,8 @@ export type FileInfo = {
     source: "ffprobe" | "filename";
     /** music: the file's container, e.g. "FLAC", "MP4" */
     container?: string | null;
+    /** music converted on the fly: what it's converted to (Settings → Music); null when it plays as-is */
+    output?: "aac" | "flac" | null;
     video_codec: string | null;
     audio_codec: string | null;
     audio_ok: boolean;
@@ -277,9 +283,55 @@ export type QueueTrack = {
   disc_number: number | null;
   duration: number | null;
   file_id: number;
+  /** CUE-sheet tracks: the stretch of the file this track is (seconds; end null = to the end of the file).
+   *  null for ordinary one-track files. */
+  start: number | null;
+  end: number | null;
   available: boolean;
   playback: FileInfo["playback"];
   download_url: string;
 };
 
+/** A playlist imported from a .m3u/.m3u8/.pls file in a music library. */
+export type PlaylistSummary = {
+  id: number;
+  library_id: number;
+  name: string;
+  /** the playlist file, relative to its library folder */
+  path: string;
+  track_count: number;
+  duration: number | null;
+  /** entries that matched nothing in the library (streams, files elsewhere) */
+  missing: number;
+  /** up to 4 album covers, in playlist order */
+  covers: string[];
+  updated_at: number;
+};
+
+export type Playlist = PlaylistSummary & { library_name: string; tracks: QueueTrack[] };
+
 export type TmdbResult ={ tmdb_id: number; title: string; year: number | null; overview: string | null; poster_path: string | null };
+
+// ---- Settings -> Security (server: security.py, netflow.py)
+
+export type IpEntry = { cidr: string; note: string };
+export type IpLists = { mode: "allow_all" | "allowlist"; allow: IpEntry[]; block: IpEntry[] };
+export type NetflowStatus = {
+  folder: string; default_folder: string; custom: boolean; max_bytes: number;
+  bytes: number; files: number; oldest: number | null; dropped: number;
+};
+export type SecuritySettings = { lockout_threshold: number; ip: IpLists; your_ip: string; netflow: NetflowStatus };
+export type AccountLock = {
+  id: number; name: string; is_admin: boolean; last_login_at: number | null; failures: number;
+  locked: boolean; locked_at: number | null; locked_by: string | null; wait_until: number | null;
+};
+export type AuthLogEntry = {
+  id: number; at: number; event: "sign-in" | "lock" | "unlock"; result: "ok" | "failed" | "admin";
+  name: string | null; user_id: number | null; ip: string | null; reason: string | null; user_agent: string | null;
+};
+export type FlowEntry = {
+  time: number; duration_ms: number; client: string | null; client_port: number | null; server: string | null;
+  scheme: string | null; http: string | null; method: string | null; path: string | null; query: string | null;
+  status: number | null; bytes_in: number; bytes_out: number; user: string | null; user_agent: string | null;
+  action: "allow" | "block";
+};

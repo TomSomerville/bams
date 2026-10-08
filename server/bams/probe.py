@@ -28,6 +28,8 @@ _ACODECS = {"aac": "AAC", "ac3": "AC3", "eac3": "EAC3", "dts": "DTS", "truehd": 
             "wavpack": "WavPack", "wmav1": "WMA", "wmav2": "WMA", "wmapro": "WMA Pro", "wmalossless": "WMA Lossless",
             "dsd_lsbf": "DSD", "dsd_msbf": "DSD", "dsd_lsbf_planar": "DSD", "dsd_msbf_planar": "DSD"}
 _IMAGE_SUBS = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}
+# Bumped when summarize() learns something new that's worth re-probing for. 2: embedded cue sheets.
+PROBE_VERSION = 2
 
 # Music tags kept from ffprobe (it already maps ID3/MP4 names to these), plus spellings other taggers use.
 _TAG_ALIASES = {
@@ -95,6 +97,38 @@ def _resolution(w: int, h: int) -> str:
     return "SD" if h < 500 else f"{h}p"
 
 
+def geometry(s: dict) -> dict:
+    """Pixel shape and scan type of a video stream: `sar` (pixel aspect, 1.0 = square; anamorphic DVDs aren't)
+    and `field_order` ("progressive", "tt"/"bb"... = interlaced, None = unknown). All-GPU conversions on
+    Quick Sync / AMF / VAAPI need both, since their filters can't work them out per frame."""
+    sar = 1.0  # missing or "0:1" (not set): square, as FFmpeg's filters take it
+    num, _, den = (s.get("sample_aspect_ratio") or "").partition(":")
+    try:
+        if int(num) > 0 and int(den) > 0:
+            sar = round(int(num) / int(den), 6)
+    except ValueError:
+        pass
+    fo = s.get("field_order")
+    return {"sar": sar, "field_order": fo if fo and fo != "unknown" else None}
+
+
+def video_geometry(path: Path, timeout: float = 30) -> dict | None:
+    """`geometry` of a file's first video stream, read on its own (quick: no packets). For files probed before
+    BAMS recorded it."""
+    exe = ffprobe_path()
+    if not exe:
+        return None
+    cmd = [exe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+           "stream=width,sample_aspect_ratio,field_order", "-of", "json", str(path)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0)
+        streams = json.loads(r.stdout).get("streams") or []
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    return geometry(streams[0]) if streams else None
+
+
 def summarize(data: dict) -> dict:
     fmt = data.get("format", {})
     streams = data.get("streams", [])
@@ -133,6 +167,7 @@ def summarize(data: dict) -> dict:
                 "resolution": _resolution(w, h) if w and h else None, "hdr": hdr, "dv_profile": dv_profile,
                 "bit_depth": 10 if "10" in (s.get("pix_fmt") or "") else 8,
                 "fps": s.get("avg_frame_rate"),
+                **geometry(s),
             }
         elif t == "audio":
             codec = s.get("codec_name", "")
@@ -155,6 +190,13 @@ def summarize(data: dict) -> dict:
     tags = music_tags(fmt.get("tags") or {}, (audio_streams[0].get("tags") or {}) if audio_streams else {})
     if tags:
         out["tags"] = tags
+    # a whole-album FLAC/WavPack/APE image with its cue sheet in its tags (CUESHEET)
+    for src in (fmt.get("tags") or {}, (audio_streams[0].get("tags") or {}) if audio_streams else {}):
+        sheet = next((str(v) for k, v in src.items() if k.casefold() == "cuesheet" and str(v).strip()), None)
+        if sheet:
+            out["cuesheet"] = sheet[:200_000]
+            break
+    out["pv"] = PROBE_VERSION
     return out
 
 
