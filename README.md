@@ -44,19 +44,6 @@ accounts, watch history and settings. No uninstalling, nothing to set up again.
 More detail (uninstalling, where data lives, forgotten passwords, troubleshooting): [docs/INSTALL.md](docs/INSTALL.md).
 Building the installers: [deploy/README.md](deploy/README.md).
 
-## Run it (development)
-
-Start the server (see [server/README.md](server/README.md)). It serves the UI at http://127.0.0.1:8484; the first
-visit, on the server itself, creates the admin account.
-After changing the UI, rebuild it (Node 20+):
-
-```bash
-cd web && npm install && npm run build
-```
-
-For UI development with hot reload, run `npm run dev` in `web/` and open http://localhost:5173.
-It proxies `/api` to the server.
-
 ## Layout
 
 | Path | What |
