@@ -93,7 +93,8 @@ export default function TmdbSettings() {
         key. Get one at{" "}
         <a href={TMDB_SIGNUP_URL} target="_blank" rel="noreferrer">themoviedb.org/settings/api</a> (free account,
         choose "Developer", personal use). Paste the <strong>API Read Access Token</strong> (preferred) or the
-        <strong> API Key</strong>.
+        <strong> API Key</strong>. New to this? Follow the{" "}
+        <a href="/help/tmdb.html" target="_blank" rel="noreferrer">step-by-step guide</a>.
       </p>
 
       {serverError && !tmdb ? (

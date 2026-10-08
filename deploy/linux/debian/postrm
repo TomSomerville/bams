@@ -1,0 +1,31 @@
+#!/bin/sh
+# BAMS postrm. "remove" keeps your BAMS data and settings (reinstalling picks them up again);
+# "purge" (apt purge bams) deletes them too. Media files are never touched either way.
+set -e
+
+case "$1" in
+remove|purge)
+    rm -rf /opt/bams/venv
+    rmdir /opt/bams 2>/dev/null || true
+    ;;
+esac
+
+if [ "$1" = purge ]; then
+    BAMS_PORT=8484
+    [ -r /etc/default/bams ] && . /etc/default/bams
+    if command -v ufw >/dev/null; then
+        ufw delete allow "$BAMS_PORT/tcp" >/dev/null 2>&1 || true
+    fi
+    rm -f /etc/default/bams
+    rm -rf /etc/systemd/system/bams.service.d
+    rm -rf /var/lib/bams
+    if getent passwd bams >/dev/null; then
+        userdel bams >/dev/null 2>&1 || true
+    fi
+fi
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+exit 0

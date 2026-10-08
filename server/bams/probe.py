@@ -67,8 +67,18 @@ def _windows_candidates() -> list[str]:
             r"C:\ffmpeg\bin\ffprobe.exe"]
 
 
+def app_ffmpeg_dir() -> Path | None:
+    """FFmpeg fetched by the Windows installer: <install dir>\\ffmpeg\\bin, next to the bundled Python.
+    BAMS never ships FFmpeg itself; the installer downloads it from its publisher on the user's machine."""
+    d = Path(sys.executable).resolve().parent.parent / "ffmpeg" / "bin"
+    return d if sys.platform == "win32" and (d / "ffprobe.exe").is_file() else None
+
+
 def ffprobe_path() -> str | None:
-    found = os.environ.get("BAMS_FFPROBE") or shutil.which("ffprobe")
+    found = os.environ.get("BAMS_FFPROBE")
+    if not found and (d := app_ffmpeg_dir()):
+        found = str(d / "ffprobe.exe")
+    found = found or shutil.which("ffprobe")
     if not found and sys.platform == "win32":
         found = next((c for c in _windows_candidates() if os.path.isfile(c)), None)
     return found

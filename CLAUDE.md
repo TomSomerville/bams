@@ -61,10 +61,12 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 172 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 173 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
+# installers (deploy/README.md): bump server/bams/config.py VERSION first
+server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
 
 ## Pitfalls already hit (don't repeat them)
@@ -126,4 +128,15 @@ cd web && npm install && npx tsc -p . && npm run build
 - **The web page must not be cached** (`SpaFiles` sends `no-cache` for HTML; missing `/assets/` 404): a cached page
   from an older build points at scripts that no longer exist → blank screen. When testing a rebuilt UI in the preview
   browser, add a query string once if it still shows an old page.
+- **Never kill processes by name** (`taskkill /IM python.exe`, `pkill python`): the owner's own server (:8484), ComfyUI
+  and other sessions are Python too. Stop only the PID you started.
+- **Installers:** the installed copy finds its UI in `bams/web` and FFmpeg in `<install>\ffmpeg\bin`; keep both lookups
+  (`__main__._web_dir`, `probe.app_ffmpeg_dir`). Python dependency changes must be re-locked in `deploy/requirements.txt`
+  (hashes) or the installers ship the old set. Updates must never touch the data dir: on Windows only `python\`, `lib\`,
+  `app\` are replaced; on Linux `/etc/default/bams` must stay a non-conffile (a conffile prompt blocks the upgrade).
+- **Windows ACLs:** never `icacls <dir> /inheritance:r /grant … /T` on a folder with files in it: the files end up with an
+  empty ACL (unreadable even to SYSTEM, the service then can't open its DB). Set the folder only, `/reset /T` its contents.
+- **Testing the Windows installer installs a real service on :8484** and needs the owner's UAC click: ask first. Silent
+  runs: `BAMS-Setup.exe /SILENT /SUPPRESSMSGBOXES /LOG=…` via `Start-Process -Verb RunAs -Wait`. `.deb` tests run in
+  Docker (`debian:12`, `ubuntu:24.04`; a systemd image for service tests); Git Bash needs `MSYS_NO_PATHCONV=1` for `-v`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

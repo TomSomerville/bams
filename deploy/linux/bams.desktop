@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=BAMS
+GenericName=Media Server
+Comment=Open BAMS - Bad Ass Media Server in your web browser
+Exec=xdg-open http://localhost:8484/
+Icon=bams
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=media;movies;tv;music;server;plex;

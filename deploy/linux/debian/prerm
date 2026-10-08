@@ -1,0 +1,16 @@
+#!/bin/sh
+# BAMS prerm: stop the server before dpkg replaces (update) or removes its files.
+set -e
+
+case "$1" in
+remove|upgrade|deconfigure|failed-upgrade)
+    if [ -d /run/systemd/system ]; then
+        systemctl stop bams.service >/dev/null 2>&1 || true
+        [ "$1" = remove ] && systemctl disable bams.service >/dev/null 2>&1 || true
+    fi
+    # compiled files made by postinst (it compiles again after an update)
+    find /opt/bams/lib -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+    ;;
+esac
+
+exit 0

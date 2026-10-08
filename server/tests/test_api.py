@@ -97,3 +97,35 @@ def test_tmdb_key_never_returned(tmp_path):
     assert c.put("/api/settings/tmdb-key", json={"key": "not a key"}).status_code == 400
     s = c.get("/api/settings").json()["tmdb"]
     assert s == {"configured": False, "kind": None, "last4": None, "verified_at": None}
+
+
+def test_saving_tmdb_key_queues_video_libraries(tmp_path, monkeypatch):
+    """Titles scanned before the key existed are matched right away, not at the next scheduled scan."""
+    from bams import app as app_mod, library
+    from bams.db import connect
+
+    class FakeTmdb:
+        def __init__(self, key, **kw):
+            self.key = key
+
+        def check(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_mod, "Tmdb", FakeTmdb)
+    tv, music = tmp_path / "tv", tmp_path / "music"
+    make_tree(tv, ["Show/Season 1/Show - S01E01.mkv"])
+    make_tree(music, ["Artist/Album/01 - Song.mp3"])
+    c = client(tmp_path)
+    try:
+        con = connect(tmp_path / "data" / "bams.db")
+        tv_id = library.create(con, tmp_path / "data", "TV", "show", [str(tv)], 6)
+        library.create(con, tmp_path / "data", "Music", "music", [str(music)], 6)
+        con.close()
+        r = c.put("/api/settings/tmdb-key", json={"key": "0123456789abcdef0123456789abcdef"})
+        assert r.status_code == 200 and r.json()["configured"]
+        assert c.get("/api/scans").json()["current"]["queued"] == [{"library_id": tv_id, "trigger": "tmdb-key+rematch"}]
+    finally:
+        readonly.set_protected_roots([])

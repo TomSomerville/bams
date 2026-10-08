@@ -1,0 +1,16 @@
+Package: bams
+Version: @VERSION@
+Architecture: all
+Maintainer: BAMS <noreply@github.com>
+Installed-Size: @SIZE@
+Depends: python3 (>= 3.11), python3-venv, ffmpeg, systemd, passwd
+Section: video
+Priority: optional
+Homepage: https://github.com/TomSomerville/bams
+Description: BAMS - Bad Ass Media Server
+ A self-hosted, Netflix/Plex-style server for your own movies, TV shows and
+ music. Point it at your folders; it identifies the media (TMDB, MusicBrainz),
+ fetches posters and descriptions and streams to any browser on your network.
+ Media folders are read-only to BAMS, enforced by systemd.
+ .
+ After installing, open http://localhost:8484 on this computer.

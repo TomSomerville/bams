@@ -30,7 +30,12 @@ def _starts() -> list[dict]:
             if os.path.isdir(d):
                 out.append({"name": d, "path": d})
     home = str(Path.home())
-    if os.path.isdir(home):
+    if sys.platform == "win32" and "systemprofile" in home.casefold():
+        # the installed Windows service runs as SYSTEM: its own home is no use, the people's folders are
+        users = os.path.join(os.environ.get("SystemDrive", "C:") + "\\", "Users")
+        if os.path.isdir(users):
+            out.append({"name": f"Users ({users})", "path": users})
+    elif os.path.isdir(home):
         out.append({"name": f"Home ({home})", "path": home})
     return out
 

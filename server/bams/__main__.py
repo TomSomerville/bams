@@ -40,8 +40,11 @@ def _setup_logging(paths: Paths, verbose: bool) -> None:
 
 
 def _web_dir() -> Path | None:
-    here = Path(__file__).resolve().parents[2] / "web" / "dist"  # repo checkout
-    return here if here.is_dir() else None
+    for here in (Path(__file__).resolve().parent / "web",  # installed: the installers put the built UI here
+                 Path(__file__).resolve().parents[2] / "web" / "dist"):  # repo checkout
+        if here.is_dir():
+            return here
+    return None
 
 
 def _new_password() -> str:

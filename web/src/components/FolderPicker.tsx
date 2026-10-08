@@ -47,7 +47,7 @@ export default function FolderPicker({ onPick, onClose }: { onPick: (path: strin
             disabled={loading || !res?.path} title="Up one level">
             <Icon name="chevronLeft" size={16} /> Up
           </button>
-          <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type or paste a path, e.g. D:\Media or /mnt/media"
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type or paste a path, e.g. D:\Media, \\NAS\Videos or /mnt/media"
             aria-label="Folder path" spellCheck={false} />
           <button type="submit" className="btn ghost small" disabled={!typed.trim() || loading}>Go</button>
         </form>

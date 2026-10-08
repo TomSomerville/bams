@@ -6,7 +6,8 @@ files next to your media. Everything BAMS learns goes into its own data folder:
 
 | OS | Data folder (default) |
 |---|---|
-| Windows | `%LOCALAPPDATA%\BAMS` (or `BAMS_DATA_DIR`) |
+| Windows (installed) | `C:\ProgramData\BAMS` |
+| Windows (from source) | `%LOCALAPPDATA%\BAMS` (or `BAMS_DATA_DIR`) |
 | Linux (service) | `/var/lib/bams` |
 | Linux (user) | `~/.local/share/bams` |
 
@@ -31,9 +32,16 @@ overlap another library.
 
 ### Linux (Debian / Ubuntu / Mint)
 
-The shipped unit [`deploy/linux/bams.service`](../deploy/linux/bams.service) runs as a `bams`
-system user with `ProtectSystem=strict`. **The kernel makes every path read-only to BAMS
-except `/var/lib/bams`**, regardless of file permissions. You still need to grant *read*:
+The shipped unit [`deploy/linux/bams.service`](../deploy/linux/bams.service) runs with
+`ProtectSystem=strict` and `ProtectHome=read-only`. **The kernel makes every path read-only to BAMS
+except `/var/lib/bams`**, regardless of file permissions.
+
+The `.deb` runs the service as the account that installed it (`BAMS_USER` in `/etc/default/bams`), so it can
+*read* whatever that person can (home folder, USB drives) without any setup, and still can't write anywhere but its
+data folder. Tested: `touch /home/<user>/x` inside the service fails with "Read-only file system".
+
+If you run it as a dedicated `bams` account instead (`BAMS_USER=bams`, then `sudo dpkg-reconfigure bams`), grant
+that account *read*:
 
 ```bash
 # local disk / bind mount
@@ -52,11 +60,14 @@ Check: `sudo -u bams touch /mnt/media/x` must fail.
 
 ### Windows
 
-Run BAMS as its own service account and grant that account **Read & execute** only:
+The installer runs BAMS as the `BAMS` service under **LocalSystem** (owner decision, 2026-10-08: starts at boot
+without anyone signing in). LocalSystem can read local drives and every user's folders, so on Windows the read-only
+guarantee comes from layers 1 and 2. For an OS-level wall as well, change the service's account (services.msc →
+BAMS Media Server → Log On) to a local user that has only **Read & execute** on the media:
 
 ```powershell
-# virtual service account created with the service (packaging comes later); or a local user
-icacls "D:\Media" /grant "NT SERVICE\BAMS:(OI)(CI)RX"
+icacls "D:\Media" /grant "bams-reader:(OI)(CI)RX"
+icacls "C:\ProgramData\BAMS" /grant "bams-reader:(OI)(CI)M"   # its own data folder (SYSTEM + admins only by default)
 ```
 
 Network shares: use a share account whose **share permission** is Read, and add the library by

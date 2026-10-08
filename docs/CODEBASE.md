@@ -97,7 +97,16 @@ bams/
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
 │           └── Settings.tsx   Admins: libraries, TMDB, music, playback, accounts. Viewers: their account only
 │
-├── deploy/linux/bams.service  Hardened systemd unit (ProtectSystem=strict → media read-only by kernel)
+├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
+├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
+│   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
+│   ├── pins.json              pinned downloads + SHA-256: embeddable Python, WinSW, FFmpeg (fetched by the .exe, never bundled)
+│   ├── requirements.txt       locked Python packages with hashes (uv pip compile --universal); used by both installers
+│   ├── windows/bams.iss       Inno Setup script: install/update/uninstall, FFmpeg download, WinSW service, firewall, data-dir ACL
+│   ├── windows/bams.cmd       installed CLI wrapper (BAMS_DATA_DIR=%ProgramData%\BAMS); bams.ico, wizard-small.png
+│   ├── linux/debian/          control, postinst (user pick, /etc/default/bams, drop-in, venv from wheels, ufw), prerm, postrm
+│   ├── linux/bams             /usr/bin/bams wrapper (runs as the service account); bams.desktop, bams.png
+│   └── linux/bams.service     Hardened systemd unit (ProtectSystem=strict → media read-only by kernel), settings from /etc/default/bams
 ├── branding/logo/             Owner-supplied logo + transparent cut-outs (re-rendered by tools/brand_art)
 ├── branding/archive/          Old comic-style concept logos (PNGs gitignored, contact sheet kept)
 ├── tools/brand_art/rework.py  Redraws the logo set via local ComfyUI (render candidates → finalize picks)
@@ -306,6 +315,18 @@ user's sessions. Last admin can't be demoted/removed; nobody removes themselves.
 UI `TmdbSettings` → `PUT /api/settings/tmdb-key` (server verifies with `/3/authentication`; a 401 → 400 and it isn't
 saved) → `settings.tmdb_key`. `GET /api/settings` returns only `{configured, kind, last4, verified_at}`.
 CLI alternative: `bams tmdb-key` (hidden prompt). Images are fetched with a separate client that never sends the key.
+Saving a key queues a scan of every TV/movie library (`tmdb-key+rematch`), so titles indexed before the key get matched
+at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html` (built into `dist/help/`).
+
+### 4.6 Installed copies (`deploy/`)
+**Windows** (`{app}` = `C:\Program Files\BAMS`): `python\` (embeddable; `._pth` = `python313.zip`, `.`, `..\lib`,
+`..pp`), `lib\` (locked packages), `appams\` (+ `web\`), `ffmpegin\` (downloaded by the installer;
+`probe.app_ffmpeg_dir` finds it next to the interpreter), `serviceams-service.exe` (WinSW 2.12) + `bams-service.xml`
+(written by the installer, read at every service start: `python -m bams serve --host … --port 8484`,
+`BAMS_DATA_DIR=C:\ProgramData\BAMS`). Service `BAMS`, LocalSystem, automatic. **Linux:** `/opt/bams/lib/bams` (+ `web`),
+`/opt/bams/wheels`, venv `/opt/bams/venv` (made by `postinst`, `bams.pth` → `/opt/bams/lib`), unit
+`/usr/lib/systemd/system/bams.service` + drop-in `/etc/systemd/system/bams.service.d/10-user.conf` (User/Group from
+`/etc/default/bams`), data `/var/lib/bams`. Updates: see deploy/README.md "How updates keep everything".
 
 ## 5. HTTP API (`app.py`)
 
@@ -352,12 +373,13 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Data dir | `--data-dir` > `BAMS_DATA_DIR` > systemd `STATE_DIRECTORY` > `%LOCALAPPDATA%\BAMS` / `~/.local/share/bams` (`config.default_data_dir`) |
 | Host/port | `bams serve --host --port` (default 127.0.0.1:8484; `0.0.0.0` for the LAN, login required) |
 | Accounts | web UI (Settings → Accounts), or `bams user add NAME [--admin] \| list \| passwd NAME \| remove NAME`; session length `auth.SESSION_DAYS`, `auth.MIN_PASSWORD` |
-| ffprobe / ffmpeg | PATH, winget package folder, `BAMS_FFPROBE` / `BAMS_FFMPEG` |
+| ffprobe / ffmpeg | `BAMS_FFPROBE` / `BAMS_FFMPEG`, then the Windows installer's `<install>fmpegin` (`probe.app_ffmpeg_dir`), PATH, winget package folder |
 | Video encoder | auto-detected (`stream.ENCODERS`); `BAMS_VIDEO_ENCODER=h264_nvenc\|h264_qsv\|h264_amf\|h264_vaapi\|libx264\|h264_mf`; VAAPI device `BAMS_VAAPI_DEVICE` (default `/dev/dri/renderD128`) |
 | GPU decoding | on with a GPU encoder (`stream.hwaccel_args`); `BAMS_HWACCEL=none` turns it off, or names a method (`cuda`, `d3d11va`, `vaapi`…) |
 | All-GPU filters (NVIDIA) | on for SDR NVDEC codecs (`stream.gpu_filters`); `BAMS_GPU_FILTERS=0` turns them off |
 | Conversion limit | Settings → Playback (`settings.max_transcodes`); HLS tuning constants at the top of `hls.py` |
-| Web UI dir | `../web/dist` relative to the package (repo checkout) |
+| Web UI dir | `bams/web` inside the package (installed copies), else `../web/dist` (repo checkout); `__main__._web_dir` |
+| Installed service settings | Windows: tasks in the installer (rewritten into `serviceams-service.xml`); Linux: `/etc/default/bams` (`BAMS_USER`, `BAMS_HOST`, `BAMS_PORT`) + `sudo dpkg-reconfigure bams` |
 | Indexed extensions | `config.VIDEO_EXTS` (FORMATS.md §1), `config.AUDIO_EXTS` (FORMATS.md §5) |
 | Music art file names | `config.ALBUM_ART_NAMES`, `ARTIST_ART_NAMES`, `ART_EXTS` |
 | Music identification | `settings.music_lookup`; MusicBrainz User-Agent in `musicbrainz.USER_AGENT` |
@@ -375,7 +397,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_parse.py` | real-world names: scene packs, Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, movies |
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN |
-| `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, cross-thread connection, movie-in-TV-library hint |
+| `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint |
 | `test_stream.py` | audio channels, burn-in + GPU filter commands, copy-HLS command, a real remux over HLS through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
@@ -408,6 +430,11 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Add a DB column/table | `db.SCHEMA` + `SCHEMA_VERSION` + migration step |
 | Anything that touches media files | **only** through `readonly.py`; never write; keep `test_readonly.py` green |
 | Theme / colours | `:root` tokens at the top of `web/src/styles.css` |
+| Release a new version | bump `config.VERSION`, `deploy/build.py all` (deploy/README.md) |
+| Change what the installers install / ask | Windows `deploy/windows/bams.iss`; Linux `deploy/linux/debian/postinst` (+ `prerm`/`postrm`) |
+| Bump Python, WinSW or the downloaded FFmpeg | `deploy/pins.json` (url + version + sha256 together) |
+| Change Python dependencies | `server/pyproject.toml`, then re-lock `deploy/requirements.txt` (command in deploy/README.md) |
+| The TMDB key guide | `web/public/help/tmdb.html` (+ screenshots in `help/img/`) |
 
 ## 9. Conventions
 

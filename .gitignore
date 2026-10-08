@@ -30,3 +30,7 @@ branding/archive/**/concepts/
 *.tsbuildinfo
 *.egg-info/
 .pytest_cache/
+
+# installer builds (deploy/build.py)
+/build/
+/dist/

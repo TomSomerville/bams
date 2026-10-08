@@ -13,7 +13,8 @@ export default function ConfigBanner() {
     return (
       <div className="config-banner" role="alert">
         <Icon name="alert" size={18} />
-        <span><strong>Can't reach the BAMS server.</strong> Start it with <code>python -m bams serve</code>.</span>
+        <span><strong>Can't reach the BAMS server.</strong> It may be restarting (after an update, give it a minute) or
+          stopped: restart the computer it runs on, or start it with <code>bams serve</code>.</span>
       </div>
     );
   }
