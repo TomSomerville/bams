@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -247,7 +247,17 @@ def _v4(con: sqlite3.Connection) -> None:
         con.execute(stmt)
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4}  # target version -> step
+def _v5(con: sqlite3.Connection) -> None:
+    """v5: each user's own display preferences (JSON, see auth.PREFS)."""
+    con.execute("ALTER TABLE users ADD COLUMN prefs TEXT")
+
+
+def _v6(con: sqlite3.Connection) -> None:
+    """v6: a file's identification entered by hand (JSON, see identify.py), used instead of its name."""
+    con.execute("ALTER TABLE files ADD COLUMN manual TEXT")
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

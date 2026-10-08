@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ServerLibrary, type ServerStatus, type UnrecognizedFile } from "../api";
+import { Link } from "react-router-dom";
+import { api, type ServerLibrary, type ServerStatus } from "../api";
 import { useAuth } from "../auth";
 import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
 import Icon from "../components/Icon";
+import { UnrecognizedFiles } from "../components/Identify";
 import MusicSettings from "../components/MusicSettings";
 import TranscodeSettings from "../components/TranscodeSettings";
+import WatchSettings from "../components/WatchSettings";
 import TmdbSettings from "../components/TmdbSettings";
 import { LIB_TYPES, type LibType } from "../format";
 
@@ -23,32 +26,15 @@ function ago(ts: number | null) {
 
 const gb = (b: number) => (b >= 1e12 ? `${(b / 1e12).toFixed(1)} TB` : `${(b / 1e9).toFixed(1)} GB`);
 
-/** Files the scanner found but couldn't identify, with the server's hint for each. */
+/** "N files couldn't be identified": a link to the library's Unrecognized tab, where they can be identified. */
 function Unrecognized({ lib }: { lib: ServerLibrary }) {
-  const [open, setOpen] = useState(false);
-  const [files, setFiles] = useState<UnrecognizedFile[] | null>(null);
   const n = lib.files.unrecognized;
-
-  useEffect(() => {
-    if (open) api.get<UnrecognizedFile[]>(`/api/libraries/${lib.id}/unrecognized`).then(setFiles).catch(() => setFiles([]));
-  }, [open, lib.id, n]);
-
   if (!n) return null;
   return (
     <div className="unrecognized">
-      <button className="link-btn warn" onClick={() => setOpen(!open)}>
-        <Icon name="alert" size={14} /> {n} file{n === 1 ? "" : "s"} couldn't be identified {open ? "▴" : "▾"}
-      </button>
-      {open && (
-        <ul>
-          {files?.map((f) => (
-            <li key={f.id}>
-              <code>{f.path}</code>
-              <span className="muted">{f.hint}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      <Link className="link-btn warn" to={`/library/${lib.id}?tab=unrecognized`}>
+        <Icon name="alert" size={14} /> {n} file{n === 1 ? "" : "s"} couldn't be identified: identify them
+      </Link>
     </div>
   );
 }
@@ -321,12 +307,18 @@ function AdminSettings() {
         {libs && !libs.length && !adding && <p className="muted">No libraries yet. Add one to start indexing.</p>}
       </div>
 
+      <div className="section-head" id="unrecognized"><h2 className="section-title">Unrecognized files</h2></div>
+      <p className="muted">Files the scan found but couldn't place from their names. Paste a TMDB or IMDb link, or say
+        what each one is. They stay hidden from the libraries until they're identified, and what you enter is kept
+        across rescans.</p>
+      <UnrecognizedFiles reloadKey={libs?.map((l) => l.files.unrecognized).join()} onChange={changed} />
+
       <div className="section-head"><h2 className="section-title">Metadata</h2></div>
       <TmdbSettings />
       <div className="lib-list"><MusicSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Playback</h2></div>
-      <div className="lib-list"><TranscodeSettings status={status} /></div>
+      <div className="lib-list"><TranscodeSettings status={status} /><WatchSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Accounts</h2></div>
       <div className="lib-list"><AccountSettings /><UsersSettings /></div>

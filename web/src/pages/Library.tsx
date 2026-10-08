@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import type { ItemSummary, ServerLibrary } from "../api";
+import { useAuth } from "../auth";
 import { PosterCard } from "../components/Cards";
+import { UnrecognizedFiles } from "../components/Identify";
 import { useApi } from "../useApi";
 import { MusicLibrary } from "./Music";
 
@@ -11,7 +13,11 @@ export default function Library() {
   const { id } = useParams();
   const [sort, setSort] = useState<keyof typeof SORTS>("title");
   const [genre, setGenre] = useState<string | null>(null);
-  const { data: lib, error } = useApi<ServerLibrary>(`/api/libraries/${id}`);
+  const { data: lib, error, reload } = useApi<ServerLibrary>(`/api/libraries/${id}`);
+  const { user } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const tab = user.is_admin && params.get("tab") === "unrecognized" ? "unrecognized" : "titles";
+  const unrecognized = lib?.files.unrecognized ?? 0;
   const isMusic = lib?.type === "music";
   const { data: items } = useApi<ItemSummary[]>(lib && !isMusic ? `/api/libraries/${id}/items?sort=${sort}` : null);
 
@@ -26,14 +32,28 @@ export default function Library() {
       <div className="page-head">
         <h1>{lib?.name ?? ""}</h1>
         {items && <span className="count">{list.length} {noun}</span>}
-        <label className="sort">
+        {user.is_admin && (unrecognized > 0 || tab === "unrecognized") && (
+          <div className="segmented lib-tabs">
+            <button className={tab === "titles" ? "on" : ""} onClick={() => setParams({})}>{noun[0].toUpperCase() + noun.slice(1)}</button>
+            <button className={tab === "unrecognized" ? "on" : ""} onClick={() => setParams({ tab: "unrecognized" })}>
+              Unrecognized{unrecognized ? <span className="tab-count">{unrecognized}</span> : null}</button>
+          </div>
+        )}
+        {tab === "titles" && <label className="sort">
           Sort
           <select value={sort} onChange={(e) => setSort(e.target.value as keyof typeof SORTS)}>
             {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-        </label>
+        </label>}
       </div>
-      {genres.length > 1 && (
+      {tab === "unrecognized" && lib && (
+        <>
+          <p className="muted">Files in this library the scan couldn't place from their names. Paste a TMDB or IMDb link,
+            or say what each one is (the fields suggest what's already in the library). Kept across rescans.</p>
+          <UnrecognizedFiles libraryId={lib.id} onChange={reload} />
+        </>
+      )}
+      {tab === "titles" && genres.length > 1 && (
         <div className="chips">
           <button className={`chip ${!genre ? "on" : ""}`} onClick={() => setGenre(null)}>All</button>
           {genres.map((g) => (
@@ -41,10 +61,12 @@ export default function Library() {
           ))}
         </div>
       )}
-      {items && !items.length && <p className="muted">No {noun} found in this library yet.</p>}
-      <div className="grid">
-        {list.map((i) => <PosterCard key={i.id} item={i} />)}
-      </div>
+      {tab === "titles" && <>
+        {items && !items.length && <p className="muted">No {noun} found in this library yet.</p>}
+        <div className="grid">
+          {list.map((i) => <PosterCard key={i.id} item={i} />)}
+        </div>
+      </>}
     </div>
   );
 }

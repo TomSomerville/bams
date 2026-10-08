@@ -55,8 +55,16 @@ def get_or_create_season(con: sqlite3.Connection, lib_id: int, show_id: int, n: 
     return _insert_item(con, lib_id, "season", season_title(n), parent_id=show_id, season_number=n)
 
 
-def get_or_create_episode(con: sqlite3.Connection, lib_id: int, season_id: int, season_n: int, n: int,
+def get_or_create_episode(con: sqlite3.Connection, lib_id: int, season_id: int, season_n: int, n: int | None,
                           title: str | None) -> int:
+    if n is None:  # unnumbered ("Season 00/Making Of.mkv"): one item per name within the season
+        key = title_key(title)
+        row = con.execute("""SELECT id FROM items WHERE parent_id=? AND kind='episode' AND episode_number IS NULL
+                             AND title_key=?""", (season_id, key)).fetchone()
+        if row:
+            return row["id"]
+        return _insert_item(con, lib_id, "episode", title or "Extra", parsed_title=title, title_key=key,
+                            parent_id=season_id, season_number=season_n)
     row = con.execute("SELECT id, match_status FROM items WHERE parent_id=? AND kind='episode' AND episode_number=?",
                       (season_id, n)).fetchone()
     if row:
@@ -78,7 +86,7 @@ def link_file(con: sqlite3.Connection, lib_id: int, file_id: int, p: Parsed) -> 
         show = get_or_create_title(con, lib_id, "show", p.title, p.year)
         season = get_or_create_season(con, lib_id, show, p.season)
         targets = [get_or_create_episode(con, lib_id, season, p.season, e, p.episode_title if len(p.episodes) == 1 else None)
-                   for e in p.episodes]
+                   for e in p.episodes] if p.episodes else [get_or_create_episode(con, lib_id, season, p.season, None, p.episode_title)]
     con.executemany("INSERT OR IGNORE INTO file_items (file_id, item_id) VALUES (?, ?)", [(file_id, t) for t in targets])
     return targets
 
@@ -108,9 +116,11 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
             if not target:
                 con.execute("UPDATE items SET parent_id=? WHERE id=?", (keep, s["id"]))
                 continue
-            for e in con.execute("SELECT id, episode_number FROM items WHERE parent_id=? AND kind='episode'", (s["id"],)).fetchall():
-                te = con.execute("SELECT id FROM items WHERE parent_id=? AND kind='episode' AND episode_number=?",
-                                 (target["id"], e["episode_number"])).fetchone()
+            for e in con.execute("SELECT id, episode_number, title_key FROM items WHERE parent_id=? AND kind='episode'",
+                                 (s["id"],)).fetchall():
+                te = con.execute("""SELECT id FROM items WHERE parent_id=? AND kind='episode' AND (episode_number=?
+                                    OR (episode_number IS NULL AND ? IS NULL AND title_key=?))""",
+                                 (target["id"], e["episode_number"], e["episode_number"], e["title_key"])).fetchone()
                 if te:
                     con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (te["id"], e["id"]))
                     _move_watch_state(con, e["id"], te["id"])

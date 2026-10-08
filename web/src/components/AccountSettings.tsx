@@ -3,14 +3,16 @@ import { useLocation } from "react-router-dom";
 import { api, type User } from "../api";
 import { useAuth } from "../auth";
 import Icon from "./Icon";
+import PasswordInput from "./PasswordInput";
 
 /** Your own account: who you are, a new password, signing out. */
 export function AccountSettings() {
-  const { user, signOut, refresh } = useAuth();
+  const { user, signOut, refresh, prefs, setPrefs } = useAuth();
   const { hash } = useLocation();
   const card = useRef<HTMLElement>(null);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -20,12 +22,14 @@ export function AccountSettings() {
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
+    if (next !== again) return setMsg({ ok: false, text: "The two new passwords don't match." });
     setBusy(true);
     setMsg(null);
     try {
       await api.put("/api/auth/password", { current, new: next });
       setCurrent("");
       setNext("");
+      setAgain("");
       setMsg({ ok: true, text: "Password changed. Other devices signed in as you have been signed out." });
       refresh();
     } catch (e) {
@@ -43,15 +47,22 @@ export function AccountSettings() {
       </div>
       <p className="muted">Your watch history (what you've watched, where you stopped) belongs to this account.</p>
       <form className="key-row" onSubmit={save}>
-        <input className="text-input" type="password" placeholder="Current password" value={current}
+        <PasswordInput className="text-input" placeholder="Current password" value={current}
           onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" aria-label="Current password" />
-        <input className="text-input" type="password" placeholder="New password (8+ characters)" value={next}
-          onChange={(e) => setNext(e.target.value)} autoComplete="new-password" aria-label="New password" />
-        <button className="btn small primary" disabled={busy || !current || next.length < 8}>Change password</button>
+        <PasswordInput className="text-input" placeholder="New password (8+ characters)" value={next}
+          onChange={(e) => { setNext(e.target.value); setMsg(null); }} autoComplete="new-password" aria-label="New password" />
+        <PasswordInput className="text-input" placeholder="New password again" value={again}
+          onChange={(e) => { setAgain(e.target.value); setMsg(null); }} autoComplete="new-password" aria-label="Confirm new password" />
+        <button className="btn small primary" disabled={busy || !current || next.length < 8 || !again}>Change password</button>
         <span className="spacer" />
         <button type="button" className="btn small ghost" onClick={signOut}>Sign out</button>
       </form>
       {msg && <p className={`key-msg ${msg.ok ? "ok" : "bad"}`}>{msg.text}</p>}
+      <label className="check pref-row">
+        <input type="checkbox" checked={prefs.home_hero}
+          onChange={(e) => setPrefs({ home_hero: e.target.checked }).catch((err) => setMsg({ ok: false, text: err.message }))} />
+        Show the rotating "Recently added" banner at the top of Home
+      </label>
     </section>
   );
 }
@@ -99,7 +110,7 @@ function UserRow({ u, me, onChange }: { u: User; me: User; onChange: () => void 
           e.preventDefault();
           run(() => api.patch(`/api/users/${u.id}`, { password: pw })).then(() => { setPw(""); setResetting(false); });
         }}>
-          <input className="text-input" type="password" placeholder="New password (8+ characters)" value={pw}
+          <PasswordInput className="text-input" placeholder="New password (8+ characters)" value={pw}
             onChange={(e) => setPw(e.target.value)} autoComplete="new-password" aria-label={`New password for ${u.name}`} />
           <button className="btn small primary" disabled={pw.length < 8}>Set password</button>
           <span className="muted">Signs {u.name} out everywhere.</span>
@@ -151,7 +162,7 @@ export function UsersSettings() {
         <form className="key-row" onSubmit={add}>
           <input className="text-input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)}
             autoFocus maxLength={40} aria-label="Name" />
-          <input className="text-input" type="password" placeholder="Password (8+ characters)" value={pw}
+          <PasswordInput className="text-input" placeholder="Password (8+ characters)" value={pw}
             onChange={(e) => setPw(e.target.value)} autoComplete="new-password" aria-label="Password" />
           <label className="check"><input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} /> Admin</label>
           <button className="btn small primary" disabled={!name.trim() || pw.length < 8}>Add</button>

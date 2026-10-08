@@ -6,6 +6,7 @@ import { AlbumCard, ContinueCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { fmtRuntime, seasonsLabel } from "../format";
+import { useAuth } from "../auth";
 import { useApi } from "../useApi";
 
 function Hero({ items }: { items: ItemSummary[] }) {
@@ -56,9 +57,11 @@ export default function Home() {
   const hasMusic = !!libs?.some((l) => l.type === "music");
   const { data: albums } = useApi<ItemSummary[]>(hasMusic ? "/api/items?kind=album&sort=added&limit=300" : null);
   const { data: resume } = useApi<ContinueItem[]>("/api/continue");
+  const { prefs } = useAuth();
 
   const recent = items?.slice(0, 20) ?? [];
-  const hero = useMemo(() => (items ?? []).filter((i) => i.backdrop || i.poster).slice(0, 6), [items]);
+  const hero = useMemo(() => (prefs.home_hero ? (items ?? []).filter((i) => i.backdrop || i.poster).slice(0, 6) : []),
+    [items, prefs.home_hero]);
   const topGenres = useMemo(() => {
     const n = new Map<string, number>();
     for (const i of items ?? []) for (const g of i.genres) n.set(g, (n.get(g) ?? 0) + 1);

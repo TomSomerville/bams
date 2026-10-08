@@ -52,7 +52,7 @@ export function ContinueCard({ item }: { item: ContinueItem }) {
   const left = item.progress?.duration && item.progress.position
     ? Math.max(1, Math.round((item.progress.duration - item.progress.position) / 60)) : null;
   const sub = [
-    item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number!)} · ${item.title}` : null,
+    item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number)} · ${item.title}` : null,
     item.reason === "next" ? "Next episode" : left ? `${fmtRuntime(left)} left` : null,
   ].filter(Boolean).join(" · ");
   return (

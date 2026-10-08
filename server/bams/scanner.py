@@ -16,10 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import items, library, music, probe, readonly
+from . import identify, items, library, music, probe, readonly
 from .config import AUDIO_EXTS, EXTRAS_DIRS, SKIP_DIRS, VIDEO_EXTS
 from .db import Tx, jdump, jload, now
-from .parse import PARSER_VERSION, parse
+from .parse import PARSER_VERSION
 
 log = logging.getLogger(__name__)
 BATCH = 200  # commit every N files so a long scan never holds the write lock for long
@@ -50,7 +50,7 @@ def _store_parse(con: sqlite3.Connection, lib_id: int, lib_type: str, file_id: i
         con.execute("UPDATE files SET parse=? WHERE id=?", (jdump(t.to_dict()), file_id))
         music.link_track(con, lib_id, file_id, t)
         return
-    p = parse(rel, lib_type)
+    p = identify.parsed_for(con, file_id, rel, lib_type)  # identified by hand, else by its name
     con.execute("UPDATE files SET parse=? WHERE id=?", (jdump(p.to_dict()), file_id))
     if not items.link_file(con, lib_id, file_id, p):
         stats.unrecognized += 1
@@ -85,41 +85,36 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
             f"{'probe' if is_music else 'NULL AS probe'} FROM files WHERE root_id=?", (root["id"],))}
         if progress:
             progress(f"walking {root_path}")
-        pending = 0
-        con.execute("BEGIN IMMEDIATE")
-        try:
-            for entry in readonly.walk(root_path, exts, SKIP_DIRS, nested_skip):
-                stats.files_seen += 1
-                row = known.get(entry.rel)
-                t = now()
-                if row is None:
-                    new_files.append((root["id"], entry))
-                    continue
+        # Walk first, with no transaction open: listing a big (network) tree can take minutes, and holding the
+        # write lock meanwhile made every other write (logins, adding a library) fail with "database is locked".
+        known_entries: list[tuple[sqlite3.Row, readonly.FileEntry]] = []
+        for entry in readonly.walk(root_path, exts, SKIP_DIRS, nested_skip):
+            stats.files_seen += 1
+            row = known.get(entry.rel)
+            if row is None:
+                new_files.append((root["id"], entry))
+            else:
                 seen_ids.add(row["id"])
-                if row["size"] == entry.size and row["mtime_ns"] == entry.mtime_ns:
-                    con.execute("UPDATE files SET last_seen=?, available=1, missing_since=NULL WHERE id=?", (t, row["id"]))
-                    if (row["pv"] or 0) < parser_version:
-                        stats.reparsed += 1
-                        _store_parse(con, lib_id, lib_type, row["id"], entry.rel, stats, jload(row["probe"]))
-                else:
-                    stats.changed += 1
-                    con.execute("""UPDATE files SET size=?, mtime_ns=?, quick_hash=NULL, probe=NULL, probed_at=NULL,
-                                   last_seen=?, available=1, missing_since=NULL WHERE id=?""",
-                                (entry.size, entry.mtime_ns, t, row["id"]))
-                    if is_music:
-                        relink.append((row["id"], entry.rel))  # tags may have changed: re-read after probing
+                known_entries.append((row, entry))
+        for i in range(0, len(known_entries), BATCH):
+            with Tx(con):
+                for row, entry in known_entries[i:i + BATCH]:
+                    t = now()
+                    if row["size"] == entry.size and row["mtime_ns"] == entry.mtime_ns:
+                        con.execute("UPDATE files SET last_seen=?, available=1, missing_since=NULL WHERE id=?", (t, row["id"]))
+                        if (row["pv"] or 0) < parser_version:
+                            stats.reparsed += 1
+                            _store_parse(con, lib_id, lib_type, row["id"], entry.rel, stats, jload(row["probe"]))
                     else:
-                        _store_parse(con, lib_id, lib_type, row["id"], entry.rel, stats)
-                    to_probe.append((row["id"], entry.path))
-                pending += 1
-                if pending >= BATCH:
-                    con.execute("COMMIT")
-                    con.execute("BEGIN IMMEDIATE")
-                    pending = 0
-            con.execute("COMMIT")
-        except BaseException:
-            con.execute("ROLLBACK")
-            raise
+                        stats.changed += 1
+                        con.execute("""UPDATE files SET size=?, mtime_ns=?, quick_hash=NULL, probe=NULL, probed_at=NULL,
+                                       last_seen=?, available=1, missing_since=NULL WHERE id=?""",
+                                    (entry.size, entry.mtime_ns, t, row["id"]))
+                        if is_music:
+                            relink.append((row["id"], entry.rel))  # tags may have changed: re-read after probing
+                        else:
+                            _store_parse(con, lib_id, lib_type, row["id"], entry.rel, stats)
+                        to_probe.append((row["id"], entry.path))
 
     # Files the DB knows (in online roots) that weren't seen: candidates for "moved" or "missing".
     gone = [r for r in con.execute(
@@ -133,16 +128,18 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
     if progress and new_files:
         progress(f"adding {len(new_files)} new files")
     for i in range(0, len(new_files), BATCH):
+        # Read the files' fingerprints before taking the write lock (slow on a network share).
+        hashed: list[tuple[int, readonly.FileEntry, str]] = []
+        for root_id, entry in new_files[i:i + BATCH]:
+            try:
+                hashed.append((root_id, entry, readonly.quick_hash(entry.path, entry.size)))
+            except OSError as e:
+                # Usually a file still being copied in (the copier holds it locked). Leave it for the
+                # next scan rather than indexing a half-written file.
+                stats.busy += 1
+                log.info("skipped for now (in use / still copying?): %s (%s)", entry.rel, e.strerror or e)
         with Tx(con):
-            for root_id, entry in new_files[i:i + BATCH]:
-                try:
-                    qh = readonly.quick_hash(entry.path, entry.size)
-                except OSError as e:
-                    # Usually a file still being copied in (the copier holds it locked). Leave it for the
-                    # next scan rather than indexing a half-written file.
-                    stats.busy += 1
-                    log.info("skipped for now (in use / still copying?): %s (%s)", entry.rel, e.strerror or e)
-                    continue
+            for root_id, entry, qh in hashed:
                 t = now()
                 twin = next((g for g in gone_by_size.get(entry.size, [])
                              if g["id"] not in moved_ids and qh and g["quick_hash"] == qh), None)

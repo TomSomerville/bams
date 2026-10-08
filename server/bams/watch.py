@@ -1,7 +1,7 @@
 """Each user's watch state: where they stopped in a movie/episode, what they've watched, what's next.
 
-Positions are reported by the player while it plays (`record_progress`). Past WATCHED_AT of the running time a
-title counts as watched and its position goes back to 0 (like Plex). Shows and seasons have no state of their
+Positions are reported by the player while it plays (`record_progress`). Past the "watched at" share of the
+running time (an admin setting, 90% by default) a title counts as watched and its position goes back to 0 (like Plex). Shows and seasons have no state of their
 own: they're summed up from their episodes.
 """
 
@@ -9,10 +9,20 @@ from __future__ import annotations
 
 import sqlite3
 
-from .db import Tx, now
+from .db import Tx, get_setting, now
 
-WATCHED_AT = 0.90   # fraction of the running time after which a title counts as watched
-MIN_RESUME = 30.0   # seconds; less than this isn't worth resuming
+WATCHED_PERCENT = 90   # default: share of the running time after which a title counts as watched
+RESUME_AFTER = 30      # default: seconds watched before a title is "started" (saved, in Continue Watching)
+
+
+def thresholds(con: sqlite3.Connection) -> dict:
+    """The admin's watch settings: `watched_percent` (50-100) and `resume_after` (seconds)."""
+    def num(key: str, default: int) -> int:
+        try:
+            return int(get_setting(con, key) or default)
+        except ValueError:
+            return default
+    return {"watched_percent": num("watched_percent", WATCHED_PERCENT), "resume_after": num("resume_after", RESUME_AFTER)}
 PLAYABLE = ("movie", "episode")
 
 
@@ -20,8 +30,9 @@ def record_progress(con: sqlite3.Connection, user_id: int, item_id: int, positio
                     duration: float | None) -> dict:
     """The player is at `position` seconds of `duration`. Returns the item's new state."""
     t = now()
+    th = thresholds(con)
     prev = con.execute("SELECT * FROM watch_state WHERE user_id=? AND item_id=?", (user_id, item_id)).fetchone()
-    finished = bool(duration and duration > 0 and position >= duration * WATCHED_AT)
+    finished = bool(duration and duration > 0 and position >= duration * th["watched_percent"] / 100)
     with Tx(con):
         if finished:
             # count a viewing once: a finished title stays at 0 while the credits keep reporting progress,
@@ -34,7 +45,7 @@ def record_progress(con: sqlite3.Connection, user_id: int, item_id: int, positio
                                ELSE last_watched_at END, updated_at=excluded.updated_at""",
                         (user_id, item_id, duration, t, t, int(again), int(again)))
         else:
-            pos = position if position >= 10 else 0.0
+            pos = position if position >= max(th["resume_after"], 1) else 0.0
             con.execute("""INSERT INTO watch_state(user_id, item_id, position, duration, updated_at)
                            VALUES (?,?,?,?,?)
                            ON CONFLICT(user_id, item_id) DO UPDATE SET position=excluded.position,
@@ -159,18 +170,19 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
         WHERE w.user_id=? ORDER BY w.updated_at DESC LIMIT 400""", (user_id,)).fetchall()
     out: list[tuple[int, str]] = []
     shows_done: set[int] = set()
+    min_resume = max(thresholds(con)["resume_after"], 1)
     for r in recent:
         if len(out) >= limit:
             break
         if r["kind"] == "movie":
-            if not r["watched"] and r["position"] >= MIN_RESUME:
+            if not r["watched"] and r["position"] >= min_resume:
                 out.append((r["item_id"], "resume"))
             continue
         show = r["show"]
         if show in shows_done:
             continue
         shows_done.add(show)  # only the most recent activity of a show decides what it offers
-        if not r["watched"] and r["position"] >= MIN_RESUME:
+        if not r["watched"] and r["position"] >= min_resume:
             out.append((r["item_id"], "resume"))
             continue
         if not r["watched"]:

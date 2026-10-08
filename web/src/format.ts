@@ -1,6 +1,8 @@
 import type { ItemSummary, PlayMethod } from "./api";
 
-export const sxe = (s: number, e: number) => `S${String(s).padStart(2, "0")}E${String(e).padStart(2, "0")}`;
+/** S01E02; an unnumbered episode (an extra in a season folder) is just S00. */
+export const sxe = (s: number, e?: number | null) =>
+  `S${String(s).padStart(2, "0")}${e == null ? "" : `E${String(e).padStart(2, "0")}`}`;
 
 export const fmtRuntime = (min?: number | null) =>
   min ? (min >= 60 ? `${Math.floor(min / 60)}h ${min % 60}m` : `${min}m`) : "";

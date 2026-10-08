@@ -9,7 +9,8 @@ descriptions, and streams to any browser. It runs on **Windows** and **Debian / 
 > **Status: early.** The server (Python) indexes and identifies TV/movie folders (matched on TMDB) and
 > music folders (tags, then MusicBrainz), and streams files. See [server/README.md](server/README.md). The web UI shows your real
 > libraries and plays anything: the server converts what the browser can't decode, with subtitles, audio
-> tracks, and per-person accounts with resume and Continue Watching.
+> tracks, and per-person accounts with resume and Continue Watching. Files it can't identify from their names
+> can be identified by hand (paste a TMDB/IMDb link, or pick the show, season and episode).
 > The full plan is in [docs/PLAN.md](docs/PLAN.md).
 >
 > Your media folders are **read-only** to BAMS, enforced in code and by the OS: [docs/READ-ONLY.md](docs/READ-ONLY.md).
@@ -39,7 +40,8 @@ Download the installer for your computer from the
 ### Updates
 
 Download the newer installer and run it the same way. It installs over the old version and keeps your libraries,
-accounts, watch history and settings. No uninstalling, nothing to set up again.
+accounts, watch history and settings. No uninstalling, nothing to set up again. What's new in each version:
+[CHANGELOG.md](CHANGELOG.md).
 
 More detail (uninstalling, where data lives, forgotten passwords, troubleshooting): [docs/INSTALL.md](docs/INSTALL.md).
 Building the installers: [deploy/README.md](deploy/README.md).
@@ -49,6 +51,7 @@ Building the installers: [deploy/README.md](deploy/README.md).
 | Path | What |
 |---|---|
 | `CLAUDE.md` | Rules and pitfalls for AI coding sessions (read first) |
+| `CHANGELOG.md` | What changed in each release |
 | `docs/STATUS.md` | What's built, requirements, decisions log, dev environment |
 | `docs/CODEBASE.md` | Codebase map: every file, data flow, DB schema, API, "where to change X" |
 | `docs/FORMATS.md` | Every video/audio/subtitle/music format and how BAMS handles it |

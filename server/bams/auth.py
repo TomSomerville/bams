@@ -18,7 +18,7 @@ import sqlite3
 import threading
 import time
 
-from .db import now
+from .db import jdump, jload, now
 
 COOKIE = "bams_session"
 SESSION_DAYS = 30
@@ -79,9 +79,25 @@ def user_count(con: sqlite3.Connection) -> int:
     return con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
+# Each user's display preferences: name -> default. Unknown names are ignored when saving.
+PREFS: dict[str, bool] = {"home_hero": True}   # the rotating "Recently added" banner at the top of Home
+
+
+def prefs(u: sqlite3.Row) -> dict:
+    saved = jload(u["prefs"]) or {}
+    return {k: saved.get(k, default) for k, default in PREFS.items()}
+
+
+def set_prefs(con: sqlite3.Connection, user_id: int, changes: dict) -> dict:
+    u = get_user(con, user_id)
+    new = {**prefs(u), **{k: v for k, v in changes.items() if k in PREFS and isinstance(v, type(PREFS[k]))}}
+    con.execute("UPDATE users SET prefs=? WHERE id=?", (jdump(new), user_id))
+    return new
+
+
 def public(u: sqlite3.Row) -> dict:
     return {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"]),
-            "created_at": u["created_at"], "last_login_at": u["last_login_at"]}
+            "created_at": u["created_at"], "last_login_at": u["last_login_at"], "prefs": prefs(u)}
 
 
 def get_user(con: sqlite3.Connection, ref: int | str) -> sqlite3.Row | None:

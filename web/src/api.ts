@@ -80,7 +80,13 @@ export type ServerStatus = {
 
 export type BrowseResult = { path: string | null; parent: string | null; dirs: { name: string; path: string }[] };
 
-export type User = { id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null };
+/** Each account's own display preferences (server: auth.PREFS). */
+export type Prefs = { home_hero: boolean };
+export type User = {
+  id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null; prefs?: Prefs;
+};
+/** Admin settings: when a title counts as watched (% of its length) and as started (seconds in). */
+export type WatchSettings = { watched_percent: number; resume_after: number };
 export type AuthState = { user: User | null; setup: boolean; setup_here: boolean };
 
 /** This user's state of a movie/episode. position 0 = from the start (or finished). */
@@ -205,7 +211,22 @@ export type ItemDetail = ItemSummary & {
   next_id?: number | null;
 };
 
-export type UnrecognizedFile = FileInfo & { hint: string };
+/** What a file is, entered by hand (PUT /api/files/:id/identify). No episodes = an extra in that season. */
+export type Identification = {
+  title: string; year?: number | null; season?: number | null; episodes?: number[]; episode_title?: string | null;
+  edition?: string | null; tmdb_id?: number | null;
+};
+/** A file the scanner couldn't place (hint says why), or one identified by hand (manual). */
+export type UnrecognizedFile = FileInfo & {
+  hint: string | null; manual: Identification | null;
+  library_id: number; library_name: string; library_type: "movie" | "show" | "music";
+  guess: { title?: string | null; year?: number | null; season?: number | null; episodes?: number[] | null; episode_title?: string | null };
+};
+/** What's already in a library, for the identify form's suggestions (GET /api/libraries/:id/names). */
+export type LibraryNames = {
+  title: string; year: number | null;
+  seasons?: { season: number; episodes: { n: number | null; title: string }[] }[];
+}[];
 
 export type MusicExtra = {
   type?: string | null;

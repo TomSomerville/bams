@@ -103,3 +103,75 @@ def test_movie_library(env):
         """SELECT i.title, i.year, COUNT(fi.file_id) n FROM items i JOIN file_items fi ON fi.item_id=i.id
            WHERE i.kind='movie' GROUP BY i.id""")}
     assert movies == {("The Matrix", 1999): 2, ("Heat", 1995): 1, ("Alien", 1979): 1}
+
+
+def test_scan_does_not_hold_the_write_lock_while_reading_disks(env, monkeypatch, unguarded):
+    """A first scan on a slow share used to keep the DB locked for the whole walk: logins and adding a
+    library failed with HTTP 500 ("database is locked"). Other writers must get in while it reads disks."""
+    import sqlite3
+
+    from bams import readonly as ro
+    from bams import scanner
+
+    paths, media, con, lib_id = setup(env)
+    scan_library(con, lib_id, do_probe=False)  # known files exist too: the walk updates them
+    with unguarded:
+        make_tree(media, ["New Show/New Show - S01E01.mkv", "New Show/New Show - S01E02.mkv"])
+    other = sqlite3.connect(paths.db, timeout=0, isolation_level=None)
+    writes = []
+
+    def can_write():
+        other.execute("INSERT INTO settings(key, value) VALUES ('probe', 'x') "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        writes.append(1)
+
+    real_walk, real_hash = ro.walk, ro.quick_hash
+
+    def walk(*a, **kw):
+        for e in real_walk(*a, **kw):
+            can_write()  # raises "database is locked" if the scan holds the lock
+            yield e
+
+    def quick_hash(*a, **kw):
+        can_write()
+        return real_hash(*a, **kw)
+
+    monkeypatch.setattr(scanner.readonly, "walk", walk)
+    monkeypatch.setattr(scanner.readonly, "quick_hash", quick_hash)
+    st = scan_library(con, lib_id, do_probe=False)
+    other.close()
+    assert st.added == 2 and len(writes) == st.files_seen + 2
+
+
+def test_unnumbered_extras_in_season_folders_are_shown(env):
+    """Tester report: a show's Season 00 folder of unnumbered extras was "unrecognized" and never shown."""
+    paths, media, con, lib_id = setup(env, [
+        "Show (2010)/Season 01/Show - S01E01.mkv",
+        "Show (2010)/Season 00/Show - S00E01 - Pilot.mkv",
+        "Show (2010)/Season 00/Behind the Scenes.mkv",
+        "Show (2010)/Season 00/Show - Bloopers.mkv",
+        "Show (2010)/Show - Bonus.mkv",  # not in a season folder: stays unrecognised
+    ])
+    st = scan_library(con, lib_id, do_probe=False)
+    assert st.unrecognized == 1
+    eps = [(e["season_number"], e["episode_number"], e["title"]) for e in con.execute(
+        "SELECT * FROM items WHERE kind='episode' ORDER BY season_number, episode_number IS NULL, episode_number, title")]
+    assert eps == [(0, 1, "Pilot"), (0, None, "Behind the Scenes"), (0, None, "Bloopers"), (1, 1, "Episode 1")]
+    n = con.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+    con.execute("UPDATE files SET parse=json_set(parse, '$.v', 0)")  # re-parse everything: no duplicates
+    assert scan_library(con, lib_id, do_probe=False).reparsed == 5
+    assert con.execute("SELECT COUNT(*) FROM items").fetchone()[0] == n
+
+
+def test_merging_shows_joins_their_unnumbered_extras(env):
+    from bams import items
+    paths, media, con, lib_id = setup(env, [
+        "Show (2010)/Season 00/Making Of.mkv", "Show (2010)/Season 00/Bloopers.mkv",
+        "Show Alt Name/Season 00/Making Of.mkv", "Show Alt Name/Season 00/Interview.mkv",
+    ])
+    scan_library(con, lib_id, do_probe=False)
+    keep, drop = (r["id"] for r in con.execute("SELECT id FROM items WHERE kind='show' ORDER BY title"))
+    items.merge_titles(con, keep, drop)
+    titles = sorted(r["title"] for r in con.execute("SELECT title FROM items WHERE kind='episode'"))
+    assert titles == ["Bloopers", "Interview", "Making Of"]  # the two "Making Of" files are one item
+    assert con.execute("SELECT COUNT(*) FROM file_items").fetchone()[0] == 4

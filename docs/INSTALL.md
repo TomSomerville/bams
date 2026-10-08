@@ -41,7 +41,7 @@ this computer to read it (guest/everyone read access, the usual setting for a me
    click **Install** and enter your password. It installs Python and FFmpeg for you if they're missing.
    From a terminal instead:
    ```bash
-   sudo apt install ./bams_0.1.0_all.deb
+   sudo apt install ./bams_0.2.0_all.deb      # the file name you downloaded
    ```
 2. Open **BAMS** from the applications menu (or http://localhost:8484) and [set it up](#first-steps).
 
@@ -63,13 +63,17 @@ Settings live in `/etc/default/bams` (which account BAMS runs as, the address an
 3. **Add your folders.** Settings → Add library: pick TV Shows, Movies or Music, then the folder. BAMS scans it right
    away and again every few hours.
 4. **Add people.** Settings → Accounts. Everyone gets their own sign-in, watch history and Continue Watching.
+5. **Check for files BAMS couldn't identify.** Settings → *Unrecognized files* (or the *Unrecognized* tab on a
+   library) lists files whose names didn't say what they are. Paste a TMDB or IMDb link for each, or type the show,
+   season and episode (the fields suggest what's already there). Better still, rename them
+   (`Show Name/Season 01/Show Name - S01E01.mkv`, `Movie Name (Year)/Movie Name (Year).mkv`).
 
 ## Updating
 
 Download the newer installer and run it, exactly like the first time. On Windows it skips the questions (it
 remembers your choices) and shows **Install**; on Linux the software installer says **Upgrade**. BAMS stops for a
 few seconds, updates, and starts again. If the database needs changes, BAMS makes them on its first start and
-keeps a backup in its data folder (`backups`).
+keeps a backup in its data folder (`backups`). What's new: [CHANGELOG.md](../CHANGELOG.md).
 
 ## Uninstalling
 
@@ -86,4 +90,5 @@ Your media files are never touched by BAMS, installing, updating or uninstalling
 | Forgot the admin password | Windows: open *Command Prompt as administrator* and run `"C:\Program Files\BAMS\bams.cmd" user passwd NAME`. Linux: `sudo bams user passwd NAME` |
 | BAMS doesn't open after a restart | Windows: Services → **BAMS Media Server** → Start. Linux: `sudo systemctl restart bams`. Logs: `C:\ProgramData\BAMS\logs` / `journalctl -u bams` |
 | Videos have no picture or sound | FFmpeg is missing (Settings shows a warning). Windows: run the installer again while online. Linux: `sudo apt install ffmpeg` |
+| A show, episode or movie is missing | Its file name probably didn't say what it is: Settings → *Unrecognized files* lists those, with a hint and an *Identify* button |
 | Another program already uses port 8484 | BAMS can't start while it does. Windows: stop that program. Linux: change `BAMS_PORT` in `/etc/default/bams`, then `sudo dpkg-reconfigure bams` |

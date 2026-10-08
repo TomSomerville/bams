@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import auth, fsbrowse, hls, library, matcher, music_match, probe, readonly, stream, subtitles, watch
+from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
@@ -149,7 +149,7 @@ def unrecognized_hint(rel: str, lib_type: str) -> str:
     if lib_type == "music":
         return "Couldn't read this file's tags or name."
     if lib_type == "show":
-        m = parse_movie(rel)
+        m = parse_movie(rel.replace("\\", "/").rsplit("/", 1)[-1])  # the file's own name: show folders have years too
         if m.title and m.year:
             return (f"Looks like a movie ({m.title}, {m.year}), but this is a TV library. "
                     "Put movies in their own folder and add it as a Movies library.")
@@ -186,6 +186,22 @@ class MatchIn(BaseModel):
     tmdb_id: int
 
 
+class IdentifyIn(BaseModel):
+    """What a file is, entered by hand. TV libraries need a season; no episode numbers = an extra."""
+    title: str = Field(min_length=1, max_length=200)
+    year: int | None = Field(None, ge=1870, le=2100)
+    season: int | None = Field(None, ge=0, le=9999)
+    episodes: list[int] = Field(default_factory=list, max_length=50)
+    episode_title: str | None = Field(None, max_length=300)
+    edition: str | None = Field(None, max_length=100)
+    tmdb_id: int | None = Field(None, ge=1)
+
+
+class LinkIn(BaseModel):
+    link: str = Field(min_length=1, max_length=500)
+    library_id: int
+
+
 class MusicMatchIn(BaseModel):
     mbid: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
 
@@ -196,6 +212,15 @@ class ToggleIn(BaseModel):
 
 class TranscodingIn(BaseModel):
     max_transcodes: int = Field(ge=0, le=32)  # 0 = automatic
+
+
+class WatchSettingsIn(BaseModel):
+    watched_percent: int = Field(ge=50, le=100)   # a title counts as watched past this share of its length
+    resume_after: int = Field(ge=0, le=600)       # seconds before it counts as started (saved, Continue Watching)
+
+
+class PrefsIn(BaseModel):
+    home_hero: bool | None = None
 
 
 class HlsIn(BaseModel):
@@ -403,6 +428,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         """Who is signed in (null if nobody), and whether the first admin account still has to be created
         (`setup`), which this browser may do only from the server itself (`setup_here`)."""
         u = lookup(request.cookies.get(auth.COOKIE))
+        if u:
+            u = {**u, "prefs": auth.prefs(auth.get_user(con, u["id"]))}
         empty = auth.user_count(con) == 0
         return {"user": u, "setup": empty, "setup_here": empty and auth.is_loopback(_client(request))}
 
@@ -461,6 +488,11 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         forget_sessions()
         _set_cookie(response, request, auth.new_session(con, me["id"], request.headers.get("user-agent")))
         return auth.public(auth.get_user(con, me["id"]))
+
+    @app.put("/api/me/prefs")
+    def put_prefs(body: PrefsIn, con=Depends(db), me=Depends(current_user)):
+        """Your own display preferences (each account has its own). Only the fields sent change."""
+        return auth.set_prefs(con, me["id"], body.model_dump(exclude_none=True))
 
     @app.get("/api/users", dependencies=ADMIN)
     def list_users(con=Depends(db)):
@@ -524,13 +556,20 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         return {"tmdb": _tmdb_status(con), "language": get_setting(con, "language", "en-US"),
                 "music_lookup": music_lookup_enabled(con),
                 "max_transcodes": int(get_setting(con, "max_transcodes", "0") or 0),
-                "max_transcodes_auto": auto_transcode_limit()}
+                "max_transcodes_auto": auto_transcode_limit(), "watch": watch.thresholds(con)}
 
     @app.put("/api/settings/transcoding", dependencies=ADMIN)
     def put_transcoding(body: TranscodingIn, con=Depends(db)):
         """How many videos may be converted at once (0 = automatic: 4 on a GPU encoder, 2 on the CPU)."""
         set_setting(con, "max_transcodes", str(body.max_transcodes))
         return {"max_transcodes": body.max_transcodes, "limit": transcode_limit()}
+
+    @app.put("/api/settings/watch", dependencies=ADMIN)
+    def put_watch_settings(body: WatchSettingsIn, con=Depends(db)):
+        """When a title counts as watched (% of its length) and as started (seconds in), for everyone."""
+        set_setting(con, "watched_percent", str(body.watched_percent))
+        set_setting(con, "resume_after", str(body.resume_after))
+        return watch.thresholds(con)
 
     @app.put("/api/settings/music-lookup", dependencies=ADMIN)
     def put_music_lookup(body: ToggleIn, con=Depends(db)):
@@ -690,7 +729,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             p = a["parent_id"]
         order = {"show": "season_number", "artist": "year IS NULL, year, title COLLATE NOCASE",
                  "album": "COALESCE(disc_number, 1), track_number IS NULL, track_number, title COLLATE NOCASE",
-                 }.get(r["kind"], "episode_number")
+                 }.get(r["kind"], "episode_number IS NULL, episode_number, title COLLATE NOCASE")  # unnumbered last
         d["children"] = [item_summary(c) for c in con.execute(
             f"{ITEM_SELECT} WHERE parent_id=? ORDER BY {order}", (item_id,))]
         playable = r["kind"] in watch.PLAYABLE
@@ -775,14 +814,98 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             })
         return out
 
+    def _unrecognized(con, lib_id: int | None) -> list[dict]:
+        """Files the parser couldn't place (each with a hint about why), and files identified by hand."""
+        rows = con.execute(f"""SELECT f.*, lr.path AS root, l.name AS library_name, l.type AS library_type
+                               FROM files f JOIN library_roots lr ON lr.id=f.root_id JOIN libraries l ON l.id=f.library_id
+                               WHERE (f.id NOT IN (SELECT file_id FROM file_items) OR f.manual IS NOT NULL)
+                               {"AND f.library_id=?" if lib_id is not None else ""}
+                               ORDER BY l.name COLLATE NOCASE, f.rel_path""", (() if lib_id is None else (lib_id,)))
+        out = []
+        for r in rows:
+            manual = jload(r["manual"])
+            guess = jload(r["parse"]) or {}
+            out.append({**file_info(r), "library_id": r["library_id"], "library_name": r["library_name"],
+                        "library_type": r["library_type"], "manual": manual,
+                        "hint": None if manual else unrecognized_hint(r["rel_path"], r["library_type"]),
+                        "guess": {k: guess.get(k) for k in ("title", "year", "season", "episodes", "episode_title")}})
+        return out
+
     @app.get("/api/libraries/{lib_id}/unrecognized", dependencies=ADMIN)
     def unrecognized(lib_id: int, con=Depends(db)):
-        """Indexed files the parser couldn't place, each with a hint about why."""
+        library.get(con, lib_id)
+        return _unrecognized(con, lib_id)
+
+    @app.get("/api/unrecognized", dependencies=ADMIN)
+    def all_unrecognized(con=Depends(db)):
+        """Every library's unrecognised (and hand-identified) files: Settings → Unrecognized files."""
+        return _unrecognized(con, None)
+
+    @app.get("/api/libraries/{lib_id}/names", dependencies=ADMIN)
+    def library_names(lib_id: int, con=Depends(db)):
+        """Shows (with seasons and episodes) or movies already in a library, for the identify form's suggestions."""
         lib = library.get(con, lib_id)
-        rows = con.execute("""SELECT f.*, lr.path AS root FROM files f JOIN library_roots lr ON lr.id=f.root_id
-                              WHERE f.library_id=? AND f.id NOT IN (SELECT file_id FROM file_items)
-                              ORDER BY f.rel_path""", (lib_id,))
-        return [{**file_info(r), "hint": unrecognized_hint(r["rel_path"], lib["type"])} for r in rows]
+        return identify.names(con, lib_id, lib["type"])
+
+    @app.post("/api/identify/lookup", dependencies=ADMIN)
+    def identify_lookup(body: LinkIn, con=Depends(db)):
+        """A pasted TMDB / IMDb link -> the identify form's fields."""
+        lib = library.get(con, body.library_id)
+        t = tmdb_client(con)
+        if not t:
+            raise HTTPException(409, "Links need a TMDB key (Settings → Metadata). You can still fill the fields in by hand.")
+        try:
+            return identify.lookup(t, body.link, lib["type"])
+        except identify.LinkError as e:
+            raise HTTPException(400, str(e)) from None
+        except TmdbError as e:
+            raise HTTPException(502, f"TMDB: {e}") from None
+        finally:
+            t.close()
+
+    @app.put("/api/files/{file_id}/identify", dependencies=ADMIN)
+    def identify_file(file_id: int, body: IdentifyIn, con=Depends(db)):
+        """Say what a file is. Kept across rescans. With a TMDB id the title is matched to it right away."""
+        f = con.execute("SELECT f.id, l.type FROM files f JOIN libraries l ON l.id=f.library_id WHERE f.id=?",
+                        (file_id,)).fetchone()
+        if not f:
+            raise HTTPException(404, "no such file")
+        if f["type"] == "music":
+            raise HTTPException(400, "Music is identified from its tags.")
+        if f["type"] == "show" and body.season is None:
+            raise HTTPException(422, "Which season? (0 = Specials)")
+        manual = body.model_dump(exclude_none=True)
+        manual["title"] = manual["title"].strip()
+        for k in (("season", "episodes", "episode_title") if f["type"] == "movie" else ("edition",)):
+            manual.pop(k, None)
+        with Tx(con):
+            [target, *_] = identify.store(con, file_id, manual)
+        title_id = identify.title_of(con, target)
+        note = None
+        it = con.execute("SELECT match_status FROM items WHERE id=?", (title_id,)).fetchone()
+        t = tmdb_client(con)
+        if t and (body.tmdb_id or it["match_status"] == "pending"):
+            try:
+                matcher.match_title(con, t, paths.images, title_id, tmdb_id=body.tmdb_id, manual=bool(body.tmdb_id))
+            except TmdbError as e:
+                note = f"Saved, but TMDB couldn't be reached ({e}). The next scan will try again."
+            finally:
+                t.close()
+        elif t:
+            t.close()
+        # a merge on matching may have folded the title into another one
+        target = con.execute("SELECT item_id FROM file_items WHERE file_id=? ORDER BY item_id LIMIT 1",
+                             (file_id,)).fetchone()["item_id"]
+        return {"item_id": target, "title_id": identify.title_of(con, target), "note": note}
+
+    @app.delete("/api/files/{file_id}/identify", dependencies=ADMIN)
+    def unidentify_file(file_id: int, con=Depends(db)):
+        """Forget a hand identification: the file is placed by its name again (maybe unrecognised)."""
+        if not con.execute("SELECT 1 FROM files WHERE id=?", (file_id,)).fetchone():
+            raise HTTPException(404, "no such file")
+        with Tx(con):
+            targets = identify.store(con, file_id, None)
+        return {"recognized": bool(targets)}
 
     @app.get("/api/tmdb/search", dependencies=ADMIN)
     def tmdb_search(q: str, kind: str = Query(pattern="^(show|movie)$"), year: int | None = None, con=Depends(db)):

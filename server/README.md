@@ -68,6 +68,8 @@ settings or accounts (and Fix match, folder browsing) are for admins.
 | `GET /api/auth/state` · `POST /api/auth/login {name, password}` · `POST /api/auth/logout` · `POST /api/auth/setup` (first admin, from the server itself) · `PUT /api/auth/password {current, new}` | signing in |
 | `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` | accounts (admins) |
 | `PUT /api/items/{id}/progress {position, duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` | watch state of the signed-in user |
+| `PUT /api/me/prefs {home_hero}` | your own display preferences (also in `GET /api/auth/state` → `user.prefs`) |
+| `PUT /api/settings/watch {watched_percent, resume_after}` | when a title counts as watched / started, for everyone (admins; in `GET /api/settings` → `watch`) |
 | `GET /api/status` | version, ffprobe, TMDB configured, guard, running/queued scans |
 | `GET /api/settings` · `PUT/DELETE /api/settings/tmdb-key` | the key is verified before saving and never returned (last 4 only) |
 | `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | |
@@ -77,7 +79,9 @@ settings or accounts (and Fix match, folder browsing) are for admins.
 | `GET /api/items/{id}/tracks` | play queue of an artist, album or track |
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music fix match |
 | `PUT /api/settings/music-lookup {enabled}` | music identification on/off |
-| `GET /api/libraries/{id}/unrecognized` | files the parser couldn't place |
+| `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` | files the parser couldn't place (with a hint) and files identified by hand |
+| `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` | say what a file is (kept across rescans) / forget it |
+| `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` | a TMDB/IMDb link → those fields; names already in a library (suggestions) |
 | `GET /api/tmdb/search?kind=show\|movie&q=` · `POST /api/items/{id}/match {tmdb_id}` | fix match |
 | `GET /api/files/{id}/stream` · `/download` | original file, Range-capable |
 | `GET /api/files/{id}/remux?t=&audio=&ch=` · `/seek?t=` | video copied + audio converted to AAC (fragmented MP4) for browsers; `/seek` says where a stream started at `t` really begins |

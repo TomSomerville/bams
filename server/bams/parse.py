@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from guessit import guessit
 
 # Bump when parsing rules change: the next scan re-parses files parsed by an older version.
-PARSER_VERSION = 3
+PARSER_VERSION = 5
 
 # {tmdb-603} [tmdbid=603] {imdb-tt0133093} [imdbid-tt0133093] {tvdb-81189}
 _ID_RE = re.compile(r"[\[{](tmdb|imdb|tvdb)(?:id)?[-=]((?:tt)?\d+)[\]}]", re.I)
@@ -42,6 +42,7 @@ class Parsed:
     season: int | None = None
     episodes: list[int] = field(default_factory=list)
     episode_title: str | None = None
+    unnumbered: bool = False           # in a season folder but no episode number ("Season 00/Making Of.mkv")
     part: int | None = None            # multi-part movies (cd1 / part2)
     edition: str | None = None
     ids: dict[str, str] = field(default_factory=dict)   # tmdb / imdb / tvdb hints from the path
@@ -51,7 +52,7 @@ class Parsed:
     def recognized(self) -> bool:
         if not self.title:
             return False
-        return self.kind == "movie" or (self.season is not None and bool(self.episodes))
+        return self.kind == "movie" or (self.season is not None and (bool(self.episodes) or self.unnumbered))
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -79,6 +80,15 @@ def _str(v) -> str | None:
     if isinstance(v, list):
         return ", ".join(str(x) for x in v)
     return str(v)
+
+
+def _title(g: dict) -> str | None:
+    """guessit splits "Star Trek - Lower Decks" into title "Star Trek" + alternative_title "Lower Decks":
+    for us the part after the dash is part of the name (two shows, not one)."""
+    title = _str(g.get("title"))
+    alt = g.get("alternative_title")
+    alts = [str(a) for a in (alt if isinstance(alt, list) else [alt]) if a]
+    return " - ".join([title, *alts]) if title and alts else title
 
 
 def _int(v) -> int | None:
@@ -157,13 +167,14 @@ def parse_episode(rel: str) -> Parsed:
         ep = g.get("episode")
         p.episodes = sorted(set(ep)) if isinstance(ep, list) else ([ep] if isinstance(ep, int) else [])
 
+    season_dir = False
     if p.season is None:  # "Show/Season 2/Show - 05.mkv": season from the folders, deepest first
         for d in reversed(dirs):
             s = _season_from_dir(d)
             if s is None:
                 s = _int(guessit(_unquote(d), {"type": "episode"}).get("season"))
             if s is not None:
-                p.season = s
+                p.season, season_dir = s, True
                 break
     if p.season is None and p.episodes:
         p.season = 1  # "Show/Show - 05.mkv": Plex treats a bare episode number as season 1
@@ -173,10 +184,10 @@ def parse_episode(rel: str) -> Parsed:
     show_dir = next((d for d in dirs if _season_from_dir(d) is None), None)
     if show_dir:
         gd = guessit(_clean_dir(show_dir), {"type": "episode"})
-        p.title = _str(gd.get("title"))
+        p.title = _title(gd)
         p.year = _int(gd.get("year"))
     if not p.title:
-        p.title = _str(g.get("title"))
+        p.title = _title(g)
     if p.year is None:
         p.year = _int(g.get("year"))
 
@@ -189,7 +200,22 @@ def parse_episode(rel: str) -> Parsed:
                                                       p.release.get("group"), p.release.get("service"))}
         et = cand if cand and cand.casefold() not in junk else None
     p.episode_title = et
+    if not p.episodes and season_dir and show_dir and p.title:
+        # "Show/Season 00/Behind the Scenes.mkv": no episode number, but the folders say whose and which season
+        # it is. Shown under that season (sorted after the numbered episodes), named after the file.
+        p.unnumbered = True
+        p.episode_title = _loose_title(stem, p.title)
     return p
+
+
+def _loose_title(stem: str, show: str) -> str:
+    """A name for an unnumbered episode: the file name without the show's name and release tags."""
+    g = guessit(stem, {"type": "movie"})
+    t = _title(g) or stem
+    words, show_words = re.split(r"[\s._]+", t.strip()), re.split(r"[\s._]+", show.strip())
+    if len(words) > len(show_words) and title_key(" ".join(words[:len(show_words)])) == title_key(show):
+        t = " ".join(words[len(show_words):])
+    return t.strip(" -–:._") or stem
 
 
 def parse_movie(rel: str) -> Parsed:
@@ -198,14 +224,14 @@ def parse_movie(rel: str) -> Parsed:
     stem = _clean_stem(name)
     g = guessit(stem, {"type": "movie"})
     p = Parsed(kind="movie", ids=_ids(rel), release=_release(g))
-    p.title = _str(g.get("title"))
+    p.title = _title(g)
     p.year = _int(g.get("year"))
     p.part = _int(g.get("part")) or _int(g.get("cd"))
     p.edition = _str(g.get("edition"))
 
     if dirs:  # "Movie (Year)/whatever.mkv": the folder is often the better name
         gd = guessit(_clean_dir(dirs[-1]), {"type": "movie"})
-        ft, fy = _str(gd.get("title")), _int(gd.get("year"))
+        ft, fy = _title(gd), _int(gd.get("year"))
         generic = not p.title or p.title.casefold() in _GENERIC_STEMS
         if ft and (generic or (p.year is None and fy is not None)):
             p.title, p.year = ft, fy
