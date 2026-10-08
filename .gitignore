@@ -1,0 +1,29 @@
+# deps / builds
+node_modules/
+dist/
+.vite/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# local config, secrets, runtime data
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+/data/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# large generated art kept locally only (the contact sheet is committed)
+branding/archive/**/concepts/
+
+# Claude Code local settings
+.claude/settings.local.json
