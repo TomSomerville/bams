@@ -173,4 +173,10 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **All-GPU paths other than NVIDIA are untested on hardware** (QSV, VAAPI, AMF: the owner's PC has only NVIDIA;
   `scale_d3d11` can't create textures on the NVIDIA driver, VAAPI didn't work through WSL/Docker). Keep the hybrid
   fallback and `stream.gpu_failed` memory; tests that touch `gpu_filters` reset `stream._gpu_broken`.
+- **The show is named by the folder above the season folder**, not the top folder (`parse._show_dir`): packs hold
+  several shows ("Megapack/Star.Trek.DS9/S03/…"). A file with a season in its name but no episode, under a season
+  folder, is an unnumbered extra. Years that follow "Series N" in a folder are the season's. New layout? Add the real
+  path to `test_parse.py` and dry-run the parser over a DB **copy** of the owner's library before shipping.
+- **Two `test_stream.py` encoder tests fail on a machine with NVENC** (`test_encoder_choice_api`,
+  `test_remux_over_hls_lines_up_across_runs`); they expect a CPU-only box. Not a regression.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

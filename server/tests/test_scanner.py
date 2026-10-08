@@ -163,6 +163,35 @@ def test_unnumbered_extras_in_season_folders_are_shown(env):
     assert con.execute("SELECT COUNT(*) FROM items").fetchone()[0] == n
 
 
+def test_nested_pack_splits_into_its_shows_on_reparse(env):
+    """Tester's library: a "megapack" folder holding several series, each with S01-style season folders and
+    DVD extras below them. Parser v5 made one fake show out of the pack; v6 splits it and keeps the extras."""
+    paths, media, con, lib_id = setup(env, [
+        "Star.Trek.Megapack.TheZerg/Star.Trek.DS9/S03/Star.Trek.DS9.S03E14.Heart.Of.Stone.DVDRip.XviD-VF/Star.Trek.DS9.S03E14.DVDRip.XviD-VF.avi",
+        "Star.Trek.Megapack.TheZerg/Star.Trek.DS9/S03/Star.Trek.DS9.S03.Extras.DVDRip.XviD-VF/Star.Trek.DS9.S03.Extra10.DVDRip.XviD-Vf.avi",
+        "Star.Trek.Megapack.TheZerg/Star.Trek.TNG/S03/Star.Trek-TNG.S03E14.iNTERNAL.DVDRip.XviD-DVDiSO/st-tng.s03e14.dvdrip.xvid-dvdiso.avi",
+        "Star.Trek.Megapack.TheZerg/Star.Trek.Voyager/S01/Star.Trek.Voyager.S01E01.DVDRip.XviD-VF/star.trek.voyager.s01e01.avi",
+    ])
+    st = scan_library(con, lib_id, do_probe=False)
+    assert st.unrecognized == 0
+    shows = sorted(r["title"] for r in con.execute("SELECT title FROM items WHERE kind='show'"))
+    assert shows == ["Star Trek Deep Space Nine", "Star Trek The Next Generation", "Star Trek Voyager"]
+    eps = [(e["title"], e["season_number"], e["episode_number"]) for e in con.execute(
+        "SELECT s.title, e.season_number, e.episode_number FROM items e JOIN items se ON se.id=e.parent_id "
+        "JOIN items s ON s.id=se.parent_id WHERE e.kind='episode'")]
+    assert ("Star Trek Deep Space Nine", 3, None) in eps  # the extra, under DS9 season 3
+    assert ("Star Trek Deep Space Nine", 3, 14) in eps and ("Star Trek The Next Generation", 3, 14) in eps
+    # a library indexed by the old parser: everything re-parses, the pack show goes away, nothing is left behind
+    con.execute("UPDATE files SET parse=json_set(parse, '$.v', 5)")
+    con.execute("UPDATE items SET title='Star Trek Megapack TheZerg', parsed_title=title, title_key='startrekmegapackthezerg' "
+                "WHERE kind='show' AND title='Star Trek Voyager'")
+    con.execute("UPDATE item_keys SET title_key='startrekmegapackthezerg' WHERE title_key='startrekvoyager'")
+    st = scan_library(con, lib_id, do_probe=False)
+    assert st.reparsed == 4
+    assert sorted(r["title"] for r in con.execute("SELECT title FROM items WHERE kind='show'")) == shows
+    assert con.execute("SELECT COUNT(*) FROM files f LEFT JOIN file_items fi ON fi.file_id=f.id WHERE fi.file_id IS NULL").fetchone()[0] == 0
+
+
 def test_merging_shows_joins_their_unnumbered_extras(env):
     from bams import items
     paths, media, con, lib_id = setup(env, [

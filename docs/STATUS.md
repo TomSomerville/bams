@@ -130,6 +130,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | The "netflow" log is **every HTTP request BAMS receives** (JSON lines), not packet-level NetFlow | BAMS can only see what reaches it; port scans etc. need router/OS flow logging |
 | 10-08 | Traffic log written by a background thread in files of a tenth of the cap, oldest deleted to stay under the cap; moving the folder leaves old files where they were | Requests never wait on the disk; trimming whole files is cheap; moving up to 10 GB inside a request isn't |
 | 10-08 | Logo tagline changed from "Your Personal Media Stream" to "Bad Ass Media Server"; logo set redrawn at higher res (`tools/brand_art/rework.py`) | Owner request |
+| 10-08 | **Show folder = the folder right above the season folder** (not the top folder under the root); without a season folder, the deepest folder that reads as a season pack | Tester's "Star.Trek.Megapack/Star.Trek.DS9/S03/…" put five series into one fake show; "Pack/The Simpsons S28/…" was named after the pack |
+| 10-08 | **Star Trek short forms** (DS9, TNG, TOS, VOY, ENT) are spelled out in the parser | The one franchise where scene packs routinely abbreviate; TMDB only knows the full names (TOS is just "Star Trek") |
+| 10-08 | TMDB: a **near-exact title (≥ 0.95) is accepted even with a wrong year**; TMDB's first result is accepted when its name is the tail of ours ("Star Wars Andor" → "Andor") | Years in scene names are often an episode's air year or a season's; South Park and Parks and Recreation sat at 0.75 for that. Only rank 0 gets the tail rule |
 
 ## 4. Built so far
 
@@ -144,8 +147,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   Parser upgrades trigger re-parse (`PARSER_VERSION`).
 - **Parser:** guessit plus our own rules: show folder vs season folder, SxxEyy/NxNN/ranges/multi-episode,
   quoted names, release-tag stripping (`(1080p … English - HONE)`), id tags `{tmdb-}` `{imdb-}` `{tvdb-}`,
-  Specials = Season 0, " - " kept inside titles, unnumbered files in season folders = extras of that season.
-  ~35 real-world cases in `tests/test_parse.py`.
+  Specials = Season 0, " - " kept inside titles, unnumbered files in season folders = extras of that season
+  (also when the file name carries the season), the show = the folder right above the season folder (nested packs),
+  else the deepest season-pack folder; Star Trek short forms (DS9/TNG/TOS/VOY/ENT) spelled out; a year after a
+  "Series N" marker is the season's, not the show's. ~50 real-world cases in `tests/test_parse.py`.
 - **Identify by hand** (`identify.py`): unrecognised files listed with hints; an admin pastes a TMDB/IMDb link or
   enters title/year/season/episodes; kept in `files.manual` across rescans; undo.
 - **Grouping:** `item_keys` aliases so differently-named folders of one show (e.g. "Bobs Burgers S01-S08…" and
@@ -277,6 +282,32 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Nested packs, extras with a season in their name, exact titles vs wrong years (parser v6)
+- **What / why:** owner: 195 files in the TV library were "unrecognized" though "they use default naming". 139 were
+  DVD extras in a nested Star Trek pack (`Star.Trek.Megapack.TheZerg/Star.Trek.DS9/S03/…Extras…/…S03.Extra10.avi`):
+  the season in the file name stopped the "unnumbered extra" rule, and worse, the pack folder was taken as the show,
+  so 688 episodes of five series sat in one unmatched "Star Trek Megapack TheZerg". `parse._show_dir`: the show is the
+  folder right above the (deepest) season folder, else the deepest season-pack folder (a one-word inner name like
+  "Parks S07" is expanded by the enclosing pack); extras under a season folder are unnumbered episodes of that season
+  whatever the file name says; `_title` drops a "Series N" alternative title and spells out DS9/TNG/TOS/VOY/ENT;
+  `_folder_year` ignores a year that follows a season marker ("Series 5 (2019)"); `_loose_title` prefers guessit's
+  alternative title ("Extra10"). Matcher: `choose()` accepts a near-exact title (`EXACT` 0.95) when the year is
+  wrong (South Park, Parks and Recreation were at 0.75), and `score()` accepts TMDB's first result when its name is
+  the tail of ours ("Star Wars Andor"). The other 54 were Korean lesson videos with no numbering (expected), one
+  Simpsons file named after its pack (hand-identify as E01) and a TV movie in the show folder (by design).
+- **Files:** `server/bams/parse.py` (v6: `_show_dir`, `_folder_year`, `_STAR_TREK*`, `_title`, `_loose_title`),
+  `server/bams/matcher.py` (`EXACT`, `choose`, `score`), `tests/test_parse.py` (+14 cases from the owner's paths),
+  `tests/test_matcher.py` (+2), `tests/test_scanner.py` (nested pack scan + v5→v6 re-parse leaves nothing behind),
+  `CHANGELOG.md` 0.5.0, `config.VERSION` 0.5.0.
+- **Verified:** 240 tests pass on Linux (Python 3.13; the two `test_stream` encoder tests fail on this machine because
+  it has NVENC, unrelated). Dry run of the new parser over all 4,370 files of the owner's TV library from a DB
+  **copy**: unrecognized 195 → 56 (54 Korean + the two above), the fake pack show gone, DS9/TNG/TOS/Voyager/Enterprise
+  separate, Sewing Bee one show, no new oddities. Not yet run against the owner's live server (needs the release).
+- **Left open:** "Star Trel Emterprise" is a typo in the owner's folder name (rename or hand-identify). Files with a
+  year in the name still create a second "(year)" title until TMDB matching merges them (pre-existing). The Windows
+  installer for 0.5.0 must be built on the Windows desktop (Inno Setup); this release was cut from Linux with the
+  `.deb` only.
 
 ### 2026-10-08: Playback leftovers (DV profile 5, all-GPU on QSV/AMF/VAAPI, VobSub sidecars, Dolby pass-through)
 - **What / why:** the four "Playback leftovers" in §5, owner asked for all of them, with a free, licence-checked test

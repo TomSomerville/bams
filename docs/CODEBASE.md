@@ -43,7 +43,7 @@ bams/
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
-│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions
+│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; `_show_dir` picks the folder that names the show
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
 │   │   ├── identify.py        Files identified by hand (files.manual): parsed_for() (scanner), store(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
@@ -502,9 +502,9 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
 | `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |
 | `test_readonly.py` | 15 write attempts must all raise and leave the tree byte-identical; reads allowed; full scan leaves media untouched; root validation |
-| `test_parse.py` | real-world names: scene packs, Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, movies |
+| `test_parse.py` | real-world names: scene packs, nested packs (megapack/show/S03/release/…), Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, extras with the season in their name, Series-N folders, movies |
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
-| `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN |
+| `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration |
 | `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
@@ -518,7 +518,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
 | Change how files group into shows | `items.get_or_create_title`, `parse.title_key` |
-| Tune TMDB matching | `matcher.score`, `matcher.best_match`, `ACCEPT` |
+| Tune TMDB matching | `matcher.score` (tail-of-ours rule), `matcher.best_match`, `matcher.choose` (exact title vs wrong year), `ACCEPT`, `EXACT` |
+| Change which folder names the show | `parse._show_dir` (season folder → the folder above; else deepest season-pack folder), `parse._folder_year` |
 | Add an API field the UI needs | serialiser in `app.py` (`item_summary`/`item_detail`/`file_info`) + type in `web/src/api.ts` |
 | Add a page | `web/src/pages/*.tsx` + route in `App.tsx` (+ Sidebar link) |
 | Change playback rules or codecs | `stream.plan` / `stream.video_copyable` (+ `test_stream.py`, FORMATS.md) |

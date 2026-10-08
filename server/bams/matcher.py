@@ -22,6 +22,7 @@ from .tmdb import InvalidKey, Tmdb, TmdbError
 log = logging.getLogger(__name__)
 
 ACCEPT = 0.80
+EXACT = 0.95   # a near-exact title is accepted even when the year from the file name is wrong
 REFRESH_AFTER = 150 * 86400  # TMDB terms: cached data no older than 6 months; refresh at ~5
 POSTER, BACKDROP, STILL, SEASON_POSTER = "w500", "w1280", "w300", "w342"
 
@@ -44,7 +45,11 @@ def _year(date: str | None) -> int | None:
 
 def score(query: str, year: int | None, names: list[str], result_year: int | None, rank: int) -> float:
     q = title_key(query)
-    sim = max((SequenceMatcher(None, q, title_key(n)).ratio() for n in names if n), default=0.0)
+    keys = [title_key(n) for n in names if n]
+    sim = max((SequenceMatcher(None, q, k).ratio() for k in keys), default=0.0)
+    if rank == 0 and any(len(k) >= 4 and q.endswith(k) and q != k for k in keys):
+        # "Star Wars Andor" → TMDB's top hit "Andor": the name is the tail of ours, the rest is the franchise
+        sim = max(sim, ACCEPT + 0.05)
     s = sim
     if year and result_year:
         if year == result_year:
@@ -65,6 +70,17 @@ def best_match(results: list[dict], query: str, year: int | None, kind: str) -> 
         if s > best_s:
             best, best_s = r, s
     return best, best_s
+
+
+def choose(results: list[dict], query: str, year: int | None, kind: str) -> tuple[dict | None, float]:
+    """The result to accept, or (best, score) below ACCEPT if none. A wrong year costs 0.25; but the year in a
+    scene name is often an episode's air year ("S07E01.2017") or a season's, so a near-exact title still wins."""
+    best, s = best_match(results, query, year, kind)
+    if year and (not best or s < ACCEPT):
+        alt, s2 = best_match(results, query, None, kind)
+        if alt and s2 >= EXACT:
+            return alt, s2
+    return best, s
 
 
 def _path_ids(con: sqlite3.Connection, item_id: int, kind: str) -> dict[str, str]:
@@ -179,7 +195,7 @@ def match_title(con: sqlite3.Connection, tmdb: Tmdb, images: Path, item_id: int,
     if tmdb_id is None:
         search = tmdb.search_tv if kind == "show" else tmdb.search_movie
         results = search(query, year) or (search(query) if year else [])
-        best, s = best_match(results, query, year, kind)
+        best, s = choose(results, query, year, kind)
         if not best or s < ACCEPT:
             with Tx(con):
                 con.execute("UPDATE items SET match_status='unmatched', match_score=?, updated_at=? WHERE id=?",
