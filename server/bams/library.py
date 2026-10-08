@@ -64,6 +64,22 @@ def roots(con: sqlite3.Connection, lib_id: int) -> list[sqlite3.Row]:
     return con.execute("SELECT id, path FROM library_roots WHERE library_id=? ORDER BY id", (lib_id,)).fetchall()
 
 
+# How libraries are listed everywhere (sidebar, Home, Settings, CLI): the admin's order, new ones last.
+ORDER = "sort_order IS NULL, sort_order, name COLLATE NOCASE"
+
+
+def listed(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    return con.execute(f"SELECT * FROM libraries ORDER BY {ORDER}").fetchall()
+
+
+def reorder(con: sqlite3.Connection, ids: list[int]) -> None:
+    """Put libraries in this order. Ids left out keep their order after the ones given; unknown ids are ignored."""
+    current = [r["id"] for r in listed(con)]
+    order = [i for i in dict.fromkeys(ids) if i in current] + [i for i in current if i not in ids]
+    with Tx(con):
+        con.executemany("UPDATE libraries SET sort_order=? WHERE id=?", list(enumerate(order)))
+
+
 def create(con: sqlite3.Connection, data_dir: Path, name: str, type_: str, paths: list[str],
            scan_interval_hours: float = 6) -> int:
     name = name.strip()
@@ -82,8 +98,9 @@ def create(con: sqlite3.Connection, data_dir: Path, name: str, type_: str, paths
     for p in paths:
         clean.append(validate_root(p, data_dir, existing + clean))
     with Tx(con):
-        lib_id = con.execute("INSERT INTO libraries (name, type, scan_interval_hours, created_at) VALUES (?,?,?,?)",
-                             (name, type_, scan_interval_hours, now())).lastrowid
+        last = con.execute("SELECT COALESCE(MAX(sort_order), -1) FROM libraries").fetchone()[0]
+        lib_id = con.execute("""INSERT INTO libraries (name, type, scan_interval_hours, created_at, sort_order)
+                                VALUES (?,?,?,?,?)""", (name, type_, scan_interval_hours, now(), last + 1)).lastrowid
         con.executemany("INSERT INTO library_roots (library_id, path) VALUES (?, ?)", [(lib_id, p) for p in clean])
     refresh_guard(con)
     return lib_id

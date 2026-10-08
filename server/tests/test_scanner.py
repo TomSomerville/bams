@@ -175,3 +175,23 @@ def test_merging_shows_joins_their_unnumbered_extras(env):
     titles = sorted(r["title"] for r in con.execute("SELECT title FROM items WHERE kind='episode'"))
     assert titles == ["Bloopers", "Interview", "Making Of"]  # the two "Making Of" files are one item
     assert con.execute("SELECT COUNT(*) FROM file_items").fetchone()[0] == 4
+
+
+def test_scan_reports_progress_with_totals(env):
+    """Settings shows "N of M files, X of Y GB, time left": each step reports done/total (and bytes where known)."""
+    from bams.jobs import Scheduler
+
+    paths, media, con, lib_id = setup(env)
+    calls = []
+    scan_library(con, lib_id, do_probe=False, progress=lambda *a, **k: calls.append(a))
+    adding = [c for c in calls if c[0] == "Adding new files"]
+    assert adding[0][1:3] == (0, 7) and adding[-1][1:3] == (6, 7)   # 7 new files (Sample skipped)
+    assert adding[-1][4] == sum(f.stat().st_size for f in media.rglob("*.mkv") if "Sample" not in f.parts)
+    assert calls[0][0] == "Looking for files"
+
+    s = Scheduler(paths)
+    s._running = {"library_id": lib_id, "step": "Starting", "step_started_at": 0}
+    s._progress("Reading file details", 3, 10, 300, 1000)
+    r = s.status()["running"]
+    assert (r["step"], r["done"], r["total"], r["bytes_done"], r["bytes_total"]) == ("Reading file details", 3, 10, 300, 1000)
+    assert r["step_started_at"] > 0  # a new step restarts the clock for "time left"

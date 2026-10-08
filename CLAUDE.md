@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 190 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 195 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -142,6 +142,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Never hold a write transaction while touching the disk** (walking, hashing, probing, network). A first scan
   that walked inside `BEGIN IMMEDIATE` locked every other writer out for minutes: logins 500'd with "database is
   locked". Read first, then write in short batches (`scanner.py`; `test_scan_does_not_hold_the_write_lock…`).
+- **Encoder tests must reset the caches:** `stream.video_encoder()` honours the admin's choice (`_preferred`) and a
+  per-encoder test cache (`_works`) besides `_detected`; the `fake_ffmpeg` fixture resets all three. A test that sets a
+  choice and leaks it changes every later conversion test.
 - **Hand identifications win over file names:** the scanner goes through `identify.parsed_for`, never `parse.parse`
   directly, or a rescan would undo what an admin entered (`files.manual`).
 - **The owner's :8484 is the installed Windows service** (`C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`), not

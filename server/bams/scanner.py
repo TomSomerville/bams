@@ -23,6 +23,9 @@ from .parse import PARSER_VERSION
 
 log = logging.getLogger(__name__)
 BATCH = 200  # commit every N files so a long scan never holds the write lock for long
+# progress(step, done=None, total=None, bytes_done=None, bytes_total=None): what the scan is doing and how far it
+# is, for Settings ("Reading file details: 120 of 505 files, 12 of 48 GB"). Plain progress("text") works too.
+Progress = Callable[..., None]
 
 
 @dataclass
@@ -58,8 +61,10 @@ def _store_parse(con: sqlite3.Connection, lib_id: int, lib_type: str, file_id: i
 
 
 def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
-                 progress: Callable[[str], None] | None = None) -> ScanStats:
+                 progress: Progress | None = None) -> ScanStats:
     lib = library.get(con, lib_id)
+    report: Progress = progress or (lambda *a, **k: None)
+    seen_bytes = 0
     lib_type = lib["type"]
     is_music = lib_type == "music"
     exts, nested_skip = (AUDIO_EXTS, frozenset()) if is_music else (VIDEO_EXTS, EXTRAS_DIRS)
@@ -83,13 +88,15 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
         known = {r["rel_path"]: r for r in con.execute(
             "SELECT id, rel_path, size, mtime_ns, json_extract(parse, '$.v') AS pv, "
             f"{'probe' if is_music else 'NULL AS probe'} FROM files WHERE root_id=?", (root["id"],))}
-        if progress:
-            progress(f"walking {root_path}")
+        report("Looking for files", stats.files_seen, None, seen_bytes)
         # Walk first, with no transaction open: listing a big (network) tree can take minutes, and holding the
         # write lock meanwhile made every other write (logins, adding a library) fail with "database is locked".
         known_entries: list[tuple[sqlite3.Row, readonly.FileEntry]] = []
         for entry in readonly.walk(root_path, exts, SKIP_DIRS, nested_skip):
             stats.files_seen += 1
+            seen_bytes += entry.size
+            if stats.files_seen % 50 == 0:
+                report("Looking for files", stats.files_seen, None, seen_bytes)
             row = known.get(entry.rel)
             if row is None:
                 new_files.append((root["id"], entry))
@@ -125,12 +132,13 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
         gone_by_size.setdefault(r["size"], []).append(r)
     moved_ids: set[int] = set()
 
-    if progress and new_files:
-        progress(f"adding {len(new_files)} new files")
+    new_bytes, hashed_n, hashed_bytes = sum(e.size for _, e in new_files), 0, 0
     for i in range(0, len(new_files), BATCH):
         # Read the files' fingerprints before taking the write lock (slow on a network share).
         hashed: list[tuple[int, readonly.FileEntry, str]] = []
         for root_id, entry in new_files[i:i + BATCH]:
+            report("Adding new files", hashed_n, len(new_files), hashed_bytes, new_bytes)
+            hashed_n, hashed_bytes = hashed_n + 1, hashed_bytes + entry.size
             try:
                 hashed.append((root_id, entry, readonly.quick_hash(entry.path, entry.size)))
             except OSError as e:
@@ -174,26 +182,37 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
 
     # Files never probed (new, changed, or ffprobe was missing on an earlier scan).
     if do_probe and probe.ffprobe_path():
-        unprobed = con.execute("""SELECT f.id, r.path root, f.rel_path FROM files f JOIN library_roots r ON r.id=f.root_id
+        unprobed = con.execute("""SELECT f.id, r.path root, f.rel_path, f.size FROM files f
+                                  JOIN library_roots r ON r.id=f.root_id
                                   WHERE f.library_id=? AND f.available=1 AND f.probed_at IS NULL""", (lib_id,)).fetchall()
-        to_probe = [(r["id"], Path(r["root"]) / r["rel_path"]) for r in unprobed]
-        if to_probe:
-            if progress:
-                progress(f"probing {len(to_probe)} files")
-            with ThreadPoolExecutor(max_workers=8 if is_music else 4) as pool:
-                results = list(pool.map(lambda fp: (fp[0], probe.probe(fp[1])), to_probe))
+        to_probe = [(r["id"], Path(r["root"]) / r["rel_path"], r["size"]) for r in unprobed]
+        total_bytes, done_bytes, done = sum(s for *_, s in to_probe), 0, 0
+        pending: list[tuple[int, dict]] = []
+
+        def save() -> None:  # in batches as results come in: a long probe shows (and keeps) its progress
             with Tx(con):
                 t = now()
-                for fid, info in results:
+                for fid, info in pending:
+                    stats.probed += 1
+                    con.execute("UPDATE files SET probe=?, probed_at=? WHERE id=?", (jdump(info), t, fid))
+            pending.clear()
+
+        if to_probe:
+            report("Reading file details", 0, len(to_probe), 0, total_bytes)
+            with ThreadPoolExecutor(max_workers=8 if is_music else 4) as pool:
+                for fid, info, size in pool.map(lambda fp: (fp[0], probe.probe(fp[1]), fp[2]), to_probe):
+                    done, done_bytes = done + 1, done_bytes + size
+                    report("Reading file details", done, len(to_probe), done_bytes, total_bytes)
                     if info is not None:
-                        stats.probed += 1
-                        con.execute("UPDATE files SET probe=?, probed_at=? WHERE id=?", (jdump(info), t, fid))
+                        pending.append((fid, info))
+                    if len(pending) >= BATCH:
+                        save()
+            save()
 
     if is_music:
         # Now the tags are known (or ffprobe is missing and the folder layout has to do).
-        if progress and relink:
-            progress(f"reading tags of {len(relink)} tracks")
         for i in range(0, len(relink), BATCH):
+            report("Reading tags", i, len(relink))
             with Tx(con):
                 for fid, rel in relink[i:i + BATCH]:
                     row = con.execute("SELECT probe FROM files WHERE id=?", (fid,)).fetchone()

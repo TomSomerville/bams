@@ -267,7 +267,7 @@ def match_artist(con: sqlite3.Connection, mb: MusicBrainz, images: Path, artist_
 
 def match_music_library(con: sqlite3.Connection, mb: MusicBrainz, images: Path, lib_id: int, *,
                         retry_unmatched: bool = False, lang: str = "en",
-                        progress: Callable[[str], None] | None = None) -> MusicMatchStats:
+                        progress: Callable[..., None] | None = None) -> MusicMatchStats:
     """Albums first (they also find their artists' ids), then artists. Only items not identified yet."""
     stats = MusicMatchStats()
     statuses = ("pending", "unmatched") if retry_unmatched else ("pending",)
@@ -279,7 +279,7 @@ def match_music_library(con: sqlite3.Connection, mb: MusicBrainz, images: Path, 
                 AND NOT (kind='artist' AND title IN (?, ?)) ORDER BY id""", (lib_id, kind, *statuses, *_SKIP_ARTISTS))]
         for i, item_id in enumerate(todo):
             if progress:
-                progress(f"identifying {kind}s on MusicBrainz ({i + 1}/{len(todo)})")
+                progress(f"Identifying {kind}s on MusicBrainz", i, len(todo))
             try:
                 ok = fn(con, mb, images, item_id, lang=lang, stats=stats)
                 failures = 0

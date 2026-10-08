@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type ServerLibrary, type ServerStatus } from "../api";
+import { api, LIBRARIES_CHANGED, type ServerLibrary, type ServerStatus } from "../api";
 import { useAuth } from "../auth";
 import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
@@ -10,7 +10,7 @@ import MusicSettings from "../components/MusicSettings";
 import TranscodeSettings from "../components/TranscodeSettings";
 import WatchSettings from "../components/WatchSettings";
 import TmdbSettings from "../components/TmdbSettings";
-import { LIB_TYPES, type LibType } from "../format";
+import { fmtSize, LIB_TYPES, type LibType } from "../format";
 
 const INTERVALS = [1, 2, 3, 6, 12, 24, 48, 168];
 const hours = (h: number) => (h >= 24 && h % 24 === 0 ? `${h / 24} day${h > 24 ? "s" : ""}` : `${h} hour${h === 1 ? "" : "s"}`);
@@ -39,7 +39,46 @@ function Unrecognized({ lib }: { lib: ServerLibrary }) {
   );
 }
 
-function LibraryCard({ lib, status, onChange }: { lib: ServerLibrary; status: ServerStatus | null; onChange: () => void }) {
+type Running = NonNullable<ServerStatus["scans"]["running"]>;
+
+/** What a step counts: files, except while matching titles or identifying music. */
+const unitOf = (step: string) => (/^Matching/.test(step) ? "titles" : /albums/.test(step) ? "albums"
+  : /artists/.test(step) ? "artists" : /tags/.test(step) ? "tracks" : "files");
+
+/** "about 4 min left", from this step's pace so far (only once it's had a few seconds to settle). */
+function timeLeft(r: Running): string | null {
+  const frac = r.bytes_total ? (r.bytes_done ?? 0) / r.bytes_total : r.total ? (r.done ?? 0) / r.total : null;
+  if (frac === null || frac <= 0.02 || r.step_elapsed < 5) return null;
+  const s = (r.step_elapsed / frac) * (1 - frac);
+  return s < 60 ? "less than a minute left" : s < 5400 ? `about ${Math.round(s / 60)} min left` : `about ${Math.round(s / 3600)} h left`;
+}
+
+/** "Reading file details: 120 of 505 files (385 left) · 12.3 of 48.0 GB · about 4 min left" */
+function ScanProgress({ r }: { r: Running }) {
+  const unit = unitOf(r.step);
+  const parts: string[] = [];
+  if (r.total) parts.push(`${r.done ?? 0} of ${r.total} ${unit} (${r.total - (r.done ?? 0)} left)`);
+  else if (r.done) parts.push(`${r.done} ${unit} found so far`);
+  if (r.bytes_total) parts.push(`${fmtSize(r.bytes_done ?? 0)} of ${fmtSize(r.bytes_total)}`);
+  else if (r.bytes_done) parts.push(fmtSize(r.bytes_done));
+  const left = timeLeft(r);
+  if (left) parts.push(left);
+  const pct = r.bytes_total ? (r.bytes_done ?? 0) / r.bytes_total : r.total ? (r.done ?? 0) / r.total : null;
+  return (
+    <div className="scan-progress">
+      <div className="scan-line"><strong>{r.step}</strong>{parts.length > 0 && <span className="muted">{parts.join(" · ")}</span>}</div>
+      {pct === null
+        ? <div className="progress inline indeterminate"><div /></div>
+        : <div className="progress inline"><div style={{ width: `${Math.min(100, pct * 100)}%` }} /></div>}
+    </div>
+  );
+}
+
+function LibraryCard({ lib, status, onChange, onMove }: {
+  lib: ServerLibrary; status: ServerStatus | null; onChange: () => void;
+  /** move this library up (-1) or down (+1) in the order; undefined at that end */
+  onMove: { up?: () => void; down?: () => void };
+}) {
   const [err, setErr] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -84,6 +123,12 @@ function LibraryCard({ lib, status, onChange }: { lib: ServerLibrary; status: Se
           </>
         )}
         <span className="muted lib-counts">{counts} · {gb(lib.files.bytes)}</span>
+        <span className="lib-order">
+          <button className="icon-btn subtle" disabled={!onMove.up} onClick={onMove.up} title="Move up (sidebar order)"
+            aria-label={`Move ${lib.name} up`}><Icon name="chevronUp" size={16} /></button>
+          <button className="icon-btn subtle" disabled={!onMove.down} onClick={onMove.down} title="Move down (sidebar order)"
+            aria-label={`Move ${lib.name} down`}><Icon name="chevronDown" size={16} /></button>
+        </span>
       </div>
 
       <div className="lib-paths">
@@ -114,7 +159,7 @@ function LibraryCard({ lib, status, onChange }: { lib: ServerLibrary; status: Se
           </select>
         </label>
         <span className="muted">
-          {running ? <>Scanning: {running.step}</> : queued ? "Scan queued" : <>Last scan: {ago(lib.last_scan_at)}
+          {running ? "Scanning…" : queued ? "Scan queued: waits for the scan before it" : <>Last scan: {ago(lib.last_scan_at)}
             {lib.last_scan_status && lib.last_scan_status !== "ok" && <span className="root-badge warn">{lib.last_scan_status}</span>}</>}
         </span>
         <span className="spacer" />
@@ -134,7 +179,7 @@ function LibraryCard({ lib, status, onChange }: { lib: ServerLibrary; status: Se
           </>
         )}
       </div>
-      {running && <div className="progress inline indeterminate"><div /></div>}
+      {running && <ScanProgress r={running} />}
       {!running && <Unrecognized lib={lib} />}
       {err && <p className="key-msg bad">{err}</p>}
       {picking && <FolderPicker onClose={() => setPicking(false)}
@@ -252,6 +297,11 @@ function AdminSettings() {
     }
   }, []);
 
+  useEffect(() => {  // reordered in the sidebar
+    window.addEventListener(LIBRARIES_CHANGED, load);
+    return () => window.removeEventListener(LIBRARIES_CHANGED, load);
+  }, [load]);
+
   // Poll scan status; reload library counts when a scan finishes.
   useEffect(() => {
     load();
@@ -278,6 +328,7 @@ function AdminSettings() {
   const changed = () => {
     wasBusy.current = true;
     load();
+    window.dispatchEvent(new Event(LIBRARIES_CHANGED));
     api.get<ServerStatus>("/api/status").then(setStatus).catch(() => {});
   };
 
@@ -303,7 +354,15 @@ function AdminSettings() {
       <div className="lib-list">
         {adding && <AddLibrary onCancel={() => setAdding(false)} onDone={() => { setAdding(false); changed(); }} />}
         {err && <p className="key-msg bad">{err}</p>}
-        {libs?.map((l) => <LibraryCard key={l.id} lib={l} status={status} onChange={changed} />)}
+        {libs?.map((l, i) => {
+          const move = (to: number) => () => {
+            const ids = libs.map((x) => x.id);
+            ids.splice(to, 0, ...ids.splice(i, 1));
+            api.put("/api/libraries/order", { ids }).then(changed).catch((e) => setErr(e.message));
+          };
+          return <LibraryCard key={l.id} lib={l} status={status} onChange={changed}
+            onMove={{ up: i > 0 ? move(i - 1) : undefined, down: i < libs.length - 1 ? move(i + 1) : undefined }} />;
+        })}
         {libs && !libs.length && !adding && <p className="muted">No libraries yet. Add one to start indexing.</p>}
       </div>
 
@@ -318,7 +377,7 @@ function AdminSettings() {
       <div className="lib-list"><MusicSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Playback</h2></div>
-      <div className="lib-list"><TranscodeSettings status={status} /><WatchSettings /></div>
+      <div className="lib-list"><TranscodeSettings status={status} onChange={changed} /><WatchSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Accounts</h2></div>
       <div className="lib-list"><AccountSettings /><UsersSettings /></div>

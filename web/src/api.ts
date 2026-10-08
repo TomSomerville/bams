@@ -33,6 +33,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 /** Fired on window when the server says this browser isn't signed in. */
 export const SIGNED_OUT = "bams:signed-out";
 
+/** Window event: libraries were added, renamed, removed or reordered (the sidebar reloads its list). */
+export const LIBRARIES_CHANGED = "bams:libraries";
+
 export const api = {
   get: <T>(p: string) => call<T>("GET", p),
   post: <T>(p: string, b?: unknown) => call<T>("POST", p, b ?? {}),
@@ -60,7 +63,11 @@ export type ServerLibrary = {
 };
 
 export type ScanState = {
-  running: { library_id: number; trigger: string; started_at: number; step: string } | null;
+  /** the scan being run: its step ("Reading file details"), how far (done of total, bytes) and for how long (s) */
+  running: {
+    library_id: number; trigger: string; started_at: number; step: string; step_elapsed: number;
+    done: number | null; total: number | null; bytes_done: number | null; bytes_total: number | null;
+  } | null;
   queued: { library_id: number; trigger: string }[];
 };
 

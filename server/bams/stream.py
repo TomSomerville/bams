@@ -182,6 +182,8 @@ HARDWARE = {"h264_nvenc", "h264_qsv", "h264_amf", "h264_vaapi"}
 _PLATFORM_ONLY = {"h264_vaapi": "linux", "h264_mf": "win32"}
 _detect_lock = threading.Lock()
 _detected: dict[str, str | None] = {}  # ffmpeg path -> encoder
+_works: dict[tuple[str, str], bool] = {}  # (ffmpeg path, encoder) -> test encode passed
+_preferred: str | None = None          # the admin's choice (Settings → Playback, settings.video_encoder); None = automatic
 _filters: dict[str, set[str]] = {}     # ffmpeg path -> filter names
 
 
@@ -209,12 +211,47 @@ def _encoder_works(exe: str, enc: str) -> bool:
     return r is not None and r.returncode == 0
 
 
+def _tested(exe: str, enc: str) -> bool:
+    """Whether `enc` works with this FFmpeg here (test-encoded once, then remembered). Call with _detect_lock held."""
+    if (exe, enc) not in _works:
+        _works[(exe, enc)] = _PLATFORM_ONLY.get(enc, sys.platform) == sys.platform and _encoder_works(exe, enc)
+    return _works[(exe, enc)]
+
+
+def encoder_forced() -> bool:
+    """`BAMS_VIDEO_ENCODER` names an encoder: it wins over the Settings choice."""
+    return os.environ.get("BAMS_VIDEO_ENCODER") in ENCODERS
+
+
+def set_preferred(enc: str | None) -> None:
+    """The admin's encoder choice (None = automatic). New conversions use it; running ones keep theirs."""
+    global _preferred
+    _preferred = enc if enc in ENCODERS else None
+
+
+def preferred() -> str | None:
+    return _preferred
+
+
+def available_encoders() -> list[str]:
+    """Every H.264 encoder that works on this machine, best first (each test-encoded once)."""
+    exe = ffmpeg_path()
+    if not exe:
+        return []
+    with _detect_lock:
+        return [e for e in ENCODERS if _tested(exe, e)]
+
+
 def video_encoder() -> str | None:
-    """The H.264 encoder transcodes use: detected once per FFmpeg, or forced with `BAMS_VIDEO_ENCODER`."""
+    """The H.264 encoder transcodes use: `BAMS_VIDEO_ENCODER`, else the admin's choice if it works here, else the
+    best one detected (once per FFmpeg)."""
     exe = ffmpeg_path()
     if not exe:
         return None
     with _detect_lock:
+        if _preferred and not encoder_forced():
+            if _tested(exe, _preferred):
+                return _preferred  # (one that stopped working, e.g. a removed GPU, falls through to automatic)
         if exe in _detected:
             return _detected[exe]
         forced = os.environ.get("BAMS_VIDEO_ENCODER")

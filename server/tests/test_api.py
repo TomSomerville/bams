@@ -129,3 +129,36 @@ def test_saving_tmdb_key_queues_video_libraries(tmp_path, monkeypatch):
         assert c.get("/api/scans").json()["current"]["queued"] == [{"library_id": tv_id, "trigger": "tmdb-key+rematch"}]
     finally:
         readonly.set_protected_roots([])
+
+
+def test_library_order(tmp_path):
+    """Tester request: arrange the libraries in the sidebar. New ones go last; admins only."""
+    for d in ("tv", "films", "music"):
+        (tmp_path / d).mkdir()
+    c = client(tmp_path)
+    try:
+        ids = [c.post("/api/libraries", json={"name": n, "type": t, "paths": [str(tmp_path / d)]}).json()["id"]
+               for n, t, d in (("TV", "show", "tv"), ("Movies", "movie", "films"), ("Anime", "show", "music"))]
+        names = lambda: [x["name"] for x in c.get("/api/libraries").json()]  # noqa: E731
+        assert names() == ["TV", "Movies", "Anime"]  # in the order they were added
+        assert c.put("/api/libraries/order", json={"ids": [ids[2], ids[0]]}).json() == [ids[2], ids[0], ids[1]]
+        assert names() == ["Anime", "TV", "Movies"]  # the ones left out keep their place after
+        assert c.put("/api/libraries/order", json={"ids": [999, ids[1]]}).status_code == 200  # unknown ids ignored
+        assert names()[0] == "Movies"
+        kid = signed_in(c.app, "Kid", admin=False)
+        assert kid.put("/api/libraries/order", json={"ids": ids}).status_code == 403
+    finally:
+        readonly.set_protected_roots([])
+
+
+def test_migration_orders_existing_libraries_by_name(tmp_path):
+    import sqlite3
+
+    from bams import db, library
+    con = sqlite3.connect(tmp_path / "old.db", isolation_level=None)
+    con.row_factory = sqlite3.Row
+    con.executescript("BEGIN;" + db.SCHEMA + "PRAGMA user_version = 1; COMMIT;")
+    for n in ("zebra", "Alpha", "middle"):
+        con.execute("INSERT INTO libraries (name, type, scan_interval_hours, created_at) VALUES (?, 'show', 6, 0)", (n,))
+    db.migrate(con)
+    assert [r["name"] for r in library.listed(con)] == ["Alpha", "middle", "zebra"]

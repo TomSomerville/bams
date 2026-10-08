@@ -197,13 +197,16 @@ def match_title(con: sqlite3.Connection, tmdb: Tmdb, images: Path, item_id: int,
     return True
 
 
-def match_library(con: sqlite3.Connection, tmdb: Tmdb, images: Path, lib_id: int, *, retry_unmatched: bool = False) -> MatchStats:
+def match_library(con: sqlite3.Connection, tmdb: Tmdb, images: Path, lib_id: int, *, retry_unmatched: bool = False,
+                  progress=None) -> MatchStats:
     stats = MatchStats()
     statuses = ("pending", "unmatched") if retry_unmatched else ("pending",)
     todo = con.execute(f"""SELECT id FROM items WHERE library_id=? AND kind IN ('show','movie')
                            AND match_status IN ({','.join('?' * len(statuses))}) ORDER BY id""",
                        (lib_id, *statuses)).fetchall()
-    for row in todo:
+    for i, row in enumerate(todo):
+        if progress:
+            progress("Matching on TMDB", i, len(todo))
         try:
             if match_title(con, tmdb, images, row["id"]):
                 stats.matched += 1

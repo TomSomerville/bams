@@ -69,10 +69,11 @@ settings or accounts (and Fix match, folder browsing) are for admins.
 | `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` | accounts (admins) |
 | `PUT /api/items/{id}/progress {position, duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` | watch state of the signed-in user |
 | `PUT /api/me/prefs {home_hero}` | your own display preferences (also in `GET /api/auth/state` → `user.prefs`) |
+| `GET /api/settings/encoders` · `PUT /api/settings/encoder {encoder}` | which H.264 encoders work; convert on the CPU or a GPU (null = automatic) |
 | `PUT /api/settings/watch {watched_percent, resume_after}` | when a title counts as watched / started, for everyone (admins; in `GET /api/settings` → `watch`) |
-| `GET /api/status` | version, ffprobe, TMDB configured, guard, running/queued scans |
+| `GET /api/status` | version, ffprobe, TMDB configured, guard, running/queued scans (the running one with step, done/total, bytes, `step_elapsed`) |
 | `GET /api/settings` · `PUT/DELETE /api/settings/tmdb-key` | the key is verified before saving and never returned (last 4 only) |
-| `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | |
+| `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` · `PUT /api/libraries/order {ids}` | listed in the admin's order |
 | `POST /api/libraries/{id}/scan[?rematch=true]` · `GET /api/scans` | |
 | `GET /api/libraries/{id}/items?sort=title\|year\|added\|rating\|artist&kind=&match_status=&q=` | shows, movies, or artists/albums/tracks (`kind=`) |
 | `GET /api/items/{id}` | detail + children (seasons / episodes / albums / tracks) + files (probe, playback method) |

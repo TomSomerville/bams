@@ -58,7 +58,7 @@ def run_scan(paths: Paths, lib_id: int, trigger: str = "manual", *, do_match: bo
         if lib["type"] == "music":
             # Music is identified from its own tags (TMDB has no music); covers come from the files/folders.
             if progress:
-                progress("reading album art")
+                progress("Reading album art")
             result["artwork"] = music.fill_artwork(con, paths.images, lib_id).as_dict()
             if do_match and music_lookup_enabled(con):
                 with MusicBrainz() as mb:
@@ -72,11 +72,9 @@ def run_scan(paths: Paths, lib_id: int, trigger: str = "manual", *, do_match: bo
             if tmdb is None:
                 result["match"] = "skipped: no TMDB key configured"
             else:
-                if progress:
-                    progress("matching on TMDB")
                 try:
                     result["match"] = matcher.match_library(con, tmdb, paths.images, lib_id,
-                                                            retry_unmatched=retry_unmatched).as_dict()
+                                                            retry_unmatched=retry_unmatched, progress=progress).as_dict()
                 except InvalidKey:
                     result["match"] = "skipped: TMDB rejected the configured key"
                 except TmdbError as e:
@@ -128,13 +126,21 @@ class Scheduler:
 
     def status(self) -> dict:
         with self._cv:
-            return {"running": dict(self._running) if self._running else None,
+            running = dict(self._running) if self._running else None
+            if running:  # seconds into the current step, by the server's clock (for "time left")
+                running["step_elapsed"] = now() - running["step_started_at"]
+            return {"running": running,
                     "queued": [{"library_id": i, "trigger": t} for i, t in self._q]}
 
-    def _progress(self, msg: str) -> None:
+    def _progress(self, step: str, done: int | None = None, total: int | None = None,
+                  bytes_done: int | None = None, bytes_total: int | None = None) -> None:
+        """What the running scan is doing and how far it is (Settings shows it: N of M, size, time left)."""
         with self._cv:
             if self._running:
-                self._running["step"] = msg
+                r = self._running
+                if r["step"] != step:
+                    r["step_started_at"] = now()  # time left = this step's pace so far
+                r.update(step=step, done=done, total=total, bytes_done=bytes_done, bytes_total=bytes_total)
 
     def _worker(self) -> None:
         while not self._stop.is_set():
@@ -144,7 +150,9 @@ class Scheduler:
                 if self._stop.is_set():
                     return
                 lib_id, trigger = self._q.popleft()
-                self._running = {"library_id": lib_id, "trigger": trigger, "started_at": now(), "step": "starting"}
+                self._running = {"library_id": lib_id, "trigger": trigger, "started_at": now(), "step": "Starting",
+                                 "step_started_at": now(), "done": None, "total": None, "bytes_done": None,
+                                 "bytes_total": None}
             try:
                 run_scan(self.paths, lib_id, trigger.replace("+rematch", ""),
                          retry_unmatched=trigger.endswith("+rematch"), progress=self._progress)

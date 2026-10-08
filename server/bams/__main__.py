@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 lib_id = library.create(con, paths.root, a.name, a.type, a.path, a.interval)
                 print(json.dumps(library.describe(con, library.get(con, lib_id)), indent=2))
             elif a.lcmd == "list":
-                for r in con.execute("SELECT * FROM libraries ORDER BY name"):
+                for r in library.listed(con):
                     print(json.dumps(library.describe(con, r), indent=2))
             elif a.lcmd == "remove":
                 library.delete(con, library.get(con, a.name)["id"])
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: {e}", file=sys.stderr)
                 return 2
         elif a.cmd == "status":
-            libs = [library.describe(con, r) for r in con.execute("SELECT * FROM libraries ORDER BY name")]
+            libs = [library.describe(con, r) for r in library.listed(con)]
             from . import probe, readonly
             print(json.dumps({"version": VERSION, "data_dir": str(paths.root), "ffprobe": probe.ffprobe_path(),
                               "tmdb_configured": bool(get_setting(con, "tmdb_key")),
