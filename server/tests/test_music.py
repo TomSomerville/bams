@@ -11,7 +11,7 @@ from bams.app import create_app
 from bams.config import Paths
 from bams.jobs import run_scan
 from bams.scanner import scan_library
-from conftest import make_tree
+from conftest import make_tree, signed_in
 from test_readonly import snapshot
 
 FFMPEG = stream.ffmpeg_path()
@@ -203,7 +203,7 @@ def test_real_album_tags_cover_playback_and_media_untouched(tmp_path):
     media = tmp_path / "media"
     _make_album(media)
     before = snapshot(media)
-    c = TestClient(create_app(paths, start_scheduler=False))
+    c = signed_in(create_app(paths, start_scheduler=False))
     try:
         lib = c.post("/api/libraries", json={"name": "Music", "type": "music", "paths": [str(media)]}).json()
         res = run_scan(paths, lib["id"], do_match=False)  # offline: identification has its own tests
@@ -247,7 +247,7 @@ def test_folder_cover_and_artist_image_preferred(tmp_path):
     d = _make_album(media)
     _ff("-f", "lavfi", "-i", "color=c=blue:s=32x32:d=1", "-frames:v", "1", d / "Cover.PNG")
     _ff("-f", "lavfi", "-i", "color=c=green:s=32x32:d=1", "-frames:v", "1", d.parent / "artist.jpg")
-    c = TestClient(create_app(paths, start_scheduler=False))
+    c = signed_in(create_app(paths, start_scheduler=False))
     try:
         lib = c.post("/api/libraries", json={"name": "Music", "type": "music", "paths": [str(media)]}).json()
         res = run_scan(paths, lib["id"], do_match=False)  # offline: identification has its own tests

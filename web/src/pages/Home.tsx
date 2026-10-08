@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ItemSummary, ServerLibrary } from "../api";
+import type { ContinueItem, ItemSummary, ServerLibrary } from "../api";
 import { Backdrop } from "../components/Art";
-import { AlbumCard, PosterCard } from "../components/Cards";
+import { AlbumCard, ContinueCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { fmtRuntime, seasonsLabel } from "../format";
@@ -55,6 +55,7 @@ export default function Home() {
   const { data: items } = useApi<ItemSummary[]>("/api/items?sort=added&limit=500");
   const hasMusic = !!libs?.some((l) => l.type === "music");
   const { data: albums } = useApi<ItemSummary[]>(hasMusic ? "/api/items?kind=album&sort=added&limit=300" : null);
+  const { data: resume } = useApi<ContinueItem[]>("/api/continue");
 
   const recent = items?.slice(0, 20) ?? [];
   const hero = useMemo(() => (items ?? []).filter((i) => i.backdrop || i.poster).slice(0, 6), [items]);
@@ -91,6 +92,7 @@ export default function Home() {
     <div className={`home ${hero.length ? "" : "no-hero"}`}>
       {hero.length > 0 && <Hero items={hero} />}
       <div className="rows">
+        {!!resume?.length && <Row title="Continue Watching">{resume.map((i) => <ContinueCard key={i.id} item={i} />)}</Row>}
         {recent.length > 0 && <Row title="Recently Added">{recent.map((i) => <PosterCard key={i.id} item={i} />)}</Row>}
         {libs.filter((l) => l.type === "music").map((l) => {
           const la = (albums ?? []).filter((a) => a.library_id === l.id).slice(0, 30);

@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 142 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 172 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -70,7 +70,9 @@ cd web && npm install && npx tsc -p . && npm run build
 ## Pitfalls already hit (don't repeat them)
 
 - **The user runs their own server on :8484** with the real data dir. To test changes, run a *separate* instance
-  on **:8485** with a **copy** of the DB (`sqlite3 backup`) in the scratchpad. Never mutate the user's libraries or
+  on **:8485** with a **copy** of the DB (`sqlite3 backup`) in the scratchpad (`.claude/launch.json` → `bams-test`;
+  point its `--data-dir` at your scratchpad). The copy has accounts: create your own test account (first-admin
+  setup from localhost works on a copy without users) and keep its password in the scratchpad, not in chat. Never mutate the user's libraries or
   settings without asking. Server code changes need the user to **restart** their server; UI changes need
   `npm run build` plus a browser reload.
 - **Vite on Windows missed file changes** and served stale modules. `web/vite.config.ts` uses polling; if the UI
@@ -110,4 +112,18 @@ cd web && npm install && npx tsc -p . && npm run build
 - **Git Bash heredocs** with backticks or unbalanced quotes inside (TSX template literals, prose) fail to parse,
   and so does probing with `python3 - || …` (the Windows Store alias waits on stdin). Use the Edit tool, or write the
   script to a file and run it with `server\.venv\Scripts\python`.
+- **Everything under `/api/` needs a signed-in session** (`LoginRequired`). In tests use
+  `conftest.signed_in(create_app(...))`, never a bare `TestClient` (401s). Endpoints that call `get_item()` directly
+  must pass `me`. New admin-only routes get `dependencies=ADMIN`; new public ones go in `PUBLIC_API` (think twice).
+- **Copy-HLS (remux) alignment:** FFmpeg's MKV seek lands on the index point *before* the target, so a run is
+  numbered from where a dry run of the **same** `-ss` lands (`remux_start(zero=True)`); fMP4 needs
+  `movflags=+frag_discont` or every run's decode times start at 0; the init file name must be absolute or it lands
+  in FFmpeg's working dir; serve `init.mp4` only once a segment exists (it's written gradually). ffprobe applies the
+  edit list, so compare segments by video packet pts or `tfdt`, not "first packet".
+- **Burned-in subtitles** must be read with a lead (second input, `SUB_LEAD`) or a run starting mid-line loses it.
+  Hand-made subtitle streams get their times rebased to their first packet when muxed: start test PGS with an empty
+  display set at 0 (`test_subtitles.pgs`).
+- **The web page must not be cached** (`SpaFiles` sends `no-cache` for HTML; missing `/assets/` 404): a cached page
+  from an older build points at scripts that no longer exist → blank screen. When testing a rebuilt UI in the preview
+  browser, add a query string once if it still shows an old page.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

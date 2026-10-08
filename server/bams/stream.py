@@ -92,19 +92,21 @@ def plan(probe_info: dict | None, parse_info: dict | None) -> dict:
             "audio_ok": audio_ok, "duration": duration}
 
 
-def remux_start(path: Path, t: float) -> float:
+def remux_start(path: Path, t: float, zero: bool = False) -> float:
     """Where a remux asked to start at `t` really starts.
 
     Copying video means starting on a keyframe, and FFmpeg's input seek doesn't always pick the
     nearest one (in MKV it can land a keyframe earlier). Rather than predict it, run the very same
-    seek as a dry run: keep the original timestamps, stop after one video frame, read its time."""
+    seek as a dry run: keep the original timestamps, stop after one video frame, read its time.
+    `zero`: count from the file's start, like the HLS runs (-start_at_zero)."""
     if t <= 0:
         return 0.0
     exe = ffmpeg_path()
     if not exe:
         return t
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", f"{t:.3f}", "-i", str(path),
-           "-map", "0:v:0", "-c:v", "copy", "-copyts", "-frames:v", "1", "-f", "framemd5", "pipe:1"]
+           "-map", "0:v:0", "-c:v", "copy", "-copyts", *(["-start_at_zero"] if zero else []),
+           "-frames:v", "1", "-f", "framemd5", "pipe:1"]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=20, stdin=subprocess.DEVNULL,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0)
@@ -124,7 +126,17 @@ def remux_start(path: Path, t: float) -> float:
     return t
 
 
-def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: int = 0) -> list[str]:
+def audio_channels(audio: dict | None, want: int = 2) -> int:
+    """Channels of the AAC that conversions make: 5.1 when the viewer asked for surround and the source has
+    at least six channels (7.1 is folded to 5.1), else stereo."""
+    return 6 if want >= 6 and ((audio or {}).get("channels") or 2) >= 6 else 2
+
+
+def _aac(channels: int = 2) -> list[str]:
+    return ["-c:a", "aac", "-ac", str(channels), "-b:a", "384k" if channels > 2 else "192k"]
+
+
+def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: int = 0, channels: int = 2) -> list[str]:
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -136,7 +148,7 @@ def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: in
             "-c:v", "copy"]
     if video_codec == "HEVC":
         cmd += ["-tag:v", "hvc1"]  # the tag browsers expect for HEVC in MP4
-    cmd += ["-c:a", "aac", "-ac", "2", "-b:a", "192k",
+    cmd += [*_aac(channels),
             "-sn", "-dn", "-map_metadata", "-1", "-avoid_negative_ts", "make_zero",
             "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof",
             "pipe:1"]
@@ -352,8 +364,42 @@ def transcode_filters(video: dict | None, encoder: str, tonemap: str | None, max
     return ",".join(chain)
 
 
-def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | None) -> tuple[str, list, list]:
-    """What both transcode outputs share: (ffmpeg, args before -i, video encoding args after the maps)."""
+# Codecs NVDEC decodes on any card that has NVENC (newer cards add AV1). Anything else, or an all-GPU run
+# that fails anyway (a profile the card can't decode), takes the hybrid path.
+GPU_DECODE = {"H.264", "HEVC", "VP9", "AV1", "MPEG-2", "VC-1"}
+
+
+def gpu_filters(video: dict | None, encoder: str, tonemap: str | None, burn: int | None) -> bool:
+    """Whether a transcode can stay on the GPU from decode to encode (NVIDIA: NVDEC -> bwdif_cuda/scale_cuda
+    -> NVENC; frames never come back to system memory). Not for HDR (the tone-mapping filters run on the
+    CPU or through Vulkan) or burned-in subtitles (overlay is a CPU filter). `BAMS_GPU_FILTERS=0` turns it off."""
+    if encoder != "h264_nvenc" or tonemap or burn is not None or os.environ.get("BAMS_GPU_FILTERS") == "0":
+        return False
+    if os.environ.get("BAMS_HWACCEL", "auto") not in ("auto", "cuda"):
+        return False
+    v = video or {}
+    if v.get("codec") not in GPU_DECODE or (v.get("codec") == "H.264" and (v.get("bit_depth") or 8) > 8):
+        return False
+    return has_filter("scale_cuda") and has_filter("bwdif_cuda")
+
+
+def _gpu_filter_chain(encoder: str, max_height: int | None) -> str:
+    max_w, max_h = _box(encoder, max_height)
+    k = f"min(1,min({max_w}/(iw*sar),{max_h}/ih))"
+    return ("bwdif_cuda=mode=send_frame:deint=interlaced,"
+            f"scale_cuda=w='trunc(iw*sar*{k}/2)*2':h='trunc(ih*{k}/2)*2':format=nv12,setsar=1")
+
+
+SUB_LEAD = 30.0  # seconds of subtitles read before the start of a burned-in conversion
+
+
+def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | None, burn: int | None = None,
+                     gpu: bool = True, sub_input: list[str] | None = None) -> tuple[str, list, list]:
+    """What every transcode output shares: (ffmpeg, args before -i, what follows the input: the video map +
+    filters + encoder args). `gpu=False` forces the hybrid path (after an all-GPU run failed).
+    `burn`: an image subtitle stream (the n-th subtitle) painted onto the picture. A subtitle shows from the
+    moment its event starts, so a run starting mid-line would miss the line on screen: `sub_input` (input
+    options + -i of the same file, seeked SUB_LEAD earlier) is a second input the subtitles are read from."""
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -362,30 +408,46 @@ def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | 
         raise RuntimeError("FFmpeg has no working H.264 encoder")
     tonemap = tonemap_mode(video)
     pre = ["-vaapi_device", vaapi_device()] if enc == "h264_vaapi" else []
-    pre += hwaccel_args(enc)
-    out = ["-vf", transcode_filters(video, enc, tonemap, max_height),
-           *_encoder_args(enc, quality_bitrate(video, enc, max_height))]
+    if gpu and gpu_filters(video, enc, tonemap, burn):
+        pre += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        vmap = ["-map", "0:v:0", "-vf", _gpu_filter_chain(enc, max_height)]
+    else:
+        pre += hwaccel_args(enc)
+        vf = transcode_filters(video, enc, tonemap, max_height)
+        if burn is None:
+            vmap = ["-map", "0:v:0", "-vf", vf]
+        else:
+            # subtitles go on at the source size, before scaling and tone-mapping (HDR discs' subtitles are
+            # HDR too); a subtitle stream that ends early just lets the video through
+            src = f"[1:s:{burn}]" if sub_input else f"[0:s:{burn}]"
+            vmap = [*(sub_input or []),
+                    "-filter_complex", f"[0:v:0]{src}overlay=eof_action=pass:repeatlast=0,{vf}[v]", "-map", "[v]"]
+    out = [*vmap, *_encoder_args(enc, quality_bitrate(video, enc, max_height))]
     if tonemap:
         out += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
     return exe, pre, out
 
 
-_AUDIO = ["-c:a", "aac", "-ac", "2", "-b:a", "192k", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1"]
+_NO_EXTRAS = ["-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1"]
 
 
 def transcode_cmd(path: Path, start: float, video: dict | None, audio_index: int = 0,
-                  encoder: str | None = None, max_height: int | None = None) -> list[str]:
-    """Video -> H.264, audio -> AAC stereo, as fragmented MP4 on stdout. Re-encoding makes the seek
+                  encoder: str | None = None, max_height: int | None = None, channels: int = 2,
+                  burn: int | None = None) -> list[str]:
+    """Video -> H.264, audio -> AAC, as fragmented MP4 on stdout. Re-encoding makes the seek
     frame-accurate: the stream really starts at `start` (no keyframe dance like the remux).
     The player uses HLS (`hls_cmd`) when it can; this is for browsers without it."""
-    exe, pre, out = _transcode_parts(video, encoder, max_height)
+    # without -copyts each input counts from its own seek point: the earlier subtitle input is shifted back
+    lead = min(start, SUB_LEAD)
+    sub_input = ["-ss", f"{start - lead:.3f}", "-itsoffset", f"{-lead:.3f}", "-i", str(path)] if burn is not None and lead > 0 else None
+    exe, pre, out = _transcode_parts(video, encoder, max_height, burn, sub_input=sub_input)
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin", *pre]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-i", str(path), "-map", "0:v:0", "-map", f"0:a:{audio_index}?", *out,
+    cmd += ["-i", str(path), *out, "-map", f"0:a:{audio_index}?",
             # a keyframe every 2 s: each one closes an MP4 fragment the browser can play
             "-force_key_frames", "expr:gte(t,n_forced*2)",
-            *_AUDIO, "-avoid_negative_ts", "make_zero", "-max_muxing_queue_size", "1024",
+            *_aac(channels), *_NO_EXTRAS, "-avoid_negative_ts", "make_zero", "-max_muxing_queue_size", "1024",
             "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof",
             "pipe:1"]
     return cmd
@@ -395,7 +457,8 @@ SEGMENT = 4.0  # HLS segment length, seconds
 
 
 def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_index: int = 0,
-            encoder: str | None = None, max_height: int | None = None) -> list[str]:
+            encoder: str | None = None, max_height: int | None = None, channels: int = 2,
+            burn: int | None = None, gpu: bool = True) -> list[str]:
     """HLS segments `{n}.ts` in `out_dir` (the data dir, never a media folder) from segment `segment` on.
 
     Segments from different runs must line up, because the player seeks by asking for any segment and
@@ -405,18 +468,92 @@ def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_i
     because the first frame can sit a few ms after the start). Segment n always covers n*SEGMENT onwards.
     Every run's timestamps are pushed 10 s later: a run from 0 would otherwise start with negative
     timestamps (B-frames, AAC priming), which the muxer fixes by shifting that run only."""
-    exe, pre, out = _transcode_parts(video, encoder, max_height)
     start = segment * SEGMENT
+    # -copyts keeps both inputs on the file's own clock, so the earlier subtitle input lines up by itself
+    sub_input = ["-ss", f"{max(0.0, start - SUB_LEAD):.3f}", "-i", str(path)] if burn is not None and start > 0 else None
+    exe, pre, out = _transcode_parts(video, encoder, max_height, burn, gpu, sub_input)
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin", *pre]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-copyts", "-start_at_zero", "-i", str(path), "-map", "0:v:0", "-map", f"0:a:{audio_index}?", *out,
+    cmd += ["-copyts", "-start_at_zero", "-i", str(path), *out, "-map", f"0:a:{audio_index}?",
             "-g", "9999", "-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT})",  # t counts from `start`
-            *_AUDIO, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10", "-max_muxing_queue_size", "1024",
+            *_aac(channels), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",
+            "-max_muxing_queue_size", "1024",
             "-f", "hls", "-hls_time", f"{SEGMENT - 0.1}", "-hls_segment_type", "mpegts", "-hls_list_size", "0",
             "-hls_flags", "temp_file",  # a segment appears under its name only once it's complete
             "-start_number", str(segment), "-hls_segment_filename", str(out_dir / "%d.ts"),
             str(out_dir / "ffmpeg.m3u8")]  # FFmpeg's own playlist is ignored; the server writes the real one
+    return cmd
+
+
+# ------------------------------------------------------------------ HLS without re-encoding the video
+
+def keyframes(path: Path, timeout: float = 900) -> list[float] | None:
+    """Times (s, from the file's start) of every video keyframe, or None if they can't be read.
+
+    An HLS version of the audio-only remux copies the video, so its segments can only start on the file's own
+    keyframes, and the playlist (made up front) has to know them all. ffprobe lists packets without decoding,
+    but has to read the whole file to do it: a second for an MP4 (its index), up to a minute or so for a large
+    MKV on a slow disk. Callers cache the result (`hls.Keyframes`)."""
+    exe = probe.ffprobe_path()
+    if not exe:
+        return None
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    try:
+        st = subprocess.run([exe, "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", str(path)],
+                            capture_output=True, timeout=60, stdin=subprocess.DEVNULL, creationflags=flags)
+        start = float(st.stdout.decode().strip() or 0)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        start = 0.0
+    try:
+        r = subprocess.run([exe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
+                            "-of", "csv=p=0", str(path)], capture_output=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL, creationflags=flags)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    out = set()
+    for line in r.stdout.decode(errors="replace").splitlines():
+        pts, _, fl = line.partition(",")
+        if "K" in fl:
+            try:
+                out.add(round(float(pts) - start, 3))
+            except ValueError:
+                pass  # pts N/A
+    times = sorted(t for t in out if t >= 0)
+    return times or None
+
+
+def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None, out_dir: Path,
+                 audio_index: int = 0, channels: int = 2) -> list[str]:
+    """The audio-only remux as HLS: video copied, audio -> AAC, one fMP4 segment per source keyframe
+    (`{n}.m4s`, with `init_{segment}.mp4`), numbered from `segment`.
+
+    `seek` is the time asked of FFmpeg's input seek. Copying can only start where the file's index allows,
+    which (in MKV) is often a keyframe or two before the target, so the caller first asks `remux_start` where
+    this very seek lands and passes that keyframe's number as `segment`.
+    Like `hls_cmd`, timestamps are kept so runs line up (`frag_discont`: fMP4 fragments carry the real decode
+    time instead of counting from 0 in every run). The cuts come from the source: a tiny hls_time makes the
+    muxer cut at every keyframe, which are exactly the boundaries the playlist lists. fMP4 rather than
+    MPEG-TS so HEVC/AV1 copy cleanly for MSE."""
+    exe = ffmpeg_path()
+    if not exe:
+        raise RuntimeError("FFmpeg not found")
+    cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if seek > 0:
+        cmd += ["-ss", f"{seek:.3f}"]
+    cmd += ["-copyts", "-start_at_zero", "-i", str(path), "-map", "0:v:0", "-map", f"0:a:{audio_index}?",
+            "-c:v", "copy"]
+    if video_codec == "HEVC":
+        cmd += ["-tag:v", "hvc1"]
+    cmd += [*_aac(channels), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",
+            "-max_muxing_queue_size", "1024",
+            "-f", "hls", "-hls_time", "0.1", "-hls_segment_type", "fmp4",
+            "-hls_segment_options", "movflags=+frag_discont", "-hls_fmp4_init_filename",
+            str(out_dir / f"init_{segment}.mp4"),  # absolute: a bare name lands in FFmpeg's working dir "-hls_list_size", "0", "-hls_flags", "temp_file",
+            "-start_number", str(segment), "-hls_segment_filename", str(out_dir / "%d.m4s"),
+            str(out_dir / f"ffmpeg_{segment}.m3u8")]
     return cmd
 
 

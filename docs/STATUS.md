@@ -28,6 +28,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
 | O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests |
 | O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ code is portable; systemd unit done; Windows service packaging not yet |
+| O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
 | O8 | Configure libraries (folders) in the UI | ✅ Settings, with a server-side folder picker |
 | O9 | UI shows **only real data** (no placeholders) | ✅ |
@@ -56,7 +57,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | FFmpeg not bundled; discovered on PATH / winget folder / `BAMS_FFPROBE`/`BAMS_FFMPEG` | Keeps BAMS MIT, avoids GPL/LGPL redistribution duties |
 | 10-08 | Libraries are single-type (TV or Movies), like Plex; misplaced files are flagged with a hint | Parsing rules differ per type |
 | 10-08 | Browser-incompatible **audio** → on-the-fly remux (video copied, audio → AAC stereo) instead of full transcode | Most releases use AC3/EAC3 audio, which browsers can't decode; this is cheap and lossless for video |
-| 10-08 | Server listens on **127.0.0.1** by default | No authentication yet |
+| 10-08 | Server listens on **127.0.0.1** by default | Safest default; `--host 0.0.0.0` opens it to the LAN now that there's a login |
 | 10-08 | Owner: "server first; don't sink time into UI features": UI is functional but its design waits for owner mockups | Scope |
 | 10-08 | Music reuses the `items` graph (artist > album > track, like Plex), schema v2 | One API/detail/cleanup path for every kind; Plex does the same |
 | 10-08 | Music tags read by **ffprobe**, not mutagen (PLAN.md had mutagen) | mutagen is GPL-2.0; ffprobe is already required for video and reads every tag format |
@@ -76,11 +77,23 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | Hardware decoding is "hybrid": GPU decodes, frames come back to system memory for the CPU filters; on only with a GPU encoder | All-GPU was 2.5× slower here, can't run the HDR filters, and fails outright on codecs the GPU can't decode; hybrid falls back by itself |
 | 10-08 | Dolby Vision is tone-mapped by **libplacebo** (Vulkan; applies the DV metadata), when it runs; HDR10/HLG stay on zscale | Profile 5 has no HDR10 base layer and comes out green/purple otherwise; zscale needs no GPU |
 | 10-08 | hls.js (Apache-2.0) is loaded on demand, only when a video is converted | It's ~575 KB, more than the rest of the UI |
+| 10-08 | **Accounts + login** (admin / viewer), session cookie (HttpOnly, SameSite=Lax; DB keeps only its SHA-256), scrypt password hashes (stdlib) | Owner asked for users + login; no new dependency. Viewers watch/download; admins manage libraries, settings, accounts |
+| 10-08 | The **first admin** can only be created from a browser on the server itself (loopback) or with `bams user add --admin` | So nobody on the LAN can claim a freshly upgraded server |
+| 10-08 | Login enforced by a **plain ASGI middleware** on every `/api/` route except `/api/auth/{state,login,setup}`; changes from another site's Origin refused | BaseHTTPMiddleware would sit between FFmpeg streams and the client; Origin check covers other ports on the same host, which SameSite doesn't |
+| 10-08 | **Watch state per user, per item** (movie/episode), not per file; watched at **90%**; position < 10 s not kept, < 30 s not offered as resume | Plex's rules; multi-episode files and versions share the item's state |
+| 10-08 | Continue Watching = titles stopped part-way + the **next episode** after a show's most recently finished one (specials only after specials) | What Plex calls On Deck, folded into one row |
+| 10-08 | The audio-only remux goes over **HLS with the video copied**: segments cut at every source keyframe (ffprobe packet list, cached in `data/cache/keyframes`), fMP4 with `frag_discont` | Native seeking without re-encoding. fMP4 because HEVC/AV1 copy cleanly for MSE; frag_discont because the MP4 muxer otherwise counts each run from 0 |
+| 10-08 | Copy-HLS runs number their segments from where a **dry run of the same seek** lands (`remux_start(zero=True)`), not from the keyframe asked for | MKV seeks land on the index point before the target (often a keyframe or two early); measured on real files |
+| 10-08 | **"Auto" quality** = several converted sizes in one session (full, then 1080/720/480 below it), hls.js ABR picks; a size not asked for in 10 s stops its FFmpeg; a session counts once against the limit | Adapts to network *and* to how fast the server converts (segment time includes the wait) |
+| 10-08 | **All-GPU filters** (NVDEC → bwdif_cuda/scale_cuda → NVENC) by default on NVIDIA for SDR, no burn-in, NVDEC-decodable codecs; a failed run retries on the hybrid path; `BAMS_GPU_FILTERS=0` off | Re-measured on FFmpeg 9.0.2: 1.7 s vs 2.6 s per minute at 720p and far less CPU (the earlier "2.5× slower" no longer holds) |
+| 10-08 | **Subtitles**: text → WebVTT through `<track>` (cached in the data dir); image (PGS/VobSub/DVB) → **burned in** to a conversion, read from a second input seeked 30 s earlier | Browsers render WebVTT natively; burn-in from the same input misses the line already on screen when a run starts mid-cue |
+| 10-08 | **5.1 AAC** only when the viewer picks Surround (per browser), stereo by default; another audio track than the first plays through the remux | Laptops/phones are stereo; browsers only play a file's first track |
+| 10-08 | HTML pages are served with `cache-control: no-cache`; unknown `/assets/` paths 404 instead of falling back to the page | A cached old page after a UI rebuild named scripts that no longer exist (blank page) |
 | 10-08 | Logo tagline changed from "Your Personal Media Stream" to "Bad Ass Media Server"; logo set redrawn at higher res (`tools/brand_art/rework.py`) | Owner request |
 
 ## 4. Built so far
 
-### Server (`server/`, ~4,400 lines + 142 tests)
+### Server (`server/`, ~5,900 lines + 172 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval. Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -114,8 +127,16 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   (Dolby Vision through libplacebo). GPU decoding with a GPU encoder. **HLS sessions** (`hls.py`): segments made
   on demand, native seeking, quality (max height) per session, bounded CPU/disk, idle sessions closed. A limit on
   simultaneous conversions (Settings).
+- **Accounts:** `auth.py` (scrypt hashes, sessions, throttle), admin/viewer roles, first-admin setup from the server
+  itself, login middleware on `/api/`, `bams user add|list|passwd|remove`.
+- **Watch state:** `watch.py`: progress (watched at 90%), watched flags for movie/episode/season/show, per-user counts on
+  every item list, Continue Watching (resume + next episode), next episode for up-next.
+- **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
+  encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead.
+- **Audio:** track list with labels, any track via the remux, 5.1 AAC on request (`channels`/`ch`).
+- **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback.
 - **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting.
-- **API:** ~25 endpoints (see CODEBASE.md). **CLI:** `bams serve|library|scan|tmdb-key|status`.
+- **API:** ~40 endpoints (see CODEBASE.md). **CLI:** `bams serve|library|scan|tmdb-key|status`.
 - **Deploy:** `deploy/linux/bams.service` (hardened systemd unit; kernel-level read-only media).
 
 ### Web (`web/`, React 19 + Vite + TS, ~2,600 lines + 530 lines CSS)
@@ -128,7 +149,12 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   (tracklist by disc, format note, Wikipedia/MusicBrainz links), Fix match, a now-playing bar with queue that keeps
   playing across pages (media keys via Media Session) and pauses when a video starts; music in Home and Search;
   Music library type + identification toggle in Settings.
-- TMDB-missing banner on every page → `/settings#tmdb`. "Can't reach server" banner.
+- Sign-in / first-admin screens (`auth.tsx`), account menu, Settings → Accounts (password, users); viewers see only
+  their account. Continue Watching row, watched ticks / unwatched counts / progress bars, mark watched on movie,
+  show, season and episode, Resume / Start over. Player: resume, progress reports, up-next countdown, sound menu
+  (tracks, Surround), subtitles menu (text via `<track>`, picture = burned in), quality Original / Auto / sizes,
+  remux over HLS with fallback to the live remux.
+- TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
 
 ### Docs
@@ -138,19 +164,15 @@ server/README.md.
 ## 5. Not built yet / next
 
 Roughly in priority order:
-1. **Playback follow-ups (minor):** HLS for the audio-only remux too (it still restarts on seek), automatic
-   quality (adaptive bitrate), an all-GPU filter path, a check of Dolby Vision profile 5 on a real file.
-2. **Watch state**: resume position, watched flags, Continue Watching (the UI rows were removed until this exists).
-3. **Users + login** (then it's safe to listen on the LAN), and multi-user watch state.
-4. **Subtitles**: text → WebVTT, image → burn-in; sidecar `.srt` pickup.
-5. **Audio track picker** (API already takes `?audio=`), 5.1 AAC.
-6. **Filesystem watcher** (periodic scans cover it for now).
-7. **Music follow-ups**: CUE-sheet albums, playlist import (`.m3u`/`.pls`), gapless playback, merge two local
+1. **Playback leftovers (minor):** Dolby Vision profile 5 checked on a real file (none available); all-GPU filters
+   for QSV/AMF/VAAPI (NVIDIA only so far); VobSub `.sub/.idx` sidecars; Dolby pass-through for TV clients.
+2. **Filesystem watcher** (periodic scans cover it for now).
+3. **Music follow-ups**: CUE-sheet albums, playlist import (`.m3u`/`.pls`), gapless playback, merge two local
    albums pinned to the same MusicBrainz release, periodic refresh of matched music data, pick up a `cover.jpg`
    added after an album already has art, lossless (FLAC) output option for converted files.
-8. **ISO / DVD / Blu-ray folders** (phase 3).
-9. **Packaging**: Windows service + installer, `.deb`, Docker. **CI** on Windows + Ubuntu.
-10. **UI redesign** from the owner's mockups.
+4. **ISO / DVD / Blu-ray folders** (phase 3).
+5. **Packaging**: Windows service + installer, `.deb`, Docker. **CI** on Windows + Ubuntu.
+6. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
 
@@ -162,7 +184,7 @@ Roughly in priority order:
 | Node | 23 (`web/`) |
 | FFmpeg | winget `Gyan.FFmpeg` (found automatically, even without PATH) |
 | Server data dir | `C:\Users\Beached\bams\data` (gitignored): DB, image cache, logs |
-| Ports | 8484 = the owner's server · 8485 = scratch test instances · 5173 = Vite dev |
+| Ports | 8484 = the owner's server · 8485 = scratch test instances (`.claude/launch.json` → `bams-test`, data dir in the session scratchpad: edit the path) · 5173 = Vite dev |
 | Test media | `C:\Users\Beached\Shows` (TV: Bob's Burgers, Family Guy, Simpsons, Burn Notice, South Park…) · `C:\Users\Beached\Movies` (2 movies) · `C:\Users\Beached\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) |
 | Libraries on the owner's server | 1 = "TV Shows" (`…\Shows`), 2 = "Movies" (`…\Movies`); the owner adds "Music" (`…\MyMusic`) when testing |
 | Art tools | local ComfyUI (Qwen Image); `tools/brand_art/rework.py` redraws the logo set from the supplied art |
@@ -185,6 +207,38 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Users + login, watch state, subtitles, audio tracks, playback follow-ups
+- **What / why:** owner asked to "oneshot" items 1-5 of §5. **Accounts:** schema v4 (`users`, `sessions`,
+  `watch_state`); scrypt hashes; HttpOnly session cookie (DB keeps its SHA-256, sliding 30 days); `LoginRequired`
+  ASGI middleware on `/api/`; admin-only routes (`ADMIN` dependency); first admin only from loopback or the CLI;
+  throttle (10 wrong passwords / 10 min / address); Origin check on changes; `bams user ...`. **Watch state:**
+  progress every 10 s / on pause / on leave, watched at 90%, mark watched (movie/episode/season/show), counts on item
+  lists, `/api/continue`, `next_id` + up-next countdown; merges carry watch state over. **Subtitles:** embedded +
+  sidecar tracks, WebVTT cached in `data/cache/subtitles`, live streams shifted, picture tracks burned in (second
+  input 30 s earlier). **Audio:** track menu (browser language by default), other tracks via the remux, Surround = 5.1
+  AAC. **Playback:** remux over HLS with the video copied (keyframe-cut fMP4, dry-run numbering, frag_discont),
+  Auto quality (ABR ladder), all-GPU NVIDIA filters with hybrid fallback. Also: HTML served `no-cache` (stale page
+  after rebuilds).
+- **Files:** new `server/bams/auth.py`, `watch.py`, `subtitles.py`, `tests/test_auth.py`, `test_watch.py`,
+  `test_subtitles.py`, `web/src/auth.tsx`, `components/AccountSettings.tsx`; changed `db.py` (v4), `app.py` (middleware,
+  auth/users/watch/subtitle routes, HLS variants, SpaFiles), `hls.py` (rewritten around variants, `Keyframes`),
+  `stream.py` (`audio_channels`, burn-in, `gpu_filters`, `keyframes`, `hls_copy_cmd`, `remux_start(zero)`),
+  `items.py`, `config.py` (`Paths.cache`), `__main__.py`; web `api.ts`, `main.tsx`, `Player.tsx` (rewritten),
+  `Detail.tsx`, `Home.tsx`, `Cards.tsx`, `Settings.tsx`, `TopBar.tsx`, `ConfigBanner.tsx`, `styles.css`; tests
+  `conftest.py` (`signed_in`) + every API test signs in; docs FORMATS.md, READMEs.
+- **Verified:** 172 tests (30 new: auth, roles, throttle, cross-site refusal, v4 migration; watch rules, per-user,
+  continue/next, merges; subtitle labels, sidecar encodings, shift, a hand-made PGS track burned in, also when the run
+  starts mid-line (fails without the lead); copy-HLS through the API with segments from two runs 12 s apart; ABR
+  switch, GPU fallback, keyframe cache). Real files: copy-HLS segments of an H.264 and an HEVC MKV identical whichever
+  FFmpeg run made them; all-GPU 720p 1.7 s vs 2.6 s/min. Browser on a :8485 copy of the owner's DB: first-admin setup,
+  AC3 episode over copy-HLS (seek to 10:00 playing in 3 s), embedded SRT subtitles, progress saved → Continue
+  Watching → resume at 11:18; Family Guy 11 tracks, English picked, Surround switched mid-play; HEVC Auto quality
+  (1080p → 720p capped to the window, all-GPU FFmpeg seen); up-next to S01E02 with S01E01 marked watched; episode /
+  season / show toggles; viewer account: own state only, 403 on admin routes; PGS burn-in switched on mid-line. Owner
+  signed off.
+- **Left open:** DV profile 5 on a real file; GPU filters for QSV/AMF/VAAPI; `.sub/.idx` sidecars; a remembered
+  quality (incl. Auto) applies to every video in that browser; row arrows overflow the page by 2 px (pre-existing).
 
 ### 2026-10-08: Transcoding follow-ups (HLS, GPU decoding, quality menu, limit, Dolby Vision)
 - **What / why:** owner asked to complete the "left for later" list of the video transcoding work.

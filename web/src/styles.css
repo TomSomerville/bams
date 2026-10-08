@@ -537,3 +537,56 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
   .np-cover { width: 46px; height: 46px; }
   .np-seek, .np-right { display: none; }  /* phones: track + play controls only */
 }
+
+/* ---------- accounts ---------- */
+.gate { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: radial-gradient(ellipse at top, rgba(132, 76, 189, 0.18), transparent 60%), var(--bg); }
+.gate-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5); }
+.gate-logo { width: 220px; max-width: 100%; align-self: center; margin-bottom: 6px; }
+.gate-card h1 { font-size: 22px; }
+.gate-card p { margin: 0; line-height: 1.55; }
+.gate-card code { word-break: break-all; }
+.gate-form { display: flex; flex-direction: column; gap: 8px; }
+.gate-form label { font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 4px; }
+.gate-form .text-input { height: 42px; }
+.gate-form .btn { margin-top: 10px; justify-content: center; }
+.account { position: relative; }
+button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-weight: 800; }
+.avatar.small { width: 28px; height: 28px; font-size: 13px; flex-shrink: 0; }
+.account-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 210px; display: flex; flex-direction: column; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55); z-index: 50; }
+.account-name { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; font-weight: 700; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.account-name .muted { font-size: 12px; font-weight: 600; }
+.account-menu a, .account-menu button { text-align: left; background: none; border: 0; padding: 9px 10px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.account-menu a:hover, .account-menu button:hover { background: var(--surface-2); }
+.user-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.user-row { padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+.user-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.user-row .key-row { margin-top: 10px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.lib-head .btn.push { margin-left: auto; }
+
+/* ---------- watch state ---------- */
+.corner-badge.watched { left: 8px; right: auto; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; background: var(--cyan); border-color: transparent; color: var(--bg); }
+.corner-badge.count { left: 8px; right: auto; background: var(--orange); border-color: transparent; color: #1a1006; }
+.poster-frame .progress, .ep-thumb .progress { z-index: 1; }
+.episode.seen .ep-title { color: var(--muted); }
+.episode .watch-toggle { opacity: 0.4; }
+.episode:hover .watch-toggle, .episode .watch-toggle.on { opacity: 1; }
+.watch-toggle.on { color: var(--cyan); }
+.season-bar { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.season-bar .season-overview { flex: 1 1 400px; margin: 0; }
+.season-bar .btn { height: 36px; font-size: 13px; padding: 0 14px; }
+
+/* ---------- player menus & notes ---------- */
+.menu-title { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 8px 12px 4px; }
+.quality-menu { max-height: min(70vh, 520px); overflow-y: auto; min-width: 230px; }
+.quality-btn { display: inline-flex; align-items: center; gap: 6px; }
+.resumed { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.14); }
+.player-top .resumed + .player-stream { margin-left: 12px; }
+.player-top .resumed { margin-left: auto; }
+.up-next { position: absolute; right: 32px; bottom: 120px; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 12px; background: rgba(12, 12, 20, 0.92); border: 1px solid var(--border); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6); cursor: default; }
+.player-video::cue { background: rgba(0, 0, 0, 0.62); color: #fff; font-family: inherit; font-size: 1.05em; line-height: 1.35; }
+@media (max-width: 720px) {
+  .resumed { display: none; }
+  .up-next { left: 16px; right: 16px; bottom: 110px; flex-wrap: wrap; }
+  .player-controls { flex-wrap: wrap; }
+}

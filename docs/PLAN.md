@@ -208,11 +208,11 @@ Decision flow per play request: client sends what it can play → server picks
 
 Not yet done:
 - Filesystem watcher (periodic scans cover it for now).
-- Minor playback follow-ups (HLS for the audio-only remux, adaptive bitrate). Done: HLS for conversions, GPU
-  decoding, a quality picker, a conversion limit, Dolby Vision tone-mapping, on-the-fly audio
+- Done since: accounts + login, per-user watch state (resume, watched, Continue Watching), subtitles (WebVTT, burn-in),
+  audio track picker + 5.1, HLS for the audio-only remux, automatic quality, all-GPU filters on NVIDIA. Earlier: HLS
+  for conversions, GPU decoding, a quality picker, a conversion limit, Dolby Vision tone-mapping, on-the-fly audio
   conversion (AC3/EAC3/DTS → AAC, video copied) and video transcoding to H.264 on the GPU (Xvid/MPEG-2/VC-1…, and
   HEVC for browsers that can't decode it).
-- Watch state and users.
 - Windows service packaging.
 - CI.
 - Final UI design (the current UI is wired to real data but its layout is still the prototype one, until mockups land).

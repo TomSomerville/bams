@@ -38,7 +38,9 @@ Windows:
 .venv\Scripts\python -m bams serve
 ```
 
-Linux: the same, with `.venv/bin/python`. Then open http://127.0.0.1:8484/docs for the interactive API.
+Linux: the same, with `.venv/bin/python`. Then open http://127.0.0.1:8484 **on the server itself** and create the
+admin account (or run `bams user add NAME --admin`). Everyone signs in; the admin adds the others' accounts in
+Settings → Accounts. The interactive API is at http://127.0.0.1:8484/docs (its calls need a signed-in browser).
 
 `BAMS_DATA_DIR` (or `--data-dir`) chooses where the database, image cache and logs go.
 Optional: install FFmpeg (`sudo apt install ffmpeg` / `winget install Gyan.FFmpeg`) for codec and
@@ -48,7 +50,8 @@ resolution detection. BAMS never bundles it.
 
 | Command | |
 |---|---|
-| `bams serve [--host --port]` | API + scheduled scans. Localhost-only by default: there's no login yet |
+| `bams serve [--host --port]` | API + scheduled scans. This computer only by default; `--host 0.0.0.0` for the network (everyone signs in). For the internet, put it behind an HTTPS reverse proxy |
+| `bams user add NAME [--admin]` · `bams user list` · `bams user passwd NAME` · `bams user remove NAME` | accounts (passwords asked for, hidden). `passwd` signs the user out everywhere |
 | `bams library add NAME --type show\|movie\|music --path DIR [--path DIR] [--interval HOURS]` | |
 | `bams library list` / `bams library remove NAME` | remove only forgets; media is untouched |
 | `bams scan NAME [--no-match] [--rematch]` | scan now, in the foreground (`--no-match` also skips MusicBrainz) |
@@ -57,8 +60,14 @@ resolution detection. BAMS never bundles it.
 
 ## API (v0)
 
+Every `/api/` route except signing in needs the session cookie that signing in sets. Routes that change libraries,
+settings or accounts (and Fix match, folder browsing) are for admins.
+
 | | |
 |---|---|
+| `GET /api/auth/state` · `POST /api/auth/login {name, password}` · `POST /api/auth/logout` · `POST /api/auth/setup` (first admin, from the server itself) · `PUT /api/auth/password {current, new}` | signing in |
+| `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` | accounts (admins) |
+| `PUT /api/items/{id}/progress {position, duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` | watch state of the signed-in user |
 | `GET /api/status` | version, ffprobe, TMDB configured, guard, running/queued scans |
 | `GET /api/settings` · `PUT/DELETE /api/settings/tmdb-key` | the key is verified before saving and never returned (last 4 only) |
 | `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | |
@@ -71,7 +80,10 @@ resolution detection. BAMS never bundles it.
 | `GET /api/libraries/{id}/unrecognized` | files the parser couldn't place |
 | `GET /api/tmdb/search?kind=show\|movie&q=` · `POST /api/items/{id}/match {tmdb_id}` | fix match |
 | `GET /api/files/{id}/stream` · `/download` | original file, Range-capable |
-| `GET /api/files/{id}/remux?t=` · `/seek?t=` | video copied + AC3/EAC3/DTS audio converted to AAC (fragmented MP4) for browsers; `/seek` says where a stream started at `t` really begins |
+| `GET /api/files/{id}/remux?t=&audio=&ch=` · `/seek?t=` | video copied + audio converted to AAC (fragmented MP4) for browsers; `/seek` says where a stream started at `t` really begins |
+| `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video converted to H.264 too (fragmented MP4) |
+| `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, start?}` · `GET /api/hls/{sid}/index.m3u8` | HLS: the remux or a conversion, segments made on demand |
+| `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track (embedded or sidecar) as WebVTT |
 | `GET /api/files/{id}/audio?t=` | music converted to AAC (fragmented MP4) for formats browsers can't play |
 | `GET /api/images/{path}` | cached artwork |
 

@@ -1,10 +1,12 @@
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "../auth";
 import { useSettings } from "../settings";
 import Icon from "./Icon";
 
 /** Shown on every page until a TMDB key is configured on the server. Clicking jumps to the key field. */
 export default function ConfigBanner() {
   const { tmdb, serverError } = useSettings();
+  const { user } = useAuth();
   const { pathname, hash } = useLocation();
 
   if (serverError && !tmdb) {
@@ -15,7 +17,7 @@ export default function ConfigBanner() {
       </div>
     );
   }
-  if (!tmdb || tmdb.configured) return null;
+  if (!tmdb || tmdb.configured || !user.is_admin) return null;  // only an admin can add the key
 
   // Already looking at the field: the banner would just point at itself.
   const onTarget = pathname === "/settings" && hash === "#tmdb";

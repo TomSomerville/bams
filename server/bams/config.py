@@ -13,7 +13,7 @@ from pathlib import Path
 
 APP_NAME = "BAMS"
 VERSION = "0.1.0"
-DEFAULT_HOST = "127.0.0.1"  # no auth yet, so localhost-only unless told otherwise
+DEFAULT_HOST = "127.0.0.1"  # this computer only; `serve --host 0.0.0.0` opens it to the network (login required)
 DEFAULT_PORT = 8484
 
 # Keep in step with docs/FORMATS.md section 1.
@@ -74,6 +74,11 @@ class Paths:
     def transcode(self) -> Path:
         """HLS segments being served (wiped at startup)."""
         return self.root / "transcode"
+
+    @property
+    def cache(self) -> Path:
+        """Things BAMS can make again: converted subtitles, keyframe lists."""
+        return self.root / "cache"
 
     def ensure(self) -> "Paths":
         for p in (self.root, self.images, self.logs):

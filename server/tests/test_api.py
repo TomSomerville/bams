@@ -5,11 +5,11 @@ from fastapi.testclient import TestClient
 from bams import readonly
 from bams.app import create_app
 from bams.config import Paths
-from conftest import make_tree
+from conftest import make_tree, signed_in
 
 
 def client(tmp_path, web_dir=None):
-    return TestClient(create_app(Paths(tmp_path / "data"), start_scheduler=False, web_dir=web_dir))
+    return signed_in(create_app(Paths(tmp_path / "data"), start_scheduler=False, web_dir=web_dir))
 
 
 def test_library_crud_and_validation(tmp_path):
@@ -44,7 +44,7 @@ def test_movie_in_tv_library_is_flagged(tmp_path):
     media = tmp_path / "media"
     make_tree(media, ["Happy Gilmore 2/Happy.Gilmore.2.2025.1080p.WEB.h264-ETHEL.mkv", "Show/Show - S01E01.mkv"])
     paths = Paths(tmp_path / "data")
-    c = TestClient(create_app(paths, start_scheduler=False))
+    c = signed_in(create_app(paths, start_scheduler=False))
     try:
         lib = c.post("/api/libraries", json={"name": "TV", "type": "show", "paths": [str(media)]}).json()
         jobs.run_scan(paths, lib["id"], do_match=False)
@@ -72,8 +72,11 @@ def test_spa_fallback(tmp_path):
     web.mkdir()
     (web / "index.html").write_text("<html>BAMS</html>")
     c = client(tmp_path, web_dir=web)
-    assert "BAMS" in c.get("/settings").text          # client-side route -> index.html
+    r = c.get("/settings")
+    assert "BAMS" in r.text                            # client-side route -> index.html
+    assert r.headers["cache-control"] == "no-cache"    # re-checked, so a rebuilt UI is picked up
     assert c.get("/api/nope").status_code == 404       # API 404s stay 404s
+    assert c.get("/assets/index-old.js").status_code == 404  # a script from an older build isn't the page
 
 
 def test_connection_usable_from_another_thread(tmp_path):

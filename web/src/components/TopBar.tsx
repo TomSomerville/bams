@@ -1,7 +1,33 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type ServerStatus } from "../api";
+import { useAuth } from "../auth";
 import Icon from "./Icon";
+
+/** The signed-in user's initial; the menu has their account page and signing out. */
+function Account() {
+  const { user, signOut } = useAuth();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [open]);
+  return (
+    <div className="account">
+      <button className="avatar" onClick={(e) => { e.stopPropagation(); setOpen(!open); }} aria-haspopup="menu"
+        aria-expanded={open} title={user.name}>{user.name.slice(0, 1).toUpperCase()}</button>
+      {open && (
+        <div className="account-menu" role="menu">
+          <div className="account-name">{user.name}<span className="muted">{user.is_admin ? "Admin" : "Viewer"}</span></div>
+          <Link to="/settings#account" role="menuitem">Account &amp; password</Link>
+          <button role="menuitem" onClick={signOut}>Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function TopBar() {
   const nav = useNavigate();
@@ -51,6 +77,7 @@ export default function TopBar() {
             <span className="dot" /> Scanning…
           </Link>
         )}
+        <Account />
       </div>
     </header>
   );

@@ -100,6 +100,7 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
     con.execute("UPDATE item_keys SET item_id=? WHERE item_id=?", (keep, drop))
     if kind == "movie":
         con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (keep, drop))
+        _move_watch_state(con, drop, keep)
     else:
         for s in con.execute("SELECT id, season_number FROM items WHERE parent_id=? AND kind='season'", (drop,)).fetchall():
             target = con.execute("SELECT id FROM items WHERE parent_id=? AND kind='season' AND season_number=?",
@@ -112,6 +113,13 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
                                  (target["id"], e["episode_number"])).fetchone()
                 if te:
                     con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (te["id"], e["id"]))
+                    _move_watch_state(con, e["id"], te["id"])
                 else:
                     con.execute("UPDATE items SET parent_id=? WHERE id=?", (target["id"], e["id"]))
     con.execute("DELETE FROM items WHERE id=?", (drop,))
+
+
+def _move_watch_state(con: sqlite3.Connection, src: int, dest: int) -> None:
+    """A merged-away movie/episode is deleted: its viewers' progress moves to the one that's kept
+    (where a viewer has progress on both, the kept item's wins)."""
+    con.execute("UPDATE OR IGNORE watch_state SET item_id=? WHERE item_id=?", (dest, src))

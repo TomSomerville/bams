@@ -12,7 +12,7 @@ from bams.config import Paths
 from bams.db import jdump, jload
 from bams.musicbrainz import USER_AGENT, MusicBrainz
 from bams.scanner import scan_library
-from conftest import make_tree
+from conftest import make_tree, signed_in
 
 JPEG = b"\xff\xd8\xff\xe0fake-jpeg"
 ARTIST_ID = "11111111-1111-1111-1111-111111111111"
@@ -210,7 +210,7 @@ def test_api_toggle_and_fix_match(tmp_path, monkeypatch):
     calls: list = []
     monkeypatch.setattr(app_module, "MusicBrainz", lambda: MusicBrainz(transport=fake(calls), min_interval=0))
     monkeypatch.setattr(jobs, "MusicBrainz", lambda: MusicBrainz(transport=fake(calls), min_interval=0))
-    c = TestClient(create_app(paths, start_scheduler=False))
+    c = signed_in(create_app(paths, start_scheduler=False))
     try:
         assert c.get("/api/settings").json()["music_lookup"] is True  # on by default
         assert c.put("/api/settings/music-lookup", json={"enabled": False}).json() == {"music_lookup": False}

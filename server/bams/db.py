@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -212,7 +212,42 @@ def _v3(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE items ADD COLUMN extra TEXT")
 
 
-MIGRATIONS = {2: _v2, 3: _v3}  # target version -> step
+_V4 = (
+    """CREATE TABLE users (
+        id            INTEGER PRIMARY KEY,
+        name          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password      TEXT NOT NULL,             -- scrypt hash (auth.hash_password), never the password
+        is_admin      INTEGER NOT NULL DEFAULT 0,
+        created_at    REAL NOT NULL,
+        last_login_at REAL)""",
+    """CREATE TABLE sessions (
+        token        TEXT PRIMARY KEY,           -- sha256 of the cookie value: a copied DB can't log anyone in
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at   REAL NOT NULL,
+        last_seen_at REAL NOT NULL,
+        user_agent   TEXT)""",
+    "CREATE INDEX sessions_user ON sessions(user_id)",
+    """CREATE TABLE watch_state (
+        user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        item_id         INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,  -- a movie or an episode
+        position        REAL NOT NULL DEFAULT 0,  -- seconds; 0 = from the start (or finished)
+        duration        REAL,
+        watched         INTEGER NOT NULL DEFAULT 0,
+        play_count      INTEGER NOT NULL DEFAULT 0,
+        last_watched_at REAL,                     -- when it was last finished
+        updated_at      REAL NOT NULL,
+        PRIMARY KEY (user_id, item_id))""",
+    "CREATE INDEX watch_recent ON watch_state(user_id, updated_at)",
+)
+
+
+def _v4(con: sqlite3.Connection) -> None:
+    """v4: user accounts, login sessions, and each user's watch state (resume position, watched flags)."""
+    for stmt in _V4:
+        con.execute(stmt)
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

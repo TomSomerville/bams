@@ -40,3 +40,22 @@ def unguarded():
         def __exit__(self, *a):
             readonly._roots = self.saved  # noqa: SLF001
     return _U()
+
+
+PASSWORD = "correct horse"
+
+
+def signed_in(app, name: str = "admin", admin: bool = True):
+    """A TestClient for `app`, signed in as a new account (an admin by default)."""
+    from fastapi.testclient import TestClient
+
+    from bams import auth
+    c = TestClient(app)
+    con = connect(app.state.paths.db)
+    try:
+        auth.create_user(con, name, PASSWORD, admin)
+    finally:
+        con.close()
+    r = c.post("/api/auth/login", json={"name": name, "password": PASSWORD})
+    assert r.status_code == 200, r.text
+    return c

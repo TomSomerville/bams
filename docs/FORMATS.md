@@ -9,8 +9,8 @@ Every video and audio format BAMS knows about: whether it's **indexed** (found b
 |---|---|---|
 | **Direct Play** | MP4 + H.264 + browser-friendly audio | Sends the original file (HTTP Range, so seeking works) |
 | **Direct Stream: file** | Browser-friendly video *and* audio in MKV/WebM/MP4 | Sends the original file; Chrome/Edge open MKV fine |
-| **Direct Stream: remux** | Browser-friendly video, but audio browsers can't decode, or a container they can't open | FFmpeg **copies the video** and **converts the audio to AAC**, streamed as fragmented MP4. Little CPU, no video quality loss |
-| **Transcode** | The video codec itself isn't browser-friendly (or the browser says it can't decode HEVC/AV1/VP9), or the viewer picked a lower quality | FFmpeg **re-encodes the video to H.264** (GPU: NVENC / QSV / AMF / VAAPI, else x264; GPU decoding too) and the audio to AAC, served as **HLS** (4 s segments made on demand, so seeking is native; plain fragmented MP4 for browsers without HLS). Deinterlaces, fixes anamorphic pixels, tone-maps HDR |
+| **Direct Stream: remux** | Browser-friendly video, but audio browsers can't decode, or a container they can't open | FFmpeg **copies the video** and **converts the audio to AAC**, served as **HLS** cut at the file's own keyframes (listed once with ffprobe, cached), so seeking is native; plain fragmented MP4 (restarted to seek) where HLS isn't possible. Little CPU, no video quality loss |
+| **Transcode** | The video codec itself isn't browser-friendly (or the browser says it can't decode HEVC/AV1/VP9), or the viewer picked a lower quality or **Auto** (several sizes; the player picks by throughput), or picture subtitles are burned in | FFmpeg **re-encodes the video to H.264** (GPU: NVENC / QSV / AMF / VAAPI, else x264; GPU decoding too, and on NVIDIA SDR sources the filters run on the GPU as well) and the audio to AAC, served as **HLS** (4 s segments made on demand, so seeking is native; plain fragmented MP4 for browsers without HLS). Deinterlaces, fixes anamorphic pixels, tone-maps HDR |
 
 Legend: ✅ yes · ⚠️ depends (hardware, OS or browser version) · ❌ no · 🔜 planned
 
@@ -90,25 +90,40 @@ This is what decides "plays with sound" vs "plays silently" (the Bob's Burgers i
 | WMA | Windows Media Audio | ❌ | ❌ | ❌ | **Converted to AAC** |
 | ALAC | Apple Lossless | ❌ | ❌ | ✅ | **Converted to AAC** |
 
-Today the conversion is to **stereo AAC 192 kbps** (surround is downmixed). 🔜 5.1 AAC for surround-capable
-clients, a track picker for files with several audio languages (the API already takes `?audio=`), and
-pass-through for clients that decode Dolby (TV apps).
+Conversions make **stereo AAC 192 kbps** by default. In the player's sound menu a viewer can choose
+**Surround**: tracks with 5.1 or more channels are then converted to **5.1 AAC 384 kbps** (7.1 is folded to 5.1);
+the choice is remembered per browser. Files with several audio tracks get a **track picker** (labels like
+"English · EAC3 5.1 · Commentary"). A browser only plays a file's first track, so picking another one plays the file
+through the remux (video copied, that track converted). With nothing remembered, the player picks the browser's
+language, else the track the file marks as default. 🔜 Pass-through for clients that decode Dolby (TV apps).
 
 ## 4. Subtitles
 
 | Format | Type | Extensions / where | Browsers | BAMS |
 |---|---|---|---|---|
-| WebVTT | text | `.vtt` | ✅ native | 🔜 served as-is |
-| SubRip | text | `.srt`, or embedded in MKV | ❌ | 🔜 convert to WebVTT |
-| ASS / SSA | text, styled | `.ass` `.ssa`, embedded (anime) | ❌ | 🔜 WebVTT (styling lost), or burn in to keep styling |
-| MP4 timed text | text | embedded in MP4 (`mov_text`) | ❌ | 🔜 convert to WebVTT |
-| TTML / DFXP | text | `.ttml` `.dfxp` | ❌ | 🔜 convert to WebVTT |
-| PGS | image | embedded in MKV/M2TS (Blu-ray) | ❌ | 🔜 burn in (needs video transcode) |
-| VobSub | image | `.sub` + `.idx`, embedded (DVD) | ❌ | 🔜 burn in |
-| DVB subtitles | image | embedded in TS (broadcast) | ❌ | 🔜 burn in |
+| WebVTT | text | `.vtt`, embedded | ✅ native | Shown through `<track>` |
+| SubRip | text | `.srt`, or embedded in MKV | ❌ | Converted to WebVTT |
+| ASS / SSA | text, styled | `.ass` `.ssa`, embedded (anime) | ❌ | Converted to WebVTT (styling lost) |
+| MP4 timed text | text | embedded in MP4 (`mov_text`) | ❌ | Converted to WebVTT |
+| TTML / DFXP | text | `.ttml` `.dfxp` | ❌ | ❌ not read (FFmpeg can't read TTML) |
+| PGS | image | embedded in MKV/M2TS (Blu-ray) | ❌ | Burned into a converted video |
+| VobSub | image | embedded (DVD) | ❌ | Burned in; ❌ `.sub` + `.idx` sidecars aren't read yet |
+| DVB subtitles | image | embedded in TS (broadcast) | ❌ | Burned in |
 
-Embedded subtitle tracks are already detected by ffprobe and listed in the file details. Sidecar files
-(`Movie (2020).en.srt` next to the video) will be picked up when subtitle support lands.
+How it works (`server/bams/subtitles.py`):
+- **Tracks**: every embedded subtitle stream (`e0`, `e1`... in stream order) plus sidecar files next to the video
+  whose name starts with the video's name: `Movie (2020).srt`, `Movie (2020).en.srt`, `Movie (2020).eng.forced.srt`,
+  `Movie (2020).English.sdh.srt` (language from a 2/3-letter code or an English name; `forced`, `sdh`/`cc`/`hi` flags).
+- **Text** tracks are converted to WebVTT by FFmpeg once and cached in `data/cache/subtitles/` (never next to the
+  media). Embedded tracks take a while the first time on a big file (FFmpeg reads it through). Sidecars in any
+  encoding are read as UTF-8/UTF-16, falling back to Windows-1252. For the live (non-HLS) streams the cue times
+  are shifted to the stream's start (`?shift=`).
+- **Image** tracks can't become text: picking one makes the server convert the video and paint the subtitles on
+  (`stream._transcode_parts(burn=)`), at the source size, before scaling and tone-mapping. The subtitles are read
+  from a second input of the same file that starts 30 s earlier (`SUB_LEAD`), so a line already on screen when a
+  conversion starts (after a seek) isn't lost.
+- The player remembers the subtitle language per browser and picks a matching text track next time (never an image
+  track by itself, since that means converting).
 
 ## 5. Music (audio-only files)
 
