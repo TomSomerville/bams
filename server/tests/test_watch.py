@@ -113,3 +113,31 @@ def test_merged_titles_keep_watch_state(tv):
 def test_progress_needs_a_signed_in_user(tv):
     app, _, ep, _ = tv
     assert TestClient(app).put(f"/api/items/{ep[(1, 1)]}/progress", json={"position": 5}).status_code == 401
+
+
+def test_watch_thresholds_are_settings(tv):
+    """Tester request: started after 10 s, watched at 95%. Admins set them; viewers can't."""
+    app, c, ep, _ = tv
+    assert c.get("/api/settings").json()["watch"] == {"watched_percent": 90, "resume_after": 30}
+    e = ep[(1, 1)]
+    c.put(f"/api/items/{e}/progress", json={"position": 15, "duration": 1000})
+    assert c.get(f"/api/items/{e}").json()["progress"]["position"] == 0  # under 30 s: not started
+    assert c.put("/api/settings/watch", json={"watched_percent": 95, "resume_after": 10}).json() == \
+        {"watched_percent": 95, "resume_after": 10}
+    c.put(f"/api/items/{e}/progress", json={"position": 15, "duration": 1000})
+    assert c.get("/api/continue").json()[0]["id"] == e  # 15 s in: saved and in Continue Watching
+    assert not c.put(f"/api/items/{e}/progress", json={"position": 920, "duration": 1000}).json()["watched"]
+    assert c.put(f"/api/items/{e}/progress", json={"position": 950, "duration": 1000}).json()["watched"]
+    assert c.put("/api/settings/watch", json={"watched_percent": 40, "resume_after": 10}).status_code == 422
+    kid = signed_in(app, "Kid", admin=False)
+    assert kid.put("/api/settings/watch", json={"watched_percent": 95, "resume_after": 10}).status_code == 403
+
+
+def test_prefs_are_per_user(tv):
+    app, c, _, _ = tv
+    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True}
+    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False}
+    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": False}
+    kid = signed_in(app, "Kid", admin=False)
+    assert kid.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True}
+    assert kid.put("/api/me/prefs", json={"nonsense": 1}).json() == {"home_hero": True}

@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 173 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 190 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -139,4 +139,11 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Testing the Windows installer installs a real service on :8484** and needs the owner's UAC click: ask first. Silent
   runs: `BAMS-Setup.exe /SILENT /SUPPRESSMSGBOXES /LOG=…` via `Start-Process -Verb RunAs -Wait`. `.deb` tests run in
   Docker (`debian:12`, `ubuntu:24.04`; a systemd image for service tests); Git Bash needs `MSYS_NO_PATHCONV=1` for `-v`.
+- **Never hold a write transaction while touching the disk** (walking, hashing, probing, network). A first scan
+  that walked inside `BEGIN IMMEDIATE` locked every other writer out for minutes: logins 500'd with "database is
+  locked". Read first, then write in short batches (`scanner.py`; `test_scan_does_not_hold_the_write_lock…`).
+- **Hand identifications win over file names:** the scanner goes through `identify.parsed_for`, never `parse.parse`
+  directly, or a rescan would undo what an admin entered (`files.manual`).
+- **The owner's :8484 is the installed Windows service** (`C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`), not
+  this checkout: restarting it doesn't load repo changes; a new installer does, and running it needs the owner.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

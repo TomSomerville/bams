@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-08**.
+Last updated: **2026-10-08** (release 0.2.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -27,7 +27,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O3 | Identify and categorise media (look it up "like Plex", via naming conventions) | ✅ guessit parser + TMDB matching; music: tags/folders + MusicBrainz |
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
 | O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests |
-| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.1.0) |
+| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.2.0) |
 | O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
 | O8 | Configure libraries (folders) in the UI | ✅ Settings, with a server-side folder picker |
@@ -98,11 +98,17 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | Python dependencies locked with hashes (`deploy/requirements.txt`, `uv pip compile --universal`) | Installers ship exactly what the tests ran against |
 | 10-08 | TMDB key guide is a page inside BAMS (`/help/tmdb.html`), not a repo doc | The repo is private; the people who need the guide only have BAMS |
 | 10-08 | Saving a TMDB key queues a scan (with rematch) of every TV/movie library | Posters appear right after setup instead of at the next scheduled scan |
+| 10-08 | Scans walk and fingerprint files **outside** a transaction, then write in batches of 200 | A walk inside `BEGIN IMMEDIATE` held the write lock for a whole first scan: logins and adding a library hit "database is locked" (HTTP 500, tester on Linux) |
+| 10-08 | `title - alternative_title` from guessit is kept as one title ("Star Trek - Lower Decks") | guessit splits on " - "; two shows (and movies like "Spider-Man - Into the Spider-Verse") collapsed into one |
+| 10-08 | A file **in a season folder** with no episode number is an unnumbered episode (an extra) of that season; loose in a show folder it stays unrecognised | Tester's Season 00 extras weren't shown. A loose file is often a movie in the TV library; a fake show would be worse than the Unrecognized list |
+| 10-08 | Files can be **identified by hand** (`files.manual`, schema v6): stored per file and used instead of the name on every scan; TMDB/IMDb links fill the fields (IMDb ids via TMDB `/find`) | Owner request; survives rescans, file changes and moves; IMDb itself is never fetched |
+| 10-08 | Watched % and "started after N s" are **admin settings** (one for everyone; defaults 90% / 30 s); saving progress and Continue Watching use the same threshold | Tester request (10 s / 95%); the old split (save at 10 s, offer at 30 s) wasn't worth two settings |
+| 10-08 | Per-user display preferences in `users.prefs` (schema v5), first one `home_hero` | Follows the person across devices, unlike browser storage |
 | 10-08 | Logo tagline changed from "Your Personal Media Stream" to "Bad Ass Media Server"; logo set redrawn at higher res (`tools/brand_art/rework.py`) | Owner request |
 
 ## 4. Built so far
 
-### Server (`server/`, ~5,900 lines + 173 tests)
+### Server (`server/`, ~6,200 lines + 190 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval. Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -113,7 +119,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   Parser upgrades trigger re-parse (`PARSER_VERSION`).
 - **Parser:** guessit plus our own rules: show folder vs season folder, SxxEyy/NxNN/ranges/multi-episode,
   quoted names, release-tag stripping (`(1080p … English - HONE)`), id tags `{tmdb-}` `{imdb-}` `{tvdb-}`,
-  Specials = Season 0. 26 real-world cases in `tests/test_parse.py`.
+  Specials = Season 0, " - " kept inside titles, unnumbered files in season folders = extras of that season.
+  ~35 real-world cases in `tests/test_parse.py`.
+- **Identify by hand** (`identify.py`): unrecognised files listed with hints; an admin pastes a TMDB/IMDb link or
+  enters title/year/season/episodes; kept in `files.manual` across rescans; undo.
 - **Grouping:** `item_keys` aliases so differently-named folders of one show (e.g. "Bobs Burgers S01-S08…" and
   "Bob's Burgers (2011) S14…") become one show, and stay merged on later scans.
 - **TMDB matcher:** path-id hints → `/find`, else search + confidence score (≥0.80) → details, images, seasons,
@@ -138,7 +147,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   simultaneous conversions (Settings).
 - **Accounts:** `auth.py` (scrypt hashes, sessions, throttle), admin/viewer roles, first-admin setup from the server
   itself, login middleware on `/api/`, `bams user add|list|passwd|remove`.
-- **Watch state:** `watch.py`: progress (watched at 90%), watched flags for movie/episode/season/show, per-user counts on
+- **Watch state:** `watch.py`: progress (watched at 90% / started after 30 s by default; admin settings), watched flags for movie/episode/season/show, per-user counts on
   every item list, Continue Watching (resume + next episode), next episode for up-next.
 - **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
   encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead.
@@ -146,7 +155,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback.
 - **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting.
 - **API:** ~40 endpoints (see CODEBASE.md). **CLI:** `bams serve|library|scan|tmdb-key|status`.
-- **Installers** (`deploy/`, v0.1.0): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
+- **Installers** (`deploy/`, v0.2.0; release notes in `CHANGELOG.md`): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
   packages, FFmpeg downloaded at install with a pinned hash, WinSW service, firewall rule for private networks,
   admin-only data dir, update in place, uninstall that asks before deleting data) and `bams_<v>_all.deb` (offline wheels,
   venv, systemd unit as the desktop user, `/etc/default/bams`, ufw, update in place, remove keeps / purge deletes data).
@@ -158,7 +167,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   filter), Title page (show: season tabs + episodes; movie: tech info + Download), Player (real `<video>`,
   remux-aware seeking, converted video over HLS (hls.js, loaded on demand), switches to the conversion when the
   browser can't decode the video, quality menu, keyboard shortcuts), Search, Settings (libraries with folder picker,
-  scan status, unrecognised-file hints; TMDB key card; Playback card: encoder in use + conversion limit).
+  scan status; Unrecognized files (identify by hand: link or fields with suggestions); TMDB key card; Playback card:
+  encoder in use + conversion limit; Watched and Continue Watching thresholds). Library pages have an Unrecognized
+  tab for admins. Player: speed 0.1x–3x. Music queue: drag (or arrow keys) to reorder. Show-password buttons,
+  confirm-new-password, per-person "hide the Home banner".
 - Music: library page (Artists/Albums tabs, sort, genres), artist page (bio, photo credit, albums), album page
   (tracklist by disc, format note, Wikipedia/MusicBrainz links), Fix match, a now-playing bar with queue that keeps
   playing across pages (media keys via Media Session) and pauses when a video starts; music in Home and Search;
@@ -222,6 +234,39 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Tester round 1 fixes + identify unrecognised files by hand (release 0.2.0)
+- **What / why:** the friend's tester sent notes on 0.1.0; the owner picked a first batch and added a request.
+  **Bugs:** HTTP 500 on login / adding a library during a first scan (the walk held SQLite's write lock: now it
+  walks and fingerprints outside a transaction); titles cut at " - " ("Star Trek - Lower Decks" → "Star Trek"; parser
+  v4 rejoins guessit's `alternative_title`); Season 00 extras without episode numbers not shown (parser v5:
+  unnumbered episode in its season folder's season). **Requests:** show-password buttons, confirm new password,
+  per-person toggle for the Home banner (`users.prefs`, schema v5), watched % / started-after seconds as admin
+  settings, playback speed 0.1x–3x, drag-to-reorder music queue. **Owner request:** identify unrecognised files by
+  hand: Settings → Unrecognized files + a library Unrecognized tab; TMDB/IMDb link fills the fields, or type them
+  with suggestions from the library; stored in `files.manual` (schema v6) and used on every scan; undo. Released as
+  **0.2.0** (`CHANGELOG.md`).
+- **Files:** server `scanner.py` (no lock during walk/hash; manual identifications), `parse.py` (`_title`,
+  `unnumbered`, `_loose_title`, v5), `items.py` (unnumbered episodes by title, merges), new `identify.py`, `app.py`
+  (identify/lookup/names/unrecognized routes, `/api/me/prefs`, `/api/settings/watch`, hint from the file name),
+  `watch.py` (`thresholds`), `auth.py` (prefs), `db.py` (v5, v6), `config.py` (0.2.0); tests `test_identify.py` (new),
+  `test_scanner.py`, `test_parse.py`, `test_watch.py`, `test_auth.py`. Web: new `PasswordInput.tsx`, `WatchSettings.tsx`,
+  `Combo.tsx`, `Identify.tsx`; `auth.tsx` (prefs), `AccountSettings.tsx`, `Home.tsx`, `Player.tsx` (speed),
+  `music.tsx` + `NowPlaying.tsx` (queue move), `Library.tsx` (tab), `Settings.tsx`, `Detail.tsx`/`Cards.tsx`/`format.ts`
+  (unnumbered `S00`), `api.ts`, `styles.css`. Docs: `CHANGELOG.md` (new), README, INSTALL.md, server/README.md,
+  CODEBASE.md, CLAUDE.md.
+- **Verified:** 190 tests (new: the scan no longer blocks another writer during walk or hashing (fails on the old
+  code); dashed titles; unnumbered extras + rescan + merge; thresholds + prefs API; identify flow, rescan keeps it, undo,
+  validation, viewer 403; TMDB/IMDb link parsing against a fake TMDB). Browser (test server, copy of the dev DB + a
+  generated demo show): sign-in during a 505-file scan, show password, confirm mismatch, banner off, thresholds saved,
+  speed menu/keys/slider (kept across a quality switch), queue drag + keys (current track kept playing), Specials
+  extras listed, identify by suggestions (extra) and by a real IMDb episode link (matched on TMDB with poster),
+  movie link refused in a TV library, undo. `.deb` 0.1.0 → 0.2.0 in Docker (Debian 12, Ubuntu 24.04): DB v4 → v6 with
+  backup, account kept, UI served.
+- **Left open:** tester requests not started: CPU/GPU encoder choice in Settings, scan progress with "remaining",
+  reorder libraries in the sidebar; scans still run one at a time (a second library waits as "Scan queued"). Extras
+  folders (`Featurettes`, `Behind The Scenes`…) are still skipped by the walk. The Windows 0.2.0 upgrade of the
+  owner's installed service is run by the owner.
 
 ### 2026-10-08: Installers (Windows + Debian/Ubuntu/Mint), updates in place, TMDB key guide
 - **What / why:** owner asked for deployment and packaging that is "ungodly easy": double-click install, all

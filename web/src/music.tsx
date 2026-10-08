@@ -23,6 +23,8 @@ type Music = {
   next: () => void;
   prev: () => void;
   jump: (index: number) => void;
+  /** Move a queued track to another place (drag to reorder). The current track keeps playing. */
+  move: (from: number, to: number) => void;
   seek: (t: number) => void;
   setVolume: (v: number) => void;
   stop: () => void;
@@ -113,6 +115,20 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     setIndex(i);
   }, [queue.length]);
 
+  const move = useCallback((from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= queue.length || to >= queue.length) return;
+    const q = [...queue];
+    const [t] = q.splice(from, 1);
+    q.splice(to, 0, t);
+    let i = index;
+    if (from === index) i = to;
+    else if (from < index && to >= index) i--;
+    else if (from > index && to <= index) i++;
+    if (current) loadedId.current = `${i}:${current.id}`; // same track, new place: don't restart it
+    setQueue(q);
+    setIndex(i);
+  }, [queue, index, current]);
+
   const next = useCallback(() => {
     if (index + 1 < queue.length) jump(index + 1);
     else {
@@ -198,9 +214,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const duration = current?.duration ?? 0;
   const value = useMemo<Music>(() => ({
     queue, index, current, playing, time, duration, volume, error,
-    playTracks, playItem, toggle, pause, next, prev, jump, seek, setVolume, stop,
+    playTracks, playItem, toggle, pause, next, prev, jump, move, seek, setVolume, stop,
   }), [queue, index, current, playing, time, duration, volume, error,
-      playTracks, playItem, toggle, pause, next, prev, jump, seek, setVolume, stop]);
+      playTracks, playItem, toggle, pause, next, prev, jump, move, seek, setVolume, stop]);
 
   return (
     <Ctx.Provider value={value}>

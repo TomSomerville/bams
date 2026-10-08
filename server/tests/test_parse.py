@@ -38,6 +38,16 @@ EPISODES = [
      dict(title="Bobs Burgers", season=14, episodes=[1], episode_title="Amelia")),
     # apostrophes inside titles survive
     ("Bob's Burgers/Season 1/Bob's Burgers - S01E01 - Human Flesh.mkv", dict(title="Bob's Burgers", season=1, episodes=[1])),
+    # no episode number, but in a season folder of a show: shown under that season (tester report: Season 00 extras)
+    ("Show (2010)/Season 00/Behind the Scenes.mkv",
+     dict(title="Show", season=0, episodes=[], unnumbered=True, episode_title="Behind the Scenes")),
+    ("Show (2010)/Specials/Show - Making Of.mkv", dict(title="Show", season=0, unnumbered=True, episode_title="Making Of")),
+    ("Show (2010)/Season 02/Show.Recap.1080p.WEB-DL.mkv", dict(title="Show", season=2, unnumbered=True, episode_title="Recap")),
+    # " - " in a show name: two different shows, not "Star Trek" twice (tester report)
+    ("Star Trek - Lower Decks (2020)/Season 01/Star Trek - Lower Decks - S01E01 - Second Contact.mkv",
+     dict(title="Star Trek - Lower Decks", year=2020, season=1, episodes=[1], episode_title="Second Contact")),
+    ("Star Trek - Prodigy/Season 1/Star Trek - Prodigy S01E02.mkv", dict(title="Star Trek - Prodigy", season=1, episodes=[2])),
+    ("Star Trek - Lower Decks S01E01 1080p WEB-DL.mkv", dict(title="Star Trek - Lower Decks", season=1, episodes=[1])),
 ]
 
 MOVIES = [
@@ -47,6 +57,10 @@ MOVIES = [
     ("Heat (1995)/movie.mkv", dict(title="Heat", year=1995)),
     ("Alien (1979) [tmdbid=348]/Alien.mkv", dict(title="Alien", year=1979, ids={"tmdb": "348"})),
     ("Kill Bill Vol 1 (2003)/Kill Bill Vol 1 (2003) - cd1.avi", dict(year=2003, part=1)),
+    # " - " in a title is part of the name, not a subtitle to drop
+    ("Spider-Man - Into the Spider-Verse (2018)/Spider-Man - Into the Spider-Verse (2018).mkv",
+     dict(title="Spider-Man - Into the Spider-Verse", year=2018)),
+    ("Mission Impossible - Fallout (2018) 1080p BluRay x264-GRP.mkv", dict(title="Mission Impossible - Fallout", year=2018)),
 ]
 
 
@@ -80,3 +94,9 @@ def test_title_key_groups_variants():
     assert title_key("The Office (US)") == title_key("the office us")
     assert title_key("Law & Order") == title_key("Law and Order")
     assert title_key("Pokémon") == title_key("Pokemon")
+
+
+def test_unnumbered_needs_a_season_folder():
+    # loose in a show folder (often a movie in the TV library) or at the root: still unrecognised
+    assert not parse("Show (2010)/Show - Bonus Episode.mkv", "show").recognized
+    assert not parse("Loose video.mkv", "show").recognized

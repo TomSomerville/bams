@@ -1,14 +1,20 @@
 // Who is signed in. Until someone is, the app shows only the sign-in screen (or, on a brand-new server
 // opened on the server itself, the "create the admin account" screen).
 import { createContext, useCallback, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { api, SIGNED_OUT, type AuthState, type User } from "./api";
+import { api, SIGNED_OUT, type AuthState, type Prefs, type User } from "./api";
+import PasswordInput from "./components/PasswordInput";
 
 type Auth = {
   user: User;
   signOut: () => Promise<void>;
   /** after a password change, etc. */
   refresh: () => Promise<void>;
+  /** this account's display preferences (saved on the server, so they follow you to other devices) */
+  prefs: Prefs;
+  setPrefs: (p: Partial<Prefs>) => Promise<void>;
 };
+
+const DEFAULT_PREFS: Prefs = { home_hero: true };
 
 const Ctx = createContext<Auth | null>(null);
 
@@ -38,6 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(SIGNED_OUT, out);
   }, [refresh]);
 
+  const setPrefs = useCallback(async (p: Partial<Prefs>) => {
+    const prefs = await api.put<Prefs>("/api/me/prefs", p);
+    setState((s) => (s && s.user ? { ...s, user: { ...s.user, prefs } } : s));
+  }, []);
+
   const signOut = useCallback(async () => {
     await api.post("/api/auth/logout").catch(() => {});
     setState((s) => s && { ...s, user: null });
@@ -49,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
   if (!state.user) return <SignIn state={state} onDone={refresh} />;
   // keyed by user: signing in as someone else starts the app afresh (their watch state, their settings)
-  return <Ctx.Provider key={state.user.id} value={{ user: state.user, signOut, refresh }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider key={state.user.id} value={{ user: state.user, signOut, refresh, prefs: { ...DEFAULT_PREFS, ...state.user.prefs }, setPrefs }}>{children}</Ctx.Provider>;
 }
 
 function Gate({ children }: { children: ReactNode }) {
@@ -106,11 +117,11 @@ function SignIn({ state, onDone }: { state: AuthState; onDone: () => void }) {
         <input id="g-name" className="text-input" value={name} onChange={(e) => setName(e.target.value)}
           autoComplete="username" autoFocus required maxLength={40} />
         <label htmlFor="g-pw">Password</label>
-        <input id="g-pw" className="text-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+        <PasswordInput id="g-pw" className="text-input" value={password} onChange={(e) => setPassword(e.target.value)}
           autoComplete={setup ? "new-password" : "current-password"} required minLength={setup ? 8 : undefined} />
         {setup && <>
           <label htmlFor="g-pw2">Password again</label>
-          <input id="g-pw2" className="text-input" type="password" value={again} onChange={(e) => setAgain(e.target.value)}
+          <PasswordInput id="g-pw2" className="text-input" value={again} onChange={(e) => setAgain(e.target.value)}
             autoComplete="new-password" required />
         </>}
         {err && <p className="key-msg bad">{err}</p>}

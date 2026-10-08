@@ -33,15 +33,16 @@ bams/
 │   │   ├── __main__.py        CLI entry (`python -m bams …` / `bams …`): serve, library, scan, tmdb-key, user, status
 │   │   ├── app.py             FastAPI app: bootstrap, serialisers, LoginRequired middleware, ALL HTTP routes, SPA hosting
 │   │   ├── auth.py            Accounts: scrypt hashes, users CRUD (last-admin rules), sessions (hashed tokens), Throttle
-│   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching
+│   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, thresholds (admin settings)
 │   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars, language labels), WebVTT conversion + cache, shift()
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
-│   │   ├── db.py              SQLite schema (v1 + migration steps to v4), connect(), migrate(), Tx, settings, JSON helpers
+│   │   ├── db.py              SQLite schema (v1 + migration steps to v6), connect(), migrate(), Tx, settings, JSON helpers
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker + quick_hash
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
 │   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
+│   │   ├── identify.py        Files identified by hand (files.manual): parsed_for() (scanner), store(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
 │   │   ├── tmdb.py            TMDB HTTP client (Bearer or api_key), throttle/retry, image cache download
 │   │   ├── probe.py           ffprobe discovery + JSON → compact summary (codecs, resolution, HDR + DV profile, tracks)
@@ -74,11 +75,15 @@ bams/
 │       ├── components/
 │       │   ├── Sidebar.tsx    Logo, Home, one link per real library, Settings
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
-│       │   ├── AccountSettings.tsx  Your account (password, sign out) + admins' "Who can sign in" (users CRUD)
+│       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out, Home banner pref) + admins' "Who can sign in" (users CRUD)
+│       │   ├── PasswordInput.tsx  Password field with a show/hide button (sign-in, setup, accounts)
+│       │   ├── WatchSettings.tsx  Playback card: "started after" seconds and "watched at" %
+│       │   ├── Identify.tsx   UnrecognizedFiles list (all libraries or one) + IdentifyForm (link lookup, fields with suggestions, undo)
+│       │   ├── Combo.tsx      Text field with as-you-type suggestions (keyboard + mouse)
 │       │   ├── ConfigBanner.tsx  "TMDB key not configured" (admins) → /settings#tmdb; "can't reach server"
 │       │   ├── Row.tsx        Horizontal shelf with arrow buttons
 │       │   ├── Cards.tsx      PosterCard (+ WatchMarks), ContinueCard, AlbumCard, ArtistCard, ItemCard, PlayBadge
-│       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel, stop
+│       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
 │       │   ├── MusicFixMatch.tsx  Modal: MusicBrainz search → POST /api/items/{id}/music-match
 │       │   ├── MusicSettings.tsx  Music identification on/off card
 │       │   ├── TranscodeSettings.tsx  Playback card: encoder in use, conversion limit
@@ -89,13 +94,13 @@ bams/
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
 │           ├── Home.tsx       Hero + Continue Watching (/api/continue) + rows from /api/items and /api/libraries
-│           ├── Library.tsx    /library/:id grid, sort, genre chips (music libraries → MusicLibrary)
+│           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id: show (season tabs → episodes, watched toggles) or movie (Resume, TechInfo); music → MusicDetail
 │           ├── Music.tsx      MusicLibrary (Artists/Albums tabs), artist page, album page + TrackList, Fix match
 │           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next,
 │           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
-│           └── Settings.tsx   Admins: libraries, TMDB, music, playback, accounts. Viewers: their account only
+│           └── Settings.tsx   Admins: libraries, unrecognized files, TMDB, music, playback, accounts. Viewers: their account only
 │
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
@@ -143,19 +148,19 @@ library roots as protected. Then `create_app` starts the Scheduler in the FastAP
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v4)
+## 3. Data model (`db.py`, schema v6)
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `max_transcodes` (0 = automatic) |
+| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30) |
 | `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status` |
 | `library_roots` | its folders | `library_id`, `path` (absolute, as given) |
 | `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit…); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
 | `item_keys` | grouping aliases | (`library_id`, `kind`, `title_key`, `year`) → `item_id`; survives merges so renamed folders keep joining the same show |
-| `files` | **actual files** | `root_id` + `rel_path` ('/'-separated, relative to root), `size`, `mtime_ns`, `quick_hash`, `parse` JSON (incl. `v` = parser version), `probe` JSON, `available`, `missing_since` |
+| `files` | **actual files** | `root_id` + `rel_path` ('/'-separated, relative to root), `size`, `mtime_ns`, `quick_hash`, `parse` JSON (incl. `v` = parser version; `manual: true` when identified by hand), `probe` JSON, `available`, `missing_since`, `manual` (v6: JSON identification entered by hand, used instead of the name) |
 | `file_items` | file ↔ items | many-to-many: one file can be several episodes; a movie can have several files (versions) |
 | `scans` | scan history | `trigger`, `status` ok\|partial\|error, `stats` JSON |
-| `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at` |
+| `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`) |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
 
@@ -174,8 +179,11 @@ MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist
 3. Diff against `files`: unchanged → touch `last_seen` (and re-parse if `PARSER_VERSION` is newer). Changed →
    reset probe and re-parse. New → `quick_hash`. If it can't be opened, it's counted as "busy" and retried next scan.
 4. New file whose hash and size match a vanished file → **moved**: the row is updated in place.
-5. Each parse → `parse.parse(rel, lib_type)` → `items.link_file` (get-or-create show/season/episode or movie
-   through `item_keys`). Unrecognised files stay indexed, unlinked (and are listed by `/unrecognized` with a hint).
+5. Each parse → `identify.parsed_for` (the file's `manual` identification, else `parse.parse(rel, lib_type)`) →
+   `items.link_file` (get-or-create show/season/episode or movie through `item_keys`; an unnumbered file in a season
+   folder becomes an episode with no number, found again by title). Unrecognised files stay indexed, unlinked
+   (listed by `/unrecognized` with a hint). Walking and hashing happen **outside** transactions; writes go in
+   batches of 200, so other writers (logins, adding a library) never wait on the disks.
 6. Vanished files → `available=0` (never deleted). `items.cleanup_orphans`.
 7. ffprobe every unprobed available file (4 threads) → `files.probe`.
 8. If a TMDB key exists → `matcher.match_library`.
@@ -311,6 +319,15 @@ process-wide (`_mb_lock`), so Fix match and the scan worker together stay at 1 r
 30 days, Secure on https). `Throttle`: 10 failures / 10 min per address → 429. Password changes and resets delete the
 user's sessions. Last admin can't be demoted/removed; nobody removes themselves.
 
+### 4.4d Identify by hand (`identify.py`)
+Settings → Unrecognized files (`GET /api/unrecognized`) and a library's Unrecognized tab list unplaced files (hint +
+the parser's `guess`) and hand-identified ones (`manual`). The form loads `GET /api/libraries/{id}/names` once for its
+suggestions (`Combo.tsx`). A pasted link → `POST /api/identify/lookup` → `identify.lookup`: TMDB URLs carry the id
+(+ season/episode), IMDb ids go through TMDB `/find` (episode → show + numbers); wrong library type refused.
+`PUT /api/files/{id}/identify` → `identify.store` (in one transaction: `files.manual`, `parse` rewritten from it incl.
+`ids.tmdb`, relink, orphan cleanup) → `matcher.match_title` with the TMDB id (or a search if the title is still
+pending). `DELETE` clears it and re-parses from the name.
+
 ### 4.5 TMDB key
 UI `TmdbSettings` → `PUT /api/settings/tmdb-key` (server verifies with `/3/authentication`; a 401 → 400 and it isn't
 saved) → `settings.tmdb_key`. `GET /api/settings` returns only `{configured, kind, last4, verified_at}`.
@@ -349,7 +366,11 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music Fix match | MusicFixMatch |
 | `PUT /api/settings/music-lookup {enabled}` (state in `GET /api/settings` → `music_lookup`) | identification on/off | MusicSettings |
 | `PUT /api/settings/transcoding {max_transcodes}` (state in `GET /api/settings` → `max_transcodes`, `max_transcodes_auto`) | conversion limit | TranscodeSettings |
-| `GET /api/libraries/{id}/unrecognized` | unplaced files + `hint` | Settings |
+| `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`) + hand-identified ones (`manual`), with `library_*` | Identify.tsx |
+| `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
+| `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` (admin) | TMDB/IMDb link → fields (409 without a key, 400 wrong type/unreadable) · names in a library for suggestions | Identify.tsx |
+| `PUT /api/me/prefs {home_hero}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`) | auth.tsx, AccountSettings |
+| `PUT /api/settings/watch {watched_percent 50–100, resume_after 0–600}` (admin; state in `GET /api/settings` → `watch`) | when titles count as watched / started | WatchSettings |
 | `GET /api/tmdb/search?kind=&q=` · `POST /api/items/{id}/match {tmdb_id}` | Fix match | FixMatch |
 | `GET /api/files/{id}/stream` · `/download` | original bytes (Range) / attachment | Player, Detail |
 | `GET /api/files/{id}/remux?t=&audio=&ch=` · `/seek?t=` | audio-converting live stream (fallback) / its real start | Player |
@@ -391,11 +412,12 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
-| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials), per user, merges keep state |
+| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials), per user, merges keep state, threshold settings, per-user prefs |
+| `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB |
 | `test_subtitles.py` | language names, sidecar matching + labels, shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track burned in (also when the run starts mid-line) |
 | `test_readonly.py` | 15 write attempts must all raise and leave the tree byte-identical; reads allowed; full scan leaves media untouched; root validation |
 | `test_parse.py` | real-world names: scene packs, Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, movies |
-| `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions |
+| `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge) |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint |
 | `test_stream.py` | audio channels, burn-in + GPU filter commands, copy-HLS command, a real remux over HLS through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
@@ -418,7 +440,9 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Which codecs the browser is asked about | `canDecode()` in `web/src/pages/Player.tsx` |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |
 | Password / session rules | `auth.py` (`MIN_PASSWORD`, `SESSION_DAYS`, `_SCRYPT`, `Throttle`) |
-| When something counts as watched, what Continue Watching offers | `watch.WATCHED_AT`, `MIN_RESUME`, `continue_watching`, `next_episode` |
+| When something counts as watched, what Continue Watching offers | admin settings via `watch.thresholds` (defaults `WATCHED_PERCENT`, `RESUME_AFTER`), `continue_watching`, `next_episode` |
+| What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
+| Add a per-user preference | `auth.PREFS` + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
 | Recognise more sidecar subtitle names / languages | `subtitles.sidecars`, `subtitles.tracks` (`_FLAGS`), `subtitles.language` |
 | Auto quality sizes | `hls.LADDER`, `hls.ladder` |
 | How far ahead / behind HLS works | `AHEAD`, `SOON`, `KEEP`, `SWITCHED`, `IDLE` in `hls.py` (seconds) |

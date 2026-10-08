@@ -78,7 +78,7 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
         {data.children.map((e) => (
           <li key={e.id}>
             <Link to={`/play/${e.id}`} className={`episode ${e.progress?.watched ? "seen" : ""}`}>
-              <span className="ep-num">{e.episode_number}</span>
+              <span className="ep-num">{e.episode_number ?? "·"}</span>
               <div className="ep-thumb">
                 {e.still ? <img className="ep-img" src={e.still} alt="" loading="lazy" />
                   : <Backdrop src={null} poster={data.poster} title={e.title} className="ep-img" />}
@@ -86,7 +86,7 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
                 {progressOf(e) !== null && <div className="progress"><div style={{ width: `${progressOf(e)! * 100}%` }} /></div>}
               </div>
               <div className="ep-text">
-                <div className="ep-title">{e.title} <span className="muted">· {sxe(e.season_number!, e.episode_number!)}</span></div>
+                <div className="ep-title">{e.title} <span className="muted">· {sxe(e.season_number!, e.episode_number)}</span></div>
                 {e.overview && <p>{e.overview}</p>}
               </div>
               <span className="ep-time">{[e.air_date?.slice(0, 4), e.runtime ? `${e.runtime}m` : null].filter(Boolean).join(" · ")}</span>

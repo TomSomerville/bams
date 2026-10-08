@@ -23,6 +23,8 @@ type Quality = "auto" | number | null;
 
 const QUALITIES = [2160, 1440, 1080, 720, 480, 360];
 const FULL = 99999;  // "Full size": converted (the browser can't play the original) at the largest size
+const SPEED_MIN = 0.1, SPEED_MAX = 3;
+const clampSpeed = (r: number) => Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, r)) * 100) / 100;
 const KEYS = { quality: "bams.quality", audioLang: "bams.audioLang", subLang: "bams.subLang", surround: "bams.surround" };
 
 function pref(key: string): string | null {
@@ -118,7 +120,8 @@ function Player({ id }: { id: string }) {
   const [audio, setAudio] = useState(0);
   const [sub, setSub] = useState<string | null>(null);
   const [surround, setSurround] = useState(() => pref(KEYS.surround) === "1");
-  const [menu, setMenu] = useState<"quality" | "audio" | "subs" | null>(null);
+  const [menu, setMenu] = useState<"quality" | "audio" | "subs" | "speed" | null>(null);
+  const [rate, setRate] = useState(1);      // playback speed; each video starts at normal speed
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [idle, setIdle] = useState(false);
@@ -302,6 +305,11 @@ function Player({ id }: { id: string }) {
     return () => clearTimeout(timer);
   }, [resumed]);
 
+  // a new <video> element per stream starts at 1x: carry the chosen speed over (also in onLoadedMetadata)
+  useEffect(() => {
+    if (video.current) video.current.playbackRate = rate;
+  }, [rate]);
+
   const toggle = () => {
     const v = video.current;
     if (!v) return;
@@ -383,6 +391,7 @@ function Player({ id }: { id: string }) {
       if (e.key === "ArrowRight") seekRef.current(posRef.current + 10);
       if (e.key === "ArrowLeft") seekRef.current(posRef.current - 10);
       if (e.key === "f") fullscreen();
+      if (e.key === ">" || e.key === "<") setRate((r) => clampSpeed(r + (e.key === ">" ? 0.25 : -0.25)));
       if (e.key === "m" && video.current) { video.current.muted = !video.current.muted; setMuted(video.current.muted); }
       wake();
     };
@@ -396,7 +405,7 @@ function Player({ id }: { id: string }) {
   if (!item) return <div className="player" />;
 
   const title = show ? show.title : item.title;
-  const subtitle = item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number!)} · ${item.title}` : item.year ?? "";
+  const subtitle = item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number)} · ${item.title}` : item.year ?? "";
   const fmt = (sec: number) => fmtClock(sec) || "0:00";
   const vcodec = pb?.video_codec ?? "Video";
   const acodec = audioTracks[audio]?.codec ?? pb?.audio_codec;
@@ -436,6 +445,7 @@ function Player({ id }: { id: string }) {
           }}
           onLoadedMetadata={(e) => {
             const v = e.currentTarget;
+            v.playbackRate = rate;
             if (v.videoWidth === 0)
               toTranscode(`This browser can play the sound but not the ${pb?.video_codec ?? ""} video of this file, and the server can't convert it (no FFmpeg). You can download it.`);
             else if (mode === "file" && startAt.current) {  // resuming, or back to the original file mid-way
@@ -543,6 +553,22 @@ function Player({ id }: { id: string }) {
                 <Choice on={!surround} onClick={() => pickSurround(false)}>Stereo</Choice>
                 <Choice on={surround} onClick={() => pickSurround(true)} note="keeps 5.1">Surround</Choice>
               </>}
+            </Menu>
+          )}
+          {file && (
+            <Menu label={`${rate}x`} title="Speed" open={menu === "speed"} setOpen={(o) => setMenu(o ? "speed" : null)}>
+              <div className="speed-pick">
+                <input type="range" min={SPEED_MIN} max={SPEED_MAX} step={0.05} value={rate} aria-label="Playback speed"
+                  onChange={(e) => setRate(clampSpeed(Number(e.target.value)))}
+                  style={{ ["--pct" as string]: `${((rate - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)) * 100}%` }} />
+                <span className="speed-ends"><span>{SPEED_MIN}x</span><span>{SPEED_MAX}x</span></span>
+              </div>
+              {[0.5, 1, 1.25, 1.5, 2].map((r) => (
+                <Choice key={r} on={rate === r} onClick={() => setRate(r)}>{r === 1 ? "Normal" : `${r}x`}</Choice>
+              ))}
+              {rate > 1.5 && mode === "transcode" && <p className="speed-note">Converted video: fast speeds need a
+                server that converts faster than that, or playback pauses to catch up.</p>}
+              <p className="speed-note">Keys: &lt; and &gt;</p>
             </Menu>
           )}
           {qualities.length > 0 && (
