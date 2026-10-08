@@ -6,11 +6,14 @@ import logging
 import mimetypes
 import os
 import sqlite3
+import subprocess
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 import anyio
@@ -19,9 +22,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import fsbrowse, hls, library, matcher, music_match, probe, readonly, stream
+from . import auth, fsbrowse, hls, library, matcher, music_match, probe, readonly, stream, subtitles, watch
 from .config import VERSION, Paths
-from .db import connect, get_setting, jload, migrate, set_setting
+from .db import Tx, connect, get_setting, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
 from .musicbrainz import MusicBrainz, MusicLookupError
 from .parse import parse_episode, parse_movie
@@ -95,7 +98,25 @@ def item_detail(r: sqlite3.Row) -> dict:
     return d
 
 
-def file_info(r: sqlite3.Row) -> dict:
+def audio_tracks(pr: dict | None) -> list[dict]:
+    """The file's audio tracks as the player's menu lists them ("English · AC3 5.1 · Commentary")."""
+    out = []
+    for n, a in enumerate((pr or {}).get("audio") or []):
+        code, name = subtitles.language(a.get("language"))
+        ch = a.get("channels")
+        layout = {1: "mono", 2: "stereo", 6: "5.1", 8: "7.1"}.get(ch, f"{ch} ch" if ch else None)
+        title = a.get("title")
+        label = " · ".join(filter(None, [name or (f"Track {n + 1}" if not title else None),
+                                         " ".join(filter(None, [a.get("codec"), layout])) or None,
+                                         title if title and title != name else None]))
+        out.append({"index": n, "label": label, "language": code, "codec": a.get("codec"), "channels": ch,
+                    "default": bool(a.get("default"))})
+    return out
+
+
+def file_info(r: sqlite3.Row, with_subtitles: bool = False) -> dict:
+    """A file as the API returns it. `with_subtitles` also lists sidecar subtitle files, which means listing
+    the file's folder (fine for one title's files, not for long lists)."""
     pr, pa = jload(r["probe"]), jload(r["parse"])
     if (pa or {}).get("kind") == "track":  # music
         pb = stream.plan_audio(pr, r["rel_path"])
@@ -109,12 +130,18 @@ def file_info(r: sqlite3.Row) -> dict:
         ff = bool(stream.ffmpeg_path())
         pb["transcode_url"] = f"/api/files/{r['id']}/transcode" if ff else None
         pb["hls_url"] = f"/api/files/{r['id']}/hls" if ff else None
-    return {
+    d = {
         "id": r["id"], "path": r["rel_path"], "root": r["root"], "size": r["size"],
         "available": bool(r["available"]), "probe": pr,
         "release": (pa or {}).get("release"), "playback": pb,
         "stream_url": f"/api/files/{r['id']}/stream", "download_url": f"/api/files/{r['id']}/download",
     }
+    if (pa or {}).get("kind") != "track":
+        d["audio_tracks"] = audio_tracks(pr)
+        if with_subtitles:
+            video = Path(r["root"]) / r["rel_path"] if r["available"] else None
+            d["subtitles"] = subtitles.tracks(pr, video, r["id"])
+    return d
 
 
 def unrecognized_hint(rel: str, lib_type: str) -> str:
@@ -174,6 +201,92 @@ class TranscodingIn(BaseModel):
 class HlsIn(BaseModel):
     audio: int = Field(0, ge=0, le=31)
     height: int | None = Field(None, ge=144, le=4320)  # quality picker; None = as large as the encoder allows
+    auto: bool = False       # automatic quality: several sizes, the player picks by throughput
+    remux: bool = False      # audio-only remux: the video is copied, only the audio converted
+    channels: int = Field(2, ge=1, le=8)  # 6 = keep 5.1 when the source has it
+    burn: int | None = Field(None, ge=0, le=99)  # image subtitle stream to paint onto the picture
+    start: float = Field(0, ge=0)  # where the player starts, so the first FFmpeg run starts there
+
+
+class LoginIn(BaseModel):
+    name: str = Field(max_length=100)
+    password: str = Field(max_length=1024)
+
+
+class PasswordIn(BaseModel):
+    current: str = Field(max_length=1024)
+    new: str = Field(max_length=1024)
+
+
+class UserIn(BaseModel):
+    name: str = Field(max_length=100)
+    password: str = Field(max_length=1024)
+    is_admin: bool = False
+
+
+class UserPatch(BaseModel):
+    name: str | None = Field(None, max_length=100)
+    password: str | None = Field(None, max_length=1024)
+    is_admin: bool | None = None
+
+
+class ProgressIn(BaseModel):
+    position: float = Field(ge=0)
+    duration: float | None = Field(None, gt=0)
+
+
+class WatchedIn(BaseModel):
+    watched: bool
+
+
+# ------------------------------------------------------------------ login
+
+PUBLIC_API = frozenset({"/api/auth/state", "/api/auth/login", "/api/auth/setup"})
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class LoginRequired:
+    """ASGI middleware: every /api/ route except signing in needs a valid session cookie. The signed-in user
+    goes into `request.state.user`. Changes (POST/PUT/PATCH/DELETE) from another site's page are refused.
+    Plain ASGI rather than BaseHTTPMiddleware, which would sit between FFmpeg's streams and the client."""
+
+    def __init__(self, app, lookup):
+        self.app, self.lookup = app, lookup
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        if scope["type"] != "http" or not path.startswith("/api/") or path in PUBLIC_API:
+            return await self.app(scope, receive, send)
+        req = Request(scope)
+        user = await anyio.to_thread.run_sync(self.lookup, req.cookies.get(auth.COOKIE))
+        if user is None:
+            return await JSONResponse({"detail": "Sign in to BAMS first."}, status_code=401)(scope, receive, send)
+        if scope.get("method") not in _SAFE_METHODS and not same_origin(req):
+            return await JSONResponse({"detail": "Refused: the request came from another site."},
+                                      status_code=403)(scope, receive, send)
+        scope.setdefault("state", {})["user"] = user
+        return await self.app(scope, receive, send)
+
+
+def same_origin(req: Request) -> bool:
+    """Browsers send Origin with every cross-site POST/PUT/DELETE; tools like curl send none (and no cookie
+    unless given one). A sandboxed page's "null" origin doesn't match."""
+    origin = req.headers.get("origin")
+    return not origin or urlsplit(origin).netloc == req.headers.get("host")
+
+
+def current_user(request: Request) -> dict:
+    return request.state.user
+
+
+def admin_only(request: Request) -> dict:
+    u = request.state.user
+    if not u["is_admin"]:
+        raise HTTPException(403, "Only an admin can do that.")
+    return u
+
+
+ADMIN = [Depends(admin_only)]
 
 
 # ------------------------------------------------------------------ app
@@ -183,11 +296,17 @@ class SpaFiles(StaticFiles):
 
     async def get_response(self, path, scope):
         try:
-            return await super().get_response(path, scope)
+            resp = await super().get_response(path, scope)
         except StarletteHTTPException as e:
-            if e.status_code != 404 or path.replace("\\", "/").startswith("api/"):  # OS-normalised path
+            p = path.replace("\\", "/")  # OS-normalised path
+            if e.status_code != 404 or p.startswith(("api/", "assets/")):  # a missing script stays a 404
                 raise
-            return await super().get_response("index.html", scope)
+            resp = await super().get_response("index.html", scope)
+        if resp.media_type == "text/html":
+            # the page names this build's scripts: browsers must re-check it, or after an update they keep
+            # an old page whose scripts no longer exist (the hashed scripts themselves can be cached)
+            resp.headers["cache-control"] = "no-cache"
+        return resp
 
 
 def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | None = None) -> FastAPI:
@@ -207,6 +326,40 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         return 4 if stream.video_encoder() in stream.HARDWARE else 2
 
     transcodes = hls.Transcodes(paths.transcode, transcode_limit)
+    keyframes = hls.Keyframes(paths.cache / "keyframes")
+    throttle = auth.Throttle()
+
+    # Signed-in users by cookie, for a minute: a playing video asks for a segment every few seconds, and
+    # each would otherwise be a DB lookup. Signing out / password changes clear it.
+    seen: dict[str, tuple[float, dict]] = {}
+    seen_lock = threading.Lock()
+
+    def lookup(token: str | None) -> dict | None:
+        if not token:
+            return None
+        t = time.monotonic()
+        with seen_lock:
+            hit = seen.get(token)
+            if hit and t - hit[0] < 60:
+                return hit[1]
+        con = connect(paths.db)
+        try:
+            u = auth.session_user(con, token)
+        finally:
+            con.close()
+        user = {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"])} if u else None
+        with seen_lock:
+            if len(seen) > 1000:
+                seen.clear()
+            if user:
+                seen[token] = (t, user)
+            else:
+                seen.pop(token, None)
+        return user
+
+    def forget_sessions() -> None:
+        with seen_lock:
+            seen.clear()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -224,6 +377,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     app.state.paths = paths
     app.state.scheduler = scheduler
     app.state.transcodes = transcodes
+    app.add_middleware(LoginRequired, lookup=lookup)
 
     def db() -> Iterator[sqlite3.Connection]:
         con = connect(paths.db)
@@ -236,14 +390,123 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     async def _lib_err(_req: Request, e: library.LibraryError):
         return JSONResponse({"detail": str(e)}, status_code=400)
 
+    # -- signing in, accounts
+    def _set_cookie(resp: Response, request: Request, token: str) -> None:
+        resp.set_cookie(auth.COOKIE, token, max_age=auth.SESSION_DAYS * 86400, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https", path="/")
+
+    def _client(request: Request) -> str:
+        return request.client.host if request.client else "?"
+
+    @app.get("/api/auth/state")
+    def auth_state(request: Request, con=Depends(db)):
+        """Who is signed in (null if nobody), and whether the first admin account still has to be created
+        (`setup`), which this browser may do only from the server itself (`setup_here`)."""
+        u = lookup(request.cookies.get(auth.COOKIE))
+        empty = auth.user_count(con) == 0
+        return {"user": u, "setup": empty, "setup_here": empty and auth.is_loopback(_client(request))}
+
+    @app.post("/api/auth/setup")
+    def auth_setup(body: LoginIn, request: Request, response: Response, con=Depends(db)):
+        """Create the first account (an admin). Only while there are no accounts, and only from a browser on
+        the server itself; elsewhere, `bams user add NAME --admin` on the server does it."""
+        if not same_origin(request):
+            raise HTTPException(403, "Refused: the request came from another site.")
+        if not auth.is_loopback(_client(request)):
+            raise HTTPException(403, "The first account can only be created on the server itself (open BAMS at "
+                                     "http://localhost:8484 there), or with `bams user add NAME --admin`.")
+        with Tx(con):
+            if auth.user_count(con):
+                raise HTTPException(409, "BAMS already has an admin. Sign in instead.")
+            try:
+                uid = auth.create_user(con, body.name, body.password, is_admin=True)
+            except auth.AuthError as e:
+                raise HTTPException(400, str(e)) from None
+        _set_cookie(response, request, auth.new_session(con, uid, request.headers.get("user-agent")))
+        return auth.public(auth.get_user(con, uid))
+
+    @app.post("/api/auth/login")
+    def auth_login(body: LoginIn, request: Request, response: Response, con=Depends(db)):
+        if not same_origin(request):
+            raise HTTPException(403, "Refused: the request came from another site.")
+        ip = _client(request)
+        if throttle.blocked(ip):
+            raise HTTPException(429, "Too many wrong passwords. Wait ten minutes and try again.")
+        u = auth.authenticate(con, body.name, body.password)
+        if not u:
+            throttle.fail(ip)
+            log.warning("failed sign-in for %r from %s", body.name[:40], ip)
+            raise HTTPException(401, "Wrong name or password.")
+        throttle.ok(ip)
+        _set_cookie(response, request, auth.new_session(con, u["id"], request.headers.get("user-agent")))
+        return auth.public(u)
+
+    @app.post("/api/auth/logout", status_code=204)
+    def auth_logout(request: Request, response: Response, con=Depends(db)):
+        auth.end_session(con, request.cookies.get(auth.COOKIE))
+        forget_sessions()
+        response.delete_cookie(auth.COOKIE, path="/")
+
+    @app.put("/api/auth/password")
+    def change_password(body: PasswordIn, request: Request, response: Response, con=Depends(db),
+                        me=Depends(current_user)):
+        """Change your own password. Signs you out everywhere else."""
+        u = auth.get_user(con, me["id"])
+        if not auth.verify_password(body.current, u["password"]):
+            raise HTTPException(400, "Your current password isn't right.")
+        try:
+            auth.update_user(con, me["id"], password=body.new)
+        except auth.AuthError as e:
+            raise HTTPException(400, str(e)) from None
+        forget_sessions()
+        _set_cookie(response, request, auth.new_session(con, me["id"], request.headers.get("user-agent")))
+        return auth.public(auth.get_user(con, me["id"]))
+
+    @app.get("/api/users", dependencies=ADMIN)
+    def list_users(con=Depends(db)):
+        return [auth.public(u) for u in con.execute("SELECT * FROM users ORDER BY name COLLATE NOCASE")]
+
+    @app.post("/api/users", status_code=201, dependencies=ADMIN)
+    def add_user(body: UserIn, con=Depends(db)):
+        try:
+            uid = auth.create_user(con, body.name, body.password, body.is_admin)
+        except auth.AuthError as e:
+            raise HTTPException(400, str(e)) from None
+        return auth.public(auth.get_user(con, uid))
+
+    @app.patch("/api/users/{user_id}", dependencies=ADMIN)
+    def patch_user(user_id: int, body: UserPatch, con=Depends(db)):
+        """Rename, reset the password (signs them out), or make/unmake an admin."""
+        try:
+            with Tx(con):
+                auth.update_user(con, user_id, **body.model_dump())
+        except auth.AuthError as e:
+            raise HTTPException(400, str(e)) from None
+        forget_sessions()
+        return auth.public(auth.get_user(con, user_id))
+
+    @app.delete("/api/users/{user_id}", status_code=204, dependencies=ADMIN)
+    def remove_user(user_id: int, me=Depends(current_user), con=Depends(db)):
+        if user_id == me["id"]:
+            raise HTTPException(400, "You can't remove your own account.")
+        try:
+            with Tx(con):
+                auth.delete_user(con, user_id)
+        except auth.AuthError as e:
+            raise HTTPException(400, str(e)) from None
+        forget_sessions()
+
     # -- status & settings
     @app.get("/api/status")
-    def status(con=Depends(db)):
+    def status(con=Depends(db), me=Depends(current_user)):
         key = get_setting(con, "tmdb_key")
         enc = stream.video_encoder()
+        adm = me["is_admin"]  # where things live on the server is for admins
         return {
-            "version": VERSION, "data_dir": str(paths.root),
-            "ffprobe": probe.ffprobe_path(), "ffmpeg": stream.ffmpeg_path(), "tmdb_configured": bool(key),
+            "version": VERSION, "data_dir": str(paths.root) if adm else None,
+            "ffprobe": (probe.ffprobe_path() if adm else bool(probe.ffprobe_path())) or None,
+            "ffmpeg": (stream.ffmpeg_path() if adm else bool(stream.ffmpeg_path())) or None,
+            "tmdb_configured": bool(key),
             "video_encoder": {"id": enc, "name": stream.ENCODER_NAMES[enc], "hardware": enc in stream.HARDWARE,
                               "hw_decode": bool(stream.hwaccel_args(enc))} if enc else None,
             "transcodes": {"running": transcodes.running(), "limit": transcode_limit()},
@@ -263,19 +526,19 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 "max_transcodes": int(get_setting(con, "max_transcodes", "0") or 0),
                 "max_transcodes_auto": auto_transcode_limit()}
 
-    @app.put("/api/settings/transcoding")
+    @app.put("/api/settings/transcoding", dependencies=ADMIN)
     def put_transcoding(body: TranscodingIn, con=Depends(db)):
         """How many videos may be converted at once (0 = automatic: 4 on a GPU encoder, 2 on the CPU)."""
         set_setting(con, "max_transcodes", str(body.max_transcodes))
         return {"max_transcodes": body.max_transcodes, "limit": transcode_limit()}
 
-    @app.put("/api/settings/music-lookup")
+    @app.put("/api/settings/music-lookup", dependencies=ADMIN)
     def put_music_lookup(body: ToggleIn, con=Depends(db)):
         """Turn online music identification (MusicBrainz, Cover Art Archive, Wikipedia) on or off."""
         set_setting(con, "music_lookup", "1" if body.enabled else "0")
         return {"music_lookup": body.enabled}
 
-    @app.put("/api/settings/tmdb-key")
+    @app.put("/api/settings/tmdb-key", dependencies=ADMIN)
     def put_key(body: KeyIn, con=Depends(db)):
         """Checked with TMDB before saving. A rejected key is not saved; the full key is never returned."""
         try:
@@ -296,13 +559,13 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         set_setting(con, "tmdb_verified_at", verified)
         return _tmdb_status(con)
 
-    @app.delete("/api/settings/tmdb-key")
+    @app.delete("/api/settings/tmdb-key", dependencies=ADMIN)
     def delete_key(con=Depends(db)):
         set_setting(con, "tmdb_key", None)
         set_setting(con, "tmdb_verified_at", None)
         return _tmdb_status(con)
 
-    @app.post("/api/settings/tmdb-key/test")
+    @app.post("/api/settings/tmdb-key/test", dependencies=ADMIN)
     def test_key(con=Depends(db)):
         """Check the saved key with TMDB right now."""
         key = get_setting(con, "tmdb_key")
@@ -319,7 +582,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         set_setting(con, "tmdb_verified_at", str(int(time.time())))
         return {"ok": True, "message": "Key works."}
 
-    @app.get("/api/fs/browse")
+    @app.get("/api/fs/browse", dependencies=ADMIN)
     def fs_browse(path: str | None = None):
         """List folders on the server, for picking library folders. Names only; nothing is changed."""
         try:
@@ -332,7 +595,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     def list_libraries(con=Depends(db)):
         return [library.describe(con, r) for r in con.execute("SELECT * FROM libraries ORDER BY name")]
 
-    @app.post("/api/libraries", status_code=201)
+    @app.post("/api/libraries", status_code=201, dependencies=ADMIN)
     def create_library(body: LibraryIn, con=Depends(db)):
         lib_id = library.create(con, paths.root, body.name, body.type, body.paths, body.scan_interval_hours)
         scheduler.request(lib_id, "manual")
@@ -342,25 +605,25 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     def get_library(lib_id: int, con=Depends(db)):
         return library.describe(con, library.get(con, lib_id))
 
-    @app.patch("/api/libraries/{lib_id}")
+    @app.patch("/api/libraries/{lib_id}", dependencies=ADMIN)
     def patch_library(lib_id: int, body: LibraryPatch, con=Depends(db)):
         library.update(con, paths.root, lib_id, **body.model_dump())
         if body.add_paths or body.remove_paths:
             scheduler.request(lib_id, "manual")  # index the new folder (or drop the removed one's items) now
         return library.describe(con, library.get(con, lib_id))
 
-    @app.delete("/api/libraries/{lib_id}", status_code=204)
+    @app.delete("/api/libraries/{lib_id}", status_code=204, dependencies=ADMIN)
     def delete_library(lib_id: int, con=Depends(db)):
         """Removes BAMS's records only. Media files are never touched."""
         library.delete(con, lib_id)
 
-    @app.post("/api/libraries/{lib_id}/scan", status_code=202)
+    @app.post("/api/libraries/{lib_id}/scan", status_code=202, dependencies=ADMIN)
     def scan_library(lib_id: int, rematch: bool = False, con=Depends(db)):
         library.get(con, lib_id)
         accepted = scheduler.request(lib_id, "manual", retry_unmatched=rematch)  # False: already queued/running
         return {"accepted": accepted, **scheduler.status()}
 
-    @app.get("/api/scans")
+    @app.get("/api/scans", dependencies=ADMIN)
     def list_scans(library_id: int | None = None, limit: int = Query(20, le=200), con=Depends(db)):
         q = "SELECT * FROM scans" + (" WHERE library_id=?" if library_id else "") + " ORDER BY id DESC LIMIT ?"
         rows = con.execute(q, ((library_id,) if library_id else ()) + (limit,)).fetchall()
@@ -375,7 +638,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     @app.get("/api/libraries/{lib_id}/items")
     def library_items(lib_id: int, sort: str = "title", kind: str | None = None, match_status: str | None = None,
-                      q: str | None = None, limit: int = Query(500, le=5000), offset: int = 0, con=Depends(db)):
+                      q: str | None = None, limit: int = Query(500, le=5000), offset: int = 0, con=Depends(db),
+                      me=Depends(current_user)):
         """Top-level items of a library: shows, movies, or (music, `kind=artist|album|track`) artists by default."""
         lib = library.get(con, lib_id)
         allowed = _LIB_KINDS[lib["type"]]
@@ -390,12 +654,12 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             args.append(f"%{q}%")
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {_SORTS.get(sort, _SORTS['title'])} "
                            "LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
-        return [item_summary(r) for r in rows]
+        return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
 
     @app.get("/api/items")
     def all_items(kind: str = Query("show,movie", pattern="^(show|movie|artist|album|track)(,(show|movie|artist|album|track))*$"),
                   sort: str = "added", q: str | None = None, genre: str | None = None,
-                  limit: int = Query(100, le=5000), con=Depends(db)):
+                  limit: int = Query(100, le=5000), con=Depends(db), me=Depends(current_user)):
         """Shows/movies (default) or artists/albums/tracks across every library (Home rows, search)."""
         kinds = kind.split(",")
         where, args = [f"kind IN ({','.join('?' * len(kinds))})"], list(kinds)
@@ -407,10 +671,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             args.append(f'%"{genre}"%')
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {_SORTS.get(sort, _SORTS['added'])} LIMIT ?",
                            (*args, limit)).fetchall()
-        return [item_summary(r) for r in rows]
+        return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
 
     @app.get("/api/items/{item_id}")
-    def get_item(item_id: int, con=Depends(db)):
+    def get_item(item_id: int, con=Depends(db), me=Depends(current_user)):
         r = con.execute(f"{ITEM_SELECT} WHERE id=?", (item_id,)).fetchone()
         if not r:
             raise HTTPException(404, "no such item")
@@ -426,10 +690,55 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                  }.get(r["kind"], "episode_number")
         d["children"] = [item_summary(c) for c in con.execute(
             f"{ITEM_SELECT} WHERE parent_id=? ORDER BY {order}", (item_id,))]
-        d["files"] = [file_info(f) for f in con.execute(
+        playable = r["kind"] in watch.PLAYABLE
+        d["files"] = [file_info(f, with_subtitles=playable) for f in con.execute(
             """SELECT f.*, lr.path AS root FROM files f JOIN file_items fi ON fi.file_id=f.id
                JOIN library_roots lr ON lr.id=f.root_id WHERE fi.item_id=? ORDER BY f.rel_path""", (item_id,))]
+        watch.annotate(con, me["id"], [d, *d["children"], *d["ancestors"]])
+        if r["kind"] == "episode":
+            d["next_id"] = watch.next_episode(con, item_id)
         return d
+
+    # -- watch state (per user)
+    def _playable(con, item_id: int) -> None:
+        r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
+        if not r or r["kind"] not in watch.PLAYABLE:
+            raise HTTPException(404, "no such movie/episode")
+
+    @app.put("/api/items/{item_id}/progress")
+    def put_progress(item_id: int, body: ProgressIn, con=Depends(db), me=Depends(current_user)):
+        """The player's position in a movie/episode (sent every few seconds while playing). Past 90% it counts
+        as watched."""
+        _playable(con, item_id)
+        return watch.record_progress(con, me["id"], item_id, body.position, body.duration)
+
+    @app.put("/api/items/{item_id}/watched")
+    def put_watched(item_id: int, body: WatchedIn, con=Depends(db), me=Depends(current_user)):
+        """Mark a movie/episode, or every episode of a season or show, watched or not."""
+        n = watch.set_watched(con, me["id"], item_id, body.watched)
+        if not n:
+            raise HTTPException(404, "nothing to mark: not a movie, episode, season or show")
+        return {"items": n, "watched": body.watched}
+
+    @app.get("/api/continue")
+    def continue_watching(limit: int = Query(20, le=100), con=Depends(db), me=Depends(current_user)):
+        """Continue Watching: titles stopped part-way ("resume"), and the next episode of shows whose last
+        watched episode was finished ("next"). Episodes carry their show's title and art."""
+        picks = watch.continue_watching(con, me["id"], limit)
+        out = []
+        for item_id, why in picks:
+            r = con.execute(f"{ITEM_SELECT} WHERE id=?", (item_id,)).fetchone()
+            if not r:
+                continue
+            d = item_summary(r)
+            d["reason"] = why
+            if r["kind"] == "episode":
+                show = con.execute("""SELECT sh.id, sh.title, sh.poster, sh.backdrop FROM items s
+                                      JOIN items sh ON sh.id=s.parent_id WHERE s.id=?""", (r["parent_id"],)).fetchone()
+                d["show"] = {"id": show["id"], "title": show["title"], "poster": _img(show["poster"]),
+                             "backdrop": _img(show["backdrop"])}
+            out.append(d)
+        return watch.annotate(con, me["id"], out)
 
     @app.get("/api/items/{item_id}/tracks")
     def item_tracks(item_id: int, con=Depends(db)):
@@ -463,7 +772,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             })
         return out
 
-    @app.get("/api/libraries/{lib_id}/unrecognized")
+    @app.get("/api/libraries/{lib_id}/unrecognized", dependencies=ADMIN)
     def unrecognized(lib_id: int, con=Depends(db)):
         """Indexed files the parser couldn't place, each with a hint about why."""
         lib = library.get(con, lib_id)
@@ -472,7 +781,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                               ORDER BY f.rel_path""", (lib_id,))
         return [{**file_info(r), "hint": unrecognized_hint(r["rel_path"], lib["type"])} for r in rows]
 
-    @app.get("/api/tmdb/search")
+    @app.get("/api/tmdb/search", dependencies=ADMIN)
     def tmdb_search(q: str, kind: str = Query(pattern="^(show|movie)$"), year: int | None = None, con=Depends(db)):
         t = tmdb_client(con)
         if not t:
@@ -487,8 +796,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                  "year": matcher._year(x.get("first_air_date") or x.get("release_date")),
                  "overview": x.get("overview"), "poster_path": x.get("poster_path")} for x in res[:20]]
 
-    @app.post("/api/items/{item_id}/match")
-    def fix_match(item_id: int, body: MatchIn, con=Depends(db)):
+    @app.post("/api/items/{item_id}/match", dependencies=ADMIN)
+    def fix_match(item_id: int, body: MatchIn, con=Depends(db), me=Depends(current_user)):
         """Fix match: pin a show/movie to a specific TMDB id."""
         r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
         if not r or r["kind"] not in ("show", "movie"):
@@ -504,9 +813,9 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             t.close()
         keep = con.execute("SELECT id FROM items WHERE tmdb_id=? AND kind=? ORDER BY id LIMIT 1",
                            (body.tmdb_id, r["kind"])).fetchone()
-        return get_item(keep["id"], con)
+        return get_item(keep["id"], con, me)
 
-    @app.get("/api/musicbrainz/search")
+    @app.get("/api/musicbrainz/search", dependencies=ADMIN)
     def musicbrainz_search(kind: str = Query(pattern="^(album|artist)$"), q: str = Query(min_length=1),
                            artist: str | None = None):
         """Fix match for music: candidate releases (albums) or artists on MusicBrainz."""
@@ -528,8 +837,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                  "type": (r.get("release-group") or {}).get("primary-type"), "status": r.get("status"),
                  "disambiguation": r.get("disambiguation") or None} for r in rels]
 
-    @app.post("/api/items/{item_id}/music-match")
-    def music_fix_match(item_id: int, body: MusicMatchIn, con=Depends(db)):
+    @app.post("/api/items/{item_id}/music-match", dependencies=ADMIN)
+    def music_fix_match(item_id: int, body: MusicMatchIn, con=Depends(db), me=Depends(current_user)):
         """Fix match for music: pin an album to a MusicBrainz release, or an artist to a MusicBrainz artist."""
         r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
         if not r or r["kind"] not in ("album", "artist"):
@@ -540,7 +849,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 fn(con, mb, paths.images, item_id, mbid=body.mbid.lower(), manual=True, lang=language(con))
         except MusicLookupError as e:
             raise HTTPException(502, str(e)) from None
-        return get_item(item_id, con)
+        return get_item(item_id, con, me)
 
     # -- files & images
     def _file_path(con, file_id: int) -> tuple[Path, str]:
@@ -570,55 +879,103 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         p, _ = _file_path(con, file_id)
         return {"t": stream.remux_start(p, t)}
 
-    @app.get("/api/files/{file_id}/remux")
-    async def remux_file(file_id: int, t: float = Query(0, ge=0), audio: int = Query(0, ge=0, le=31)):
-        """Video copied as-is, audio converted to AAC, as fragmented MP4 starting at `t` seconds.
-        For files whose audio browsers can't decode (AC3/EAC3/DTS/TrueHD). Seek = request again with ?t=."""
+    @app.get("/api/files/{file_id}/subtitles/{track}.vtt")
+    def subtitle(file_id: int, track: str, shift: float = Query(0, ge=0), con=Depends(db)):
+        """A text subtitle track (embedded "e{n}" or sidecar file "x{n}") as WebVTT. `shift`: the live stream's
+        start, for players of the remux/plain transcode streams, whose clock starts at 0 there."""
+        p, _ = _file_path(con, file_id)
+        row = con.execute("SELECT probe, mtime_ns FROM files WHERE id=?", (file_id,)).fetchone()
+        tr = next((x for x in subtitles.tracks(jload(row["probe"]), p, file_id) if x["id"] == track), None)
+        if not tr:
+            raise HTTPException(404, "no such subtitle track")
+        if tr["image"]:
+            raise HTTPException(400, "This is a picture-based subtitle track; it's burned into a converted video "
+                                     "instead.")
+        try:
+            vtt = subtitles.webvtt(p, tr, paths.cache / "subtitles", row["mtime_ns"])
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            log.warning("subtitle %s of file %s: %s", track, file_id, e)
+            raise HTTPException(500, f"Couldn't convert these subtitles: {e}") from None
+        return Response(subtitles.shift(vtt, shift), media_type="text/vtt; charset=utf-8",
+                        headers={"cache-control": "private, max-age=300"})
+
+    def _probe_of(file_id: int) -> tuple[Path, dict]:
         con = connect(paths.db)
         try:
             p, _ = _file_path(con, file_id)
             row = con.execute("SELECT probe, parse FROM files WHERE id=?", (file_id,)).fetchone()
         finally:
             con.close()
-        vcodec = stream.plan(jload(row["probe"]), jload(row["parse"]))["video_codec"]
-        return _pipe(stream.remux_cmd, (p, t, vcodec, audio), "video/mp4")
+        return p, {"probe": jload(row["probe"]) or {}, "parse": jload(row["parse"])}
+
+    def _channels(pr: dict, audio: int, want: int) -> int:
+        tracks = pr.get("audio") or []
+        return stream.audio_channels(tracks[audio] if audio < len(tracks) else None, want)
+
+    @app.get("/api/files/{file_id}/remux")
+    async def remux_file(file_id: int, t: float = Query(0, ge=0), audio: int = Query(0, ge=0, le=31),
+                         ch: int = Query(2, ge=1, le=8)):
+        """Video copied as-is, audio converted to AAC (`ch=6`: 5.1 when the track has it), as fragmented MP4
+        starting at `t` seconds. For files whose audio browsers can't decode (AC3/EAC3/DTS/TrueHD), or another
+        audio track than the first. Seek = request again with ?t=. (The player prefers HLS: POST /hls copy.)"""
+        p, info = await anyio.to_thread.run_sync(_probe_of, file_id)
+        vcodec = stream.plan(info["probe"], info["parse"])["video_codec"]
+        return _pipe(stream.remux_cmd, (p, t, vcodec, audio, _channels(info["probe"], audio, ch)), "video/mp4")
 
     @app.get("/api/files/{file_id}/transcode")
     async def transcode_file(file_id: int, t: float = Query(0, ge=0), audio: int = Query(0, ge=0, le=31),
-                             h: int | None = Query(None, ge=144, le=4320)):
+                             h: int | None = Query(None, ge=144, le=4320), ch: int = Query(2, ge=1, le=8),
+                             sub: int | None = Query(None, ge=0, le=99)):
         """Video converted to H.264 (GPU when available) and audio to AAC, as fragmented MP4 starting
         exactly at `t` seconds, at most `h` pixels high. For codecs the browser can't decode (Xvid, MPEG-2,
-        VC-1, HEVC in Firefox...) when it can't use HLS (`POST /hls`). Seek = request again with ?t=."""
-        con = connect(paths.db)
-        try:
-            p, _ = _file_path(con, file_id)
-            row = con.execute("SELECT probe FROM files WHERE id=?", (file_id,)).fetchone()
-        finally:
-            con.close()
-        video = (jload(row["probe"]) or {}).get("video")
+        VC-1, HEVC in Firefox...) when it can't use HLS (`POST /hls`). Seek = request again with ?t=.
+        `sub`: an image subtitle stream to burn in."""
+        p, info = await anyio.to_thread.run_sync(_probe_of, file_id)
+        pr = info["probe"]
         try:
             transcodes.check()
         except hls.Busy as e:
             raise HTTPException(503, str(e)) from None
-        return _pipe(stream.transcode_cmd, (p, t, video, audio, None, h), "video/mp4", on_start=transcodes.add_pipe)
+        return _pipe(stream.transcode_cmd, (p, t, pr.get("video"), audio, None, h, _channels(pr, audio, ch), sub),
+                     "video/mp4", on_start=transcodes.add_pipe)
 
     @app.post("/api/files/{file_id}/hls")
     def hls_start(file_id: int, body: HlsIn, con=Depends(db)):
-        """Start an HLS conversion of a video (H.264 + AAC, 4-second segments made on demand). The player
-        loads `playlist` and seeks by itself. Close it with DELETE /api/hls/{id} (or it closes when idle)."""
+        """Start an HLS session for a video. Converted (H.264 + AAC, 4-second segments made on demand; `auto`
+        lists several sizes for the player to choose between, `height` caps the size, `burn` paints an image
+        subtitle track on) or, with `remux`, the video copied and only the audio converted (segments at the
+        file's own keyframes). The player loads `playlist` and seeks by itself. Close it with
+        DELETE /api/hls/{id} (or it closes when idle)."""
         p, _ = _file_path(con, file_id)
-        pr = jload(con.execute("SELECT probe FROM files WHERE id=?", (file_id,)).fetchone()["probe"]) or {}
+        row = con.execute("SELECT probe, parse, size, mtime_ns FROM files WHERE id=?", (file_id,)).fetchone()
+        pr = jload(row["probe"]) or {}
         if not pr.get("duration"):
             raise HTTPException(409, "This file hasn't been probed yet, so its length isn't known and it can't be "
                                      "split into segments.")
-        if not stream.ffmpeg_path() or not stream.video_encoder():
-            raise HTTPException(503, "The server can't convert video: FFmpeg or a working H.264 encoder is missing.")
-        try:
-            s = transcodes.create(file_id, p, pr.get("video"), pr["duration"], body.audio, body.height)
-        except hls.Busy as e:
-            raise HTTPException(503, str(e)) from None
+        if not stream.ffmpeg_path():
+            raise HTTPException(503, "The server can't convert video: FFmpeg wasn't found.")
+        ch = _channels(pr, body.audio, body.channels)
+        if body.remux:
+            kf = keyframes.get(file_id, p, row["size"], row["mtime_ns"])
+            if not kf:
+                raise HTTPException(409, "Couldn't list this file's keyframes, so it can't be split without "
+                                         "converting the video.")
+            s = transcodes.create(file_id, p, pr.get("video"), pr["duration"], body.audio, channels=ch,
+                                  keyframes=kf, start=body.start, bitrate=pr.get("bitrate"),
+                                  video_codec=stream.plan(pr, jload(row["parse"]))["video_codec"])
+        else:
+            enc = stream.video_encoder()
+            if not enc:
+                raise HTTPException(503, "The server can't convert video: FFmpeg has no working H.264 encoder.")
+            heights = hls.ladder(pr.get("video"), enc) if body.auto and not body.height else [body.height]
+            try:
+                s = transcodes.create(file_id, p, pr.get("video"), pr["duration"], body.audio, heights, channels=ch,
+                                      burn=body.burn, start=body.start, encoder=enc)
+            except hls.Busy as e:
+                raise HTTPException(503, str(e)) from None
         return {"id": s.id, "playlist": f"/api/hls/{s.id}/index.m3u8", "duration": s.duration,
-                "segment": stream.SEGMENT}
+                "variants": [{"height": v.resolution[1] if v.resolution else v.height, "bandwidth": v.bandwidth}
+                             for v in s.variants], "copy": body.remux, "channels": ch}
 
     def _session(sid: str) -> hls.Session:
         try:
@@ -626,17 +983,23 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         except KeyError:
             raise HTTPException(404, "no such conversion (it was closed, or the server restarted)") from None
 
-    @app.get("/api/hls/{sid}/index.m3u8")
-    def hls_playlist(sid: str):
-        return Response(_session(sid).playlist(), media_type="application/vnd.apple.mpegurl",
-                        headers={"cache-control": "no-store"})
+    _M3U8 = {"media_type": "application/vnd.apple.mpegurl", "headers": {"cache-control": "no-store"}}
 
-    @app.get("/api/hls/{sid}/{k}.ts")
-    def hls_segment(sid: str, k: int):
-        """One segment, made first if needed (waits up to a minute). Sync: runs in the thread pool."""
+    @app.get("/api/hls/{sid}/index.m3u8")
+    def hls_master(sid: str):
+        return Response(_session(sid).playlist(), **_M3U8)
+
+    @app.get("/api/hls/{sid}/{v}/index.m3u8")
+    def hls_playlist(sid: str, v: int):
         s = _session(sid)
         try:
-            f = transcodes.segment(s, k)
+            return Response(transcodes.variant(s, v).playlist(), **_M3U8)
+        except KeyError:
+            raise HTTPException(404, "no such variant") from None
+
+    def _segment_errors(fn):
+        try:
+            return fn()
         except KeyError:
             raise HTTPException(404, "no such segment") from None
         except hls.SegmentGone:
@@ -647,7 +1010,24 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             raise HTTPException(504, "the segment took too long to make") from None
         except (RuntimeError, OSError) as e:
             raise HTTPException(500, str(e)) from None
-        return FileResponse(f, media_type="video/mp2t", headers={"cache-control": "no-store"})
+
+    @app.get("/api/hls/{sid}/{v}/init.mp4")
+    def hls_init(sid: str, v: int):
+        s = _session(sid)
+        f = _segment_errors(lambda: transcodes.init(s, v))
+        return FileResponse(f, media_type="video/mp4", headers={"cache-control": "no-store"})
+
+    @app.get("/api/hls/{sid}/{v}/{seg}")
+    def hls_segment(sid: str, v: int, seg: str):
+        """One segment (`{k}.ts` converted, `{k}.m4s` copied), made first if needed (waits up to a minute).
+        Sync: runs in the thread pool."""
+        k, _, ext = seg.partition(".")
+        if not k.isdigit() or ext not in ("ts", "m4s"):
+            raise HTTPException(404, "no such segment")
+        s = _session(sid)
+        f = _segment_errors(lambda: transcodes.segment(s, v, int(k)))
+        return FileResponse(f, media_type="video/mp2t" if ext == "ts" else "video/iso.segment",
+                            headers={"cache-control": "no-store"})
 
     @app.delete("/api/hls/{sid}", status_code=204)
     def hls_stop(sid: str):

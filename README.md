@@ -8,14 +8,16 @@ descriptions, and streams to any browser. It runs on **Windows** and **Debian / 
 
 > **Status: early.** The server (Python) indexes and identifies TV/movie folders (matched on TMDB) and
 > music folders (tags, then MusicBrainz), and streams files. See [server/README.md](server/README.md). The web UI shows your real
-> libraries and plays whatever your browser can decode; server-side transcoding comes next.
+> libraries and plays anything: the server converts what the browser can't decode, with subtitles, audio
+> tracks, and per-person accounts with resume and Continue Watching.
 > The full plan is in [docs/PLAN.md](docs/PLAN.md).
 >
 > Your media folders are **read-only** to BAMS, enforced in code and by the OS: [docs/READ-ONLY.md](docs/READ-ONLY.md).
 
 ## Run it
 
-Start the server (see [server/README.md](server/README.md)). It serves the UI at http://127.0.0.1:8484.
+Start the server (see [server/README.md](server/README.md)). It serves the UI at http://127.0.0.1:8484; the first
+visit, on the server itself, creates the admin account.
 After changing the UI, rebuild it (Node 20+):
 
 ```bash

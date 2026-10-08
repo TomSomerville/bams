@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
+import { api, MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
 import { Backdrop, Poster } from "../components/Art";
-import { PlayBadge, PosterCard } from "../components/Cards";
+import { PlayBadge, PosterCard, progressOf } from "../components/Cards";
 import FixMatch from "../components/FixMatch";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
-import { fmtRuntime, fmtSize, seasonsLabel, sxe } from "../format";
+import { fmtClock, fmtRuntime, fmtSize, seasonsLabel, sxe } from "../format";
 import { useApi } from "../useApi";
 import { MusicDetail } from "./Music";
 
@@ -19,7 +19,8 @@ function TechInfo({ f }: { f: FileInfo }) {
   const audio = p?.audio.length
     ? p.audio.map((a) => [a.codec, a.channels ? `${a.channels}ch` : null, a.language].filter(Boolean).join(" ")).join(", ")
     : [rel.audio_codec, rel.audio_channels].filter(Boolean).join(" ") || "unknown";
-  const subs = p?.subtitles.length ? p.subtitles.map((s) => s.language ?? s.codec).join(", ") : null;
+  const subs = f.subtitles?.length ? f.subtitles.map((s) => s.label).join(", ")
+    : p?.subtitles.length ? p.subtitles.map((s) => s.language ?? s.codec).join(", ") : null;
   return (
     <>
       <dl className="tech">
@@ -45,27 +46,51 @@ function TechInfo({ f }: { f: FileInfo }) {
   );
 }
 
-function Episodes({ season }: { season: ItemSummary }) {
-  const { data } = useApi<ItemDetail>(`/api/items/${season.id}`);
+/** Mark a movie/episode, or all of a season/show, watched or not; `done` reloads what shows it. */
+function WatchedButton({ item, watched, done, small }: { item: ItemSummary; watched: boolean; done: () => void; small?: boolean }) {
+  const label = watched ? "Mark unwatched" : "Mark watched";
+  const what = item.kind === "season" ? " (season)" : item.kind === "show" ? " (all episodes)" : "";
+  const toggle = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    api.put(`/api/items/${item.id}/watched`, { watched: !watched }).then(done).catch(() => {});
+  };
+  return small ? (
+    <button className={`icon-btn subtle watch-toggle ${watched ? "on" : ""}`} onClick={toggle} title={label} aria-label={label}>
+      <Icon name={watched ? "check" : "eye"} size={16} />
+    </button>
+  ) : (
+    <button className="btn ghost" onClick={toggle}><Icon name={watched ? "eyeOff" : "check"} /> {label}{what}</button>
+  );
+}
+
+function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => void }) {
+  const { data, reload } = useApi<ItemDetail>(`/api/items/${season.id}`);
   if (!data) return <p className="muted">Loading episodes…</p>;
+  const changed = () => { reload(); onChange(); };
   return (
     <>
-      {data.overview && <p className="muted season-overview">{data.overview}</p>}
+      <div className="season-bar">
+        {data.overview && <p className="muted season-overview">{data.overview}</p>}
+        {!!data.episodes && <WatchedButton item={data} watched={data.unwatched === 0} done={changed} />}
+      </div>
       <ol className="episodes">
         {data.children.map((e) => (
           <li key={e.id}>
-            <Link to={`/play/${e.id}`} className="episode">
+            <Link to={`/play/${e.id}`} className={`episode ${e.progress?.watched ? "seen" : ""}`}>
               <span className="ep-num">{e.episode_number}</span>
               <div className="ep-thumb">
                 {e.still ? <img className="ep-img" src={e.still} alt="" loading="lazy" />
                   : <Backdrop src={null} poster={data.poster} title={e.title} className="ep-img" />}
                 <span className="round-btn"><Icon name="play" size={16} /></span>
+                {progressOf(e) !== null && <div className="progress"><div style={{ width: `${progressOf(e)! * 100}%` }} /></div>}
               </div>
               <div className="ep-text">
                 <div className="ep-title">{e.title} <span className="muted">· {sxe(e.season_number!, e.episode_number!)}</span></div>
                 {e.overview && <p>{e.overview}</p>}
               </div>
               <span className="ep-time">{[e.air_date?.slice(0, 4), e.runtime ? `${e.runtime}m` : null].filter(Boolean).join(" · ")}</span>
+              <WatchedButton small item={e} watched={!!e.progress?.watched} done={reload} />
             </Link>
           </li>
         ))}
@@ -88,7 +113,7 @@ export default function Detail() {
     if (!item) return;
     const first = item.children.findIndex((s) => (s.season_number ?? 0) > 0);
     setSeasonIdx(first >= 0 ? first : 0);
-  }, [item]);
+  }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- not on reloads (marking watched)
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   if (!item) return <div className="page muted">Loading…</div>;
@@ -97,6 +122,7 @@ export default function Detail() {
   const season = item.kind === "show" && seasonIdx !== null ? item.children[seasonIdx] : null;
   const file = item.files.find((f) => f.available) ?? item.files[0];
   const more = (similar ?? []).filter((i) => i.id !== item.id);
+  const resumeAt = item.kind === "movie" && item.progress && !item.progress.watched ? item.progress.position : 0;
 
   return (
     <div className="detail">
@@ -125,8 +151,13 @@ export default function Detail() {
             )}
           <div className="actions">
             {item.kind === "movie" && file && (
-              <Link to={`/play/${item.id}`} className="btn primary"><Icon name="play" /> Play</Link>
+              <Link to={`/play/${item.id}`} className="btn primary">
+                <Icon name="play" /> {resumeAt ? `Resume from ${fmtClock(resumeAt)}` : "Play"}
+              </Link>
             )}
+            {resumeAt > 0 && <Link to={`/play/${item.id}?start=0`} className="btn ghost"><Icon name="refresh" /> Start over</Link>}
+            {item.kind === "movie" && <WatchedButton item={item} watched={!!item.progress?.watched} done={reload} />}
+            {item.kind === "show" && !!item.episodes && <WatchedButton item={item} watched={item.unwatched === 0} done={reload} />}
             {item.kind === "movie" && file && (
               <a className="btn ghost" href={file.download_url} download><Icon name="download" /> Download</a>
             )}
@@ -144,11 +175,11 @@ export default function Detail() {
           <div className="season-tabs">
             {item.children.map((s, k) => (
               <button key={s.id} className={`chip ${seasonIdx === k ? "on" : ""}`} onClick={() => setSeasonIdx(k)}>
-                {s.title} <span className="chip-count">{s.child_count}</span>
+                {s.title} <span className="chip-count">{s.unwatched === 0 && s.episodes ? "✓" : s.child_count}</span>
               </button>
             ))}
           </div>
-          {season && <Episodes key={season.id} season={season} />}
+          {season && <Episodes key={season.id} season={season} onChange={reload} />}
         </section>
       )}
 

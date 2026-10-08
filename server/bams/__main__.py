@@ -5,6 +5,8 @@
     bams library list | remove NAME
     bams scan NAME [--no-match] [--rematch]
     bams tmdb-key                    paste your own TMDB key (hidden prompt); --clear to remove
+    bams user add NAME [--admin]     create an account (password prompt)
+    bams user list | passwd NAME | remove NAME
     bams status
 """
 
@@ -42,6 +44,14 @@ def _web_dir() -> Path | None:
     return here if here.is_dir() else None
 
 
+def _new_password() -> str:
+    pw = getpass.getpass("Password (input hidden): ")
+    if getpass.getpass("Same password again: ") != pw:
+        print("error: the passwords don't match", file=sys.stderr)
+        sys.exit(2)
+    return pw
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="bams", description=f"{APP_NAME} {VERSION} - Bad Ass Media Server")
     p.add_argument("--data-dir", type=Path, help=f"default: {default_data_dir()} (or env BAMS_DATA_DIR)")
@@ -50,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("serve", help="run the server")
     s.add_argument("--host", default=DEFAULT_HOST,
-                   help="bind address (default 127.0.0.1). There's no login yet: only use 0.0.0.0 on a trusted LAN")
+                   help="bind address (default 127.0.0.1, this computer only; 0.0.0.0 = every network interface)")
     s.add_argument("--port", type=int, default=DEFAULT_PORT)
 
     lib = sub.add_parser("library", help="manage libraries").add_subparsers(dest="lcmd", required=True)
@@ -71,6 +81,16 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("tmdb-key", help="set your own TMDB API key / Read Access Token")
     k.add_argument("--clear", action="store_true")
 
+    us = sub.add_parser("user", help="manage accounts").add_subparsers(dest="ucmd", required=True)
+    ua = us.add_parser("add", help="create an account (asks for its password)")
+    ua.add_argument("name")
+    ua.add_argument("--admin", action="store_true", help="can manage libraries, settings and accounts")
+    us.add_parser("list")
+    up = us.add_parser("passwd", help="set a new password (signs the user out everywhere)")
+    up.add_argument("name")
+    ur = us.add_parser("remove")
+    ur.add_argument("name")
+
     sub.add_parser("status")
     a = p.parse_args(argv)
 
@@ -88,8 +108,16 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "serve":
         import uvicorn
         if a.host not in ("127.0.0.1", "localhost", "::1"):
-            log.warning("listening on %s: BAMS has no login yet, anyone who can reach this port can browse "
-                        "and stream your libraries", a.host)
+            log.info("listening on %s: other devices can reach BAMS (they have to sign in). For access from the "
+                     "internet, put it behind an HTTPS reverse proxy", a.host)
+        from . import auth
+        con = connect(paths.db)
+        try:
+            if not auth.user_count(con):
+                log.warning("no accounts yet: open http://localhost:%s on this computer to create the admin "
+                            "account, or run `bams user add NAME --admin`", a.port)
+        finally:
+            con.close()
         log.info("BAMS %s  data dir: %s  http://%s:%s  (API docs at /docs)", VERSION, paths.root, a.host, a.port)
         uvicorn.run(create_app(paths, web_dir=_web_dir()), host=a.host, port=a.port, log_level="info")
         return 0
@@ -129,6 +157,30 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Couldn't verify with TMDB ({e}); saving anyway.", file=sys.stderr)
             set_setting(con, "tmdb_key", key)
             print(f"TMDB key saved (…{key[-4:]})")
+        elif a.cmd == "user":
+            from . import auth
+            try:
+                if a.ucmd == "add":
+                    pw = _new_password()
+                    auth.create_user(con, a.name, pw, a.admin)
+                    print(f"created {'admin ' if a.admin else ''}account {a.name!r}")
+                elif a.ucmd == "list":
+                    for u in con.execute("SELECT * FROM users ORDER BY name COLLATE NOCASE"):
+                        print(f"{u['name']}{'  (admin)' if u['is_admin'] else ''}")
+                elif a.ucmd in ("passwd", "remove"):
+                    u = auth.get_user(con, a.name)
+                    if not u:
+                        print(f"error: no account called {a.name!r}", file=sys.stderr)
+                        return 2
+                    if a.ucmd == "passwd":
+                        auth.update_user(con, u["id"], password=_new_password())
+                        print(f"password changed for {u['name']!r}")
+                    else:
+                        auth.delete_user(con, u["id"])
+                        print(f"removed account {u['name']!r} (and its watch history)")
+            except auth.AuthError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
         elif a.cmd == "status":
             libs = [library.describe(con, r) for r in con.execute("SELECT * FROM libraries ORDER BY name")]
             from . import probe, readonly

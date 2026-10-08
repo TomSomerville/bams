@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ServerLibrary, type ServerStatus, type UnrecognizedFile } from "../api";
+import { useAuth } from "../auth";
+import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
 import Icon from "../components/Icon";
 import MusicSettings from "../components/MusicSettings";
@@ -234,6 +236,21 @@ function AddLibrary({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
 }
 
 export default function Settings() {
+  const { user } = useAuth();
+  if (!user.is_admin) {
+    return (
+      <div className="page narrow">
+        <div className="page-head"><h1>Settings</h1></div>
+        <div className="section-head"><h2 className="section-title">Your account</h2></div>
+        <div className="lib-list"><AccountSettings /></div>
+        <p className="muted">Libraries and server settings are managed by an admin.</p>
+      </div>
+    );
+  }
+  return <AdminSettings />;
+}
+
+function AdminSettings() {
   const [libs, setLibs] = useState<ServerLibrary[] | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -310,6 +327,9 @@ export default function Settings() {
 
       <div className="section-head"><h2 className="section-title">Playback</h2></div>
       <div className="lib-list"><TranscodeSettings status={status} /></div>
+
+      <div className="section-head"><h2 className="section-title">Accounts</h2></div>
+      <div className="lib-list"><AccountSettings /><UsersSettings /></div>
     </div>
   );
 }

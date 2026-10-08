@@ -20,6 +20,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   if (r.status === 204) return undefined as T;
   const data = await r.json().catch(() => null);
+  // signed out (expired, or by an admin): the AuthProvider shows the sign-in screen
+  if (r.status === 401 && !path.startsWith("/api/auth/")) window.dispatchEvent(new Event(SIGNED_OUT));
   if (!r.ok) {
     const d = data?.detail;
     const msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((x) => x.msg).join("; ") : `HTTP ${r.status}`;
@@ -27,6 +29,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   }
   return data as T;
 }
+
+/** Fired on window when the server says this browser isn't signed in. */
+export const SIGNED_OUT = "bams:signed-out";
 
 export const api = {
   get: <T>(p: string) => call<T>("GET", p),
@@ -61,9 +66,10 @@ export type ScanState = {
 
 export type ServerStatus = {
   version: string;
-  data_dir: string;
-  ffprobe: string | null;
-  ffmpeg: string | null;
+  data_dir: string | null;
+  /** paths for admins; for others just whether it's there (true) or not (null) */
+  ffprobe: string | boolean | null;
+  ffmpeg: string | boolean | null;
   /** the H.264 encoder video transcodes use (null: none works, or no FFmpeg) */
   video_encoder: { id: string; name: string; hardware: boolean; hw_decode: boolean } | null;
   /** video conversions running now (HLS sessions + plain streams) and how many are allowed */
@@ -73,6 +79,12 @@ export type ServerStatus = {
 };
 
 export type BrowseResult = { path: string | null; parent: string | null; dirs: { name: string; path: string }[] };
+
+export type User = { id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null };
+export type AuthState = { user: User | null; setup: boolean; setup_here: boolean };
+
+/** This user's state of a movie/episode. position 0 = from the start (or finished). */
+export type Progress = { position: number; duration: number | null; watched: boolean };
 
 export type ItemKind = "show" | "movie" | "season" | "episode" | "artist" | "album" | "track";
 export const MUSIC_KINDS: ItemKind[] = ["artist", "album", "track"];
@@ -107,7 +119,26 @@ export type ItemSummary = {
   disc_number?: number | null;
   /** the performer, when it isn't the album artist */
   artist?: string | null;
+  // watch state of the signed-in user
+  progress?: Progress;
+  /** shows/seasons: how many episodes, and how many of them aren't watched */
+  episodes?: number;
+  unwatched?: number;
 };
+
+/** Continue Watching: stopped part-way ("resume") or the next episode of a show ("next"). */
+export type ContinueItem = ItemSummary & {
+  reason: "resume" | "next";
+  show?: { id: number; title: string; poster: string | null; backdrop: string | null };
+};
+
+export type AudioTrack = { index: number; label: string; language: string | null; codec: string | null;
+  channels: number | null; default: boolean };
+
+/** A subtitle track: embedded ("e{n}") or a file next to the video ("x{n}"). Image tracks have no url: they
+ *  can only be burned into a converted video (index = which subtitle stream). */
+export type SubtitleTrack = { id: string; index: number; source: "embedded" | "file"; language: string | null;
+  label: string; forced: boolean; sdh: boolean; image: boolean; codec: string | null; url: string | null };
 
 export type Probe = {
   container: string | null;
@@ -153,6 +184,10 @@ export type FileInfo = {
   };
   stream_url: string;
   download_url: string;
+  /** video files */
+  audio_tracks?: AudioTrack[];
+  /** video files, on a movie's/episode's own page */
+  subtitles?: SubtitleTrack[];
 };
 
 export type ItemDetail = ItemSummary & {
@@ -166,6 +201,8 @@ export type ItemDetail = ItemSummary & {
   ancestors: ItemSummary[];
   children: ItemSummary[];
   files: FileInfo[];
+  /** episodes: the next one in the show (null at the end) */
+  next_id?: number | null;
 };
 
 export type UnrecognizedFile = FileInfo & { hint: string };
