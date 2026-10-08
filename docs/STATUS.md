@@ -27,7 +27,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O3 | Identify and categorise media (look it up "like Plex", via naming conventions) | ✅ guessit parser + TMDB matching; music: tags/folders + MusicBrainz |
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
 | O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests |
-| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.3.0) |
+| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.4.0) |
 | O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
 | O8 | Configure libraries (folders) in the UI | ✅ Settings, with a server-side folder picker |
@@ -87,6 +87,11 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | **"Auto" quality** = several converted sizes in one session (full, then 1080/720/480 below it), hls.js ABR picks; a size not asked for in 10 s stops its FFmpeg; a session counts once against the limit | Adapts to network *and* to how fast the server converts (segment time includes the wait) |
 | 10-08 | **All-GPU filters** (NVDEC → bwdif_cuda/scale_cuda → NVENC) by default on NVIDIA for SDR, no burn-in, NVDEC-decodable codecs; a failed run retries on the hybrid path; `BAMS_GPU_FILTERS=0` off | Re-measured on FFmpeg 9.0.2: 1.7 s vs 2.6 s per minute at 720p and far less CPU (the earlier "2.5× slower" no longer holds) |
 | 10-08 | **Subtitles**: text → WebVTT through `<track>` (cached in the data dir); image (PGS/VobSub/DVB) → **burned in** to a conversion, read from a second input seeked 30 s earlier | Browsers render WebVTT natively; burn-in from the same input misses the line already on screen when a run starts mid-cue |
+| 10-08 | **All-GPU filters on Quick Sync, VAAPI and AMF too**: QSV `vpp_qsv`, VAAPI `deinterlace_vaapi`/`scale_vaapi`, AMF (Windows) D3D11 decode → `vpp_amf`; given the output size as numbers and a deinterlacer only when the probe says interlaced (AMF: interlaced → hybrid; QSV: unknown scan → hybrid); a failed all-GPU run is remembered per encoder + codec/profile/bit depth until restart | Their filters can't read pixel aspect/interlacing per frame like CUDA's. **Not tested on real hardware** (owner's PC has only NVIDIA; VAAPI couldn't be reached through WSL/Docker): the fallback keeps a wrong guess cheap |
+| 10-08 | Probe records `sar` + `field_order`; files probed earlier get them read on the fly (`probe.video_geometry`) when a QSV/AMF/VAAPI conversion needs them | No re-probe of whole libraries for one playback feature |
+| 10-08 | **VobSub `.idx/.sub` sidecars** are picture tracks, one per `id:` stream in the .idx (`x{n}-{k}`), burned in from the .idx as a second input; `burn` takes a track id (old stream numbers still work) | FFmpeg reads the pair natively; the .idx has no start time, so it lines up with the film without offsets |
+| 10-08 | **Dolby pass-through**: when the browser says it decodes AC3/EAC3 (`MediaSource.isTypeSupported`), the remux (HLS copy + live) copies the audio; Sound menu switch (remembered per browser); a decode error falls back to AAC by itself. Remux only: conversions stay AAC | TV browsers, Safari, Edge, Chromecast hand Dolby to an AV receiver. DTS/TrueHD don't go into MP4 cleanly. A device can claim support and fail, hence the automatic fallback |
+| 10-08 | Live (non-HLS) burn-in from mid-film keeps the file's clock (`-copyts -start_at_zero`, `-output_ts_offset -t`) like HLS | The old `-itsoffset` on the subtitle input lost a line already on screen (found while adding VobSub) |
 | 10-08 | **5.1 AAC** only when the viewer picks Surround (per browser), stereo by default; another audio track than the first plays through the remux | Laptops/phones are stereo; browsers only play a file's first track |
 | 10-08 | HTML pages are served with `cache-control: no-cache`; unknown `/assets/` paths 404 instead of falling back to the page | A cached old page after a UI rebuild named scripts that no longer exist (blank page) |
 | 10-08 | **Installers**: Inno Setup `.exe` for Windows, a `.deb` built in Python for Debian/Ubuntu/Mint; one file, double-click; a newer one installs over the old one and keeps data, settings and choices | Owner: "ungodly easy", "double click install and done", updates without reinstalling or reconfiguring |
@@ -104,14 +109,31 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | Files can be **identified by hand** (`files.manual`, schema v6): stored per file and used instead of the name on every scan; TMDB/IMDb links fill the fields (IMDb ids via TMDB `/find`) | Owner request; survives rescans, file changes and moves; IMDb itself is never fetched |
 | 10-08 | Watched % and "started after N s" are **admin settings** (one for everyone; defaults 90% / 30 s); saving progress and Continue Watching use the same threshold | Tester request (10 s / 95%); the old split (save at 10 s, offer at 30 s) wasn't worth two settings |
 | 10-08 | Per-user display preferences in `users.prefs` (schema v5), first one `home_hero` | Follows the person across devices, unlike browser storage |
+| 10-08 | Home's rows are **per user** (`home_rows` pref: ordered `{id, show}`; empty = default). Rows not in the saved list (a new library) are shown at their default place; genres are one entry (the 4 most common) | Owner request. Per user like the banner toggle, unlike the shared library order: Home is personal. No schema change (prefs is JSON) |
 | 10-08 | The admin can **choose the encoder** (`settings.video_encoder`, Settings → Playback); only encoders that pass a test encode are offered; a choice that stops working falls back to automatic; `BAMS_VIDEO_ENCODER` still wins | Tester asked for a CPU/GPU switch; GPU is faster, x264 can look better per bit |
 | 10-08 | Scan progress = step + done/total + bytes, "left" counted in **files and size** (titles while matching), time left from the step's own pace | Shows/episodes aren't known until files are parsed; files and bytes are exact. Time left comes from the server's clock (`step_elapsed`) |
 | 10-08 | Libraries have an **admin-set order** (`libraries.sort_order`, schema v7), shared by everyone; sidebar drag + Settings ▲▼ | Tester request; one order for the household like Plex's pinned sources; the icon-only sidebar on small screens hides the handles, so Settings has buttons |
+| 10-08 | **No filesystem watcher** (dropped from the roadmap) | Owner: scheduled scans plus Scan now are enough; watchers are unreliable on SMB/NFS mounts anyway |
+| 10-08 | **No Docker image, apt repository or CI** (dropped from the roadmap) | Owner decision: the `.exe` and `.deb` installers are the distribution; packaging work left is code-signing and an "update available" notice |
+| 10-08 | **CUE sheets** split one file into tracks by `file_items.cue_start/cue_end` (schema v8); the track rows are kept across re-reads, matched by track number; a pregap stays with the track before it | One file holding several items already fits the model (multi-episode files); the player plays a stretch of the file instead of a cut copy, so nothing is written or duplicated |
+| 10-08 | **Playlists are imported, not authored**: the `.m3u/.m3u8/.pls` file stays the source (re-read when it changes, gone when it's deleted); entries kept as written and re-matched after every scan (relative path → absolute path under a root → unique path tail) | Owner asked for import. Re-matching each scan follows moves and picks up music added later; the tail match covers playlists made on another computer |
+| 10-08 | **Gapless = two `<audio>` elements** with the next track preloaded and started at the current one's end (timer from the element's clock, `ended` as fallback); consecutive CUE tracks of one file play as one stream | Works in every browser with the existing file/convert endpoints. Sample-perfect gapless would need Media Source Extensions (every track repackaged by FFmpeg): left open |
+| 10-08 | Albums on the **same MusicBrainz release are merged only when both are pinned** (tag id, Fix match, or a search ≥ 0.95); the merged-away name stays an `item_keys` alias by **artist + album name** (not ids) | A fuzzy search match merging two different albums would compound the error. Names, because the merged-away artist is deleted and would come back with a new id |
+| 10-08 | `items.poster_src` records **where music art came from**; a new or changed `cover.jpg`/`artist.jpg` replaces embedded, Cover Art Archive or Commons art; downloaded art is re-downloaded on refresh, the owner's never | "Local data wins" now also holds for art added later. Images are seen in the scan's own walk, so no extra folder listings |
+| 10-08 | Identified music is **refreshed after ~4 months, 50 items per scan** | Picks up MusicBrainz corrections and new Wikipedia text while keeping to 1 request/second |
+| 10-08 | Converted music: admin choice **AAC 256k (default) or FLAC** (`settings.music_output`); FLAC keeps 24-bit and the channels, caps the rate at 96/88.2 kHz | Every current browser plays FLAC; it's lossless and has no encoder delay (better gapless), but ~4x the data, so not the default |
+| 10-08 | **Settings → Security** (owner request): sign-in log, wait after each wrong password (1 s, doubling), lockout after N in a row (default 5, admin setting), lock/unlock accounts, IP allow/block lists with two modes, a traffic log of every request (10 GB cap, folder and size adjustable) | Owner request. Details in the rows below and the work log |
+| 10-08 | Sign-in state and log live in a **separate `security.db`** in the data dir, not in `bams.db` | Written on every sign-in and read by nothing else; kept out of the main DB's schema/migrations (another session was mid-way through schema v8) |
+| 10-08 | **Unknown names get the same waits/lockout** as real accounts (kept as `n:<name>` rows) | Different answers would tell an attacker which names exist |
+| 10-08 | An account **locked by wrong passwords stays signed in** where it already was; a lock **by an admin** signs it out everywhere | Otherwise anyone could sign a family member out just by typing wrong passwords |
+| 10-08 | IP lists: **block list always wins**; the server's own **loopback is always let in**; saving a change that would block the admin's own address is refused; `bams security allow-all` resets the mode | So the owner can't lock themselves out of the machine BAMS runs on |
+| 10-08 | The "netflow" log is **every HTTP request BAMS receives** (JSON lines), not packet-level NetFlow | BAMS can only see what reaches it; port scans etc. need router/OS flow logging |
+| 10-08 | Traffic log written by a background thread in files of a tenth of the cap, oldest deleted to stay under the cap; moving the folder leaves old files where they were | Requests never wait on the disk; trimming whole files is cheap; moving up to 10 GB inside a request isn't |
 | 10-08 | Logo tagline changed from "Your Personal Media Stream" to "Bad Ass Media Server"; logo set redrawn at higher res (`tools/brand_art/rework.py`) | Owner request |
 
 ## 4. Built so far
 
-### Server (`server/`, ~6,350 lines + 195 tests)
+### Server (`server/`, ~7,000 lines + 227 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval, order (`PUT /api/libraries/order`). Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -134,11 +156,18 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **Probe:** ffprobe summary (container, codecs, resolution, HDR, audio/subtitle tracks; music tags, embedded cover flag).
 - **Music libraries:** artist > album > track from tags (ffprobe) with the folder layout as fallback (disc folders,
   `Artist - Album`, FMA-style names). Album covers from `cover.jpg`/`folder.jpg`… or the embedded picture;
-  `artist.jpg` for artists; all copied into `data/images/music/`. Browser-unplayable formats converted to AAC on
-  the fly (`/audio?t=`). `/api/items/{id}/tracks` gives a play queue.
+  `artist.jpg` for artists; all copied into `data/images/music/`; a `cover.jpg`/`artist.jpg` added or changed later
+  replaces embedded/downloaded art (`items.poster_src`). Browser-unplayable formats converted on the fly
+  (`/audio?t=`) to AAC or, by admin choice, lossless FLAC. `/api/items/{id}/tracks` gives a play queue (best file
+  per track; CUE `start`/`end`).
+- **CUE sheets** (`cue.py`): a `.cue` next to a whole-album file (or a CUESHEET tag inside it) makes one track per
+  entry; adding/editing/removing the sheet re-reads the file's tracks on the next scan.
+- **Playlists** (`playlists.py`): `.m3u`/`.m3u8`/`.pls` files in music folders imported and kept in step with their
+  files; entries matched by relative path, absolute path under a root, `file://`, or a unique path tail.
 - **Music identification:** MusicBrainz (release id from tags, else scored search), Cover Art Archive covers,
   Wikidata → Wikipedia summaries and Commons artist photos with credits. Fix match for albums/artists. On/off
-  setting. Respects MusicBrainz's 1 request/second.
+  setting. Respects MusicBrainz's 1 request/second. Albums pinned to the same release are merged; identified
+  albums/artists refreshed after ~4 months (50 per scan).
 - **Playback:** `stream.plan()` picks Direct Play / Direct Stream (file) / Direct Stream (remux) / Transcode.
   `/stream` (Range), `/remux?t=` (FFmpeg: copy video + AAC audio, fragmented MP4), `/seek?t=` (real
   keyframe start via a dry run), `/download`.
@@ -149,17 +178,23 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   on demand, native seeking, quality (max height) per session, bounded CPU/disk, idle sessions closed. A limit on
   simultaneous conversions (Settings).
 - **Accounts:** `auth.py` (scrypt hashes, sessions, throttle), admin/viewer roles, first-admin setup from the server
-  itself, login middleware on `/api/`, `bams user add|list|passwd|remove`.
+  itself, login middleware on `/api/`, `bams user add|list|passwd|remove|unlock`.
+- **Security** (`security.py`, `netflow.py`): sign-in log (`security.db`), per-account wait after wrong passwords
+  (1 s doubling) and lockout (default 5), admin lock/unlock, IP allow/block lists (`security.Gate`, outermost
+  middleware), traffic log of every request (10 GB cap, folder/size settable), `bams security allow-all`.
 - **Watch state:** `watch.py`: progress (watched at 90% / started after 30 s by default; admin settings), watched flags for movie/episode/season/show, per-user counts on
   every item list, Continue Watching (resume + next episode), next episode for up-next.
 - **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
-  encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead.
-- **Audio:** track list with labels, any track via the remux, 5.1 AAC on request (`channels`/`ch`).
-- **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback.
+  encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead, VobSub `.idx/.sub` sidecars
+  (one track per language) burned in too.
+- **Audio:** track list with labels, any track via the remux, 5.1 AAC on request (`channels`/`ch`), Dolby (AC3/EAC3)
+  pass-through on devices that decode it.
+- **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback
+  (NVIDIA tested; Quick Sync, VAAPI, AMF built but untested on hardware). Dolby Vision profile 5 verified on a real file.
 - **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting
   (step, done/total, bytes, seconds into the step) shown in Settings.
 - **API:** ~40 endpoints (see CODEBASE.md). **CLI:** `bams serve|library|scan|tmdb-key|status`.
-- **Installers** (`deploy/`, v0.3.0; release notes in `CHANGELOG.md`): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
+- **Installers** (`deploy/`, v0.4.0; release notes in `CHANGELOG.md`): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
   packages, FFmpeg downloaded at install with a pinned hash, WinSW service, firewall rule for private networks,
   admin-only data dir, update in place, uninstall that asks before deleting data) and `bams_<v>_all.deb` (offline wheels,
   venv, systemd unit as the desktop user, `/etc/default/bams`, ufw, update in place, remove keeps / purge deletes data).
@@ -167,24 +202,29 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **Deploy (manual):** `deploy/linux/bams.service` (hardened systemd unit; kernel-level read-only media).
 
 ### Web (`web/`, React 19 + Vite + TS, ~2,600 lines + 530 lines CSS)
-- Pages: Home (hero, Recently Added, per-library rows, Top Rated, genre rows), Library grid (sort, genre
+- Pages: Home (hero, Recently Added, per-library rows, Top Rated, genre rows; each user picks which rows show and their order), Library grid (sort, genre
   filter), Title page (show: season tabs + episodes; movie: tech info + Download), Player (real `<video>`,
   remux-aware seeking, converted video over HLS (hls.js, loaded on demand), switches to the conversion when the
   browser can't decode the video, quality menu, keyboard shortcuts), Search, Settings (libraries with folder picker,
   scan status; Unrecognized files (identify by hand: link or fields with suggestions); TMDB key card; Playback card:
   encoder in use + conversion limit; Watched and Continue Watching thresholds). Library pages have an Unrecognized
   tab for admins. Player: speed 0.1x–3x. Music queue: drag (or arrow keys) to reorder. Show-password buttons,
-  confirm-new-password, per-person "hide the Home banner". Playback card: encoder choice (CPU/GPU). Library cards:
+  confirm-new-password. Settings → Home page (per person): banner on/off, rows on/off and order (drag, arrow keys, ▲▼), reset. Playback card: encoder choice (CPU/GPU). Library cards:
   live scan progress (N of M, size, time left, bar) and ▲▼ order buttons. Sidebar: admins drag libraries into order.
-- Music: library page (Artists/Albums tabs, sort, genres), artist page (bio, photo credit, albums), album page
-  (tracklist by disc, format note, Wikipedia/MusicBrainz links), Fix match, a now-playing bar with queue that keeps
-  playing across pages (media keys via Media Session) and pauses when a video starts; music in Home and Search;
-  Music library type + identification toggle in Settings.
+- Music: library page (Artists/Albums/Playlists tabs, sort, genres), artist page (bio, photo credit, albums), album page
+  (tracklist by disc, format note, Wikipedia/MusicBrainz links), playlist page (`/playlist/:id`, cover mosaic, missing
+  entries), Fix match (goes to the kept album after a merge), a now-playing bar with queue that keeps playing across
+  pages (media keys via Media Session) and pauses when a video starts; gapless hand-over between tracks and CUE
+  tracks played as stretches of one file; music in Home and Search; Music library type + identification toggle +
+  converted-music format (AAC/FLAC) in Settings.
+- Settings → Security (`SecuritySettings.tsx`, admins): wrong-password threshold, account locks (lock/unlock), who can
+  connect (mode + allow/block lists, "Allow my address"), sign-in log (filter, older), traffic log (folder, size, usage,
+  search, older).
 - Sign-in / first-admin screens (`auth.tsx`), account menu, Settings → Accounts (password, users); viewers see only
   their account. Continue Watching row, watched ticks / unwatched counts / progress bars, mark watched on movie,
   show, season and episode, Resume / Start over. Player: resume, progress reports, up-next countdown, sound menu
-  (tracks, Surround), subtitles menu (text via `<track>`, picture = burned in), quality Original / Auto / sizes,
-  remux over HLS with fallback to the live remux.
+  (tracks, Surround, Dolby pass-through on/off), subtitles menu (text via `<track>`, picture incl. VobSub = burned in),
+  quality Original / Auto / sizes, remux over HLS with fallback to the live remux.
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
 
@@ -195,16 +235,14 @@ docs/INSTALL.md, deploy/README.md, server/README.md.
 ## 5. Not built yet / next
 
 Roughly in priority order:
-1. **Playback leftovers (minor):** Dolby Vision profile 5 checked on a real file (none available); all-GPU filters
-   for QSV/AMF/VAAPI (NVIDIA only so far); VobSub `.sub/.idx` sidecars; Dolby pass-through for TV clients.
-2. **Filesystem watcher** (periodic scans cover it for now).
-3. **Music follow-ups**: CUE-sheet albums, playlist import (`.m3u`/`.pls`), gapless playback, merge two local
-   albums pinned to the same MusicBrainz release, periodic refresh of matched music data, pick up a `cover.jpg`
-   added after an album already has art, lossless (FLAC) output option for converted files.
-4. **ISO / DVD / Blu-ray folders** (phase 3).
-5. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning), Docker image, an apt repository for
-   automatic updates, an in-app "update available" notice. **CI** on Windows + Ubuntu (build both installers too).
-6. **UI redesign** from the owner's mockups.
+1. **Playback leftovers (minor):** all-GPU filters on real Intel/AMD/VAAPI hardware (built, untested); Dolby
+   pass-through on a real Dolby device (tested only with a faked "supported"); Dolby Vision profile 5 without
+   libplacebo/Vulkan fails to convert (zscale can't read it); text MicroDVD `.sub` sidecars (no `.idx`) aren't listed.
+2. **Music leftovers (minor):** sample-perfect gapless (Media Source Extensions); un-merging an album; making and
+   editing playlists in BAMS (only imported today); `.cue` entries inside playlists.
+3. **ISO / DVD / Blu-ray folders** (phase 3).
+4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning), an in-app "update available" notice.
+5. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
 
@@ -217,7 +255,7 @@ Roughly in priority order:
 | FFmpeg | winget `Gyan.FFmpeg` (found automatically, even without PATH) |
 | Server data dir | `C:\Users\Beached\bams\data` (gitignored): DB, image cache, logs |
 | Ports | 8484 = the owner's server · 8485 = scratch test instances (`.claude/launch.json` → `bams-test`, data dir in the session scratchpad: edit the path) · 5173 = Vite dev |
-| Test media | `C:\Users\Beached\Shows` (TV: Bob's Burgers, Family Guy, Simpsons, Burn Notice, South Park…) · `C:\Users\Beached\Movies` (2 movies) · `C:\Users\Beached\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) |
+| Test media | `C:\Users\Beached\Shows` (TV: Bob's Burgers, Family Guy, Simpsons, Burn Notice, South Park…) · `C:\Users\Beached\Movies` (2 movies) · `C:\Users\Beached\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) · `C:\Users\Beached\TestMedia` (Jellyfin DV profile 5 clip + its SDR version, CC BY-SA 4.0, `CREDITS.txt`) |
 | Libraries on the owner's server | 1 = "TV Shows" (`…\Shows`), 2 = "Movies" (`…\Movies`); the owner adds "Music" (`…\MyMusic`) when testing |
 | Art tools | local ComfyUI (Qwen Image); `tools/brand_art/rework.py` redraws the logo set from the supplied art |
 
@@ -239,6 +277,121 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Playback leftovers (DV profile 5, all-GPU on QSV/AMF/VAAPI, VobSub sidecars, Dolby pass-through)
+- **What / why:** the four "Playback leftovers" in §5, owner asked for all of them, with a free, licence-checked test
+  file. **DV profile 5:** downloaded Jellyfin's CC BY-SA 4.0 clip (checksum matched); no code change needed, BAMS's
+  libplacebo conversion matches the SDR version of the same clip. **All-GPU** chains for Quick Sync / VAAPI / AMF,
+  probe now records `sar`/`field_order` (`probe.geometry`, `video_geometry` for older probes), failed GPU runs
+  remembered (`stream.gpu_failed`), `stream.output_size` (SAR-aware, also used for the HLS master playlist).
+  **VobSub** `.idx/.sub` sidecars as picture tracks (`subtitles.vobsub_streams`, `burn_source`), `burn` accepts a
+  track id. **Dolby pass-through** (`stream.PASSTHROUGH_AUDIO`, `passthrough` on `/remux` and `POST /hls`, player
+  detection + Sound menu + fallback). Bugs fixed on the way: copy-HLS lost `-hls_list_size 0 -hls_flags temp_file`
+  into a comment (half-written segments could be served); the live burn-in lost a line already on screen when started
+  mid-line (now `-copyts`); AC3/EAC3 copied into streamed MP4 needs `delay_moov`.
+- **Files:** `server/bams/stream.py`, `hls.py`, `subtitles.py`, `probe.py`, `app.py`; `web/src/pages/Player.tsx`,
+  `web/src/api.ts`; tests `tests/vobsub.py` (new: writes .idx/.sub, multi-pack pictures), `test_stream.py`,
+  `test_subtitles.py`.
+- **Verified:** 227 tests pass (new: GPU chains per vendor, failure memory, SAR sizes, probe geometry, VobSub listing
+  and burn-in from HLS segments 0/1 + the live stream, live PGS burn-in mid-line, AC3 pass-through over HLS and live).
+  Real files: DV P5 frame vs the SDR reference (same colours; a naive decode is teal). D3D11 → `scale_d3d11` failed on
+  the NVIDIA driver, so AMF uses `vpp_amf` (untested). Browser on a :8490 test instance (fresh DB): DV P5 switches to
+  the conversion (Chromium: no `dvh1.05`), VobSub English line burned in at 0:16 after picking it mid-line, Sound menu
+  "EAC3 → AAC" without Dolby support; with `isTypeSupported` faked to say yes: pass-through requested, the decode
+  failed, the player went to AAC by itself and the menu says "didn't play here". No console or server errors.
+- **Left open:** see §5 item 1 (real Intel/AMD/VAAPI hardware, a real Dolby device, DV P5 without Vulkan, MicroDVD
+  `.sub`). Conversions (as opposed to the remux) still always output AAC.
+
+### 2026-10-08: Choose and order Home's rows
+- **What / why:** owner asked to configure which categories Home shows and in what order. New Settings card
+  **Home page** (admins: own section; viewers: under Your account): the banner toggle (moved from the account card)
+  plus every Home row (Continue Watching, Recently Added, each library, Top Rated, Genres) with a checkbox, drag
+  handle (arrow keys work when it's focused) and ▲▼; saves on each change; *Reset to default*. Per user, stored as
+  the `home_rows` pref (`[{id, show}]`, ids `continue`, `recent`, `lib:<id>`, `top_rated`, `genres`; empty = default).
+  Rows missing from the saved list (a library added later) appear switched on after their default neighbour;
+  saved ids that no longer exist are ignored. Server validates shape, max 200 rows, drops duplicates.
+- **Files:** `server/bams/auth.py` (`PREFS` now mixed types, `_valid`/`_home_rows`, `MAX_HOME_ROWS`), `app.py`
+  (`HomeRowIn`, `PrefsIn.home_rows`), `tests/test_watch.py` (`test_home_rows_pref`, prefs test updated);
+  web: new `homeRows.ts` (`defaultRows`, `homeRows` merge), new `components/HomeSettings.tsx`, `pages/Home.tsx`
+  (renders rows from `homeRows()`), `pages/Settings.tsx`, `components/AccountSettings.tsx` (banner toggle removed),
+  `api.ts` (`HomeRowPref`, `Prefs`), `auth.tsx` (`DEFAULT_PREFS`), `styles.css` (`.home-rows`, `.home-row`).
+- **Verified:** `test_watch.py` passes; full suite 226 passed, 1 failed (`test_vobsub_sidecar_is_burned_in`, from
+  another session's unfinished VobSub work, not touched here). `tsc` clean, `npm run build`. Test server on :8488
+  with a DB copy: card lists 7 rows in the default order; ▲ and arrow key moved Genres, unticking Continue Watching
+  saved `show:false`; `/api/auth/state` returned the saved list; Home rendered the genre rows above Movies with
+  Continue Watching gone; Reset restored the default and disabled itself; no console errors.
+- **Left open:** individual genres can't be picked (Genres is one entry); not in an installer yet (the owner's
+  :8484 service needs a new build to show it).
+
+### 2026-10-08: Music follow-ups (CUE sheets, playlists, gapless, merges, refresh, late covers, FLAC output)
+- **What / why:** the seven music follow-ups from §5, which the owner asked to build. **CUE sheets:** a `.cue` next to
+  a whole-album file (matched by name, by name with another extension, or as the folder's only audio file) or a
+  CUESHEET tag makes one track per entry (`file_items.cue_start/cue_end`); sheet changes are detected by their
+  size/mtime (`files.parse.cues`) and re-read without re-probing; long files probed before v8 are probed once more for
+  embedded sheets (`probe.PROBE_VERSION`). **Playlists:** imported from `.m3u/.m3u8/.pls` in music folders, re-read when
+  their file changes, deleted with it, entries re-matched to tracks every scan; Playlists tab + page. **Gapless:** two
+  `<audio>` elements, next track preloaded ~20 s before the end and started at the end; consecutive CUE tracks of one
+  file are one stream. **Merges:** albums pinned to the same release (both by tag id, Fix match or a ≥ 0.95 search)
+  become one; same disc+number+similar title → one track with both files; the queue plays the best file. **Refresh:**
+  identified albums/artists looked up again after 120 days, 50 per scan; how they were found and their score are kept;
+  downloaded covers/photos re-fetched, the owner's never. **Late covers:** the scan's walk notes images (and cue sheets,
+  playlists) for free (`readonly.walk(side=…)`); `fill_artwork` compares each album's best folder image with
+  `items.poster_src` and replaces embedded/CAA/Commons art. **FLAC output:** Settings → Music → Converted music.
+  Schema v8 (`file_items.cue_*`, `items.poster_src`, `playlists`, `playlist_items`); `music.PARSER_VERSION` 2.
+- **Files:** new `server/bams/cue.py`, `playlists.py`; `db.py` (v8), `config.py` (`CUE_EXTS`, `PLAYLIST_EXTS`),
+  `readonly.py` (`walk` side files, `read_text`), `scanner.py` (side files, `sheet_for`/`cues_near`, playlist import +
+  resolve), `music.py` (`parse_cue_tracks`, `link_tracks`, `album_alias`, `fill_artwork` rewrite), `music_match.py`
+  (`merge_same_release`/`merge_albums`, refresh, `matched_by`, `poster_src`), `probe.py` (`cuesheet`, `pv`),
+  `stream.py` (`plan_audio(output)`, `audio_cmd` FLAC), `jobs.py`, `app.py` (`_queue`, playlists API,
+  `/api/settings/music-output`, Fix match after a merge); `web/src/music.tsx` (rewritten player), `pages/Music.tsx`
+  (Playlists tab, `PlaylistPage`, `TrackList numbered`), `App.tsx`, `api.ts`, `components/MusicSettings.tsx`,
+  `MusicFixMatch.tsx`, `NowPlaying.tsx`, `styles.css`; `tests/test_music_extras.py` (new), `test_music.py`,
+  `test_music_match.py`, `test_auth.py`.
+- **Verified:** 227 tests (12 new: cue parsing; image split, edited/removed sheet; queue `start/end`; real FLAC with an
+  embedded sheet; playlist parsing, import, edit/delete; late cover/artist image vs CAA/Commons; merge + rescan +
+  best file; unsure matches not merged; refresh; FLAC command and API). Browser on a test instance (:8489, generated
+  music): playlist with relative, `Z:\Old Laptop\…` and CUE-image entries (1 stream counted missing); MP3 → converted
+  ALAC → FLAC CUE image played through with ~1 ms between one element ending and the next playing, CUE tracks one
+  stream; a WavPack CUE track started at `?t=5` with the clock from 0:00; FLAC setting → `audio/flac`, "FLAC" badge;
+  seek inside a CUE track; a `cover.jpg` added after the first scan shown on the album; media folder unchanged.
+- **Left open:** sample-perfect gapless (MSE; MP3 padding and AAC priming can still leave a tiny gap, FLAC output and
+  CUE images avoid both); un-merge; authoring playlists; playlists not in Home/Search.
+
+### 2026-10-08: Settings → Security (sign-in log, lockout, IP lists, traffic log)
+- **What / why:** owner asked for a security section in Settings. **Sign-in log:** every sign-in (ok/failed + reason:
+  wrong password, no such account, account locked, tried again too soon, too many from this address) and every
+  lock/unlock, in `security.db` (newest 100,000 kept); filter All/Successful/Failed/Locks, paging. **Wait:** after
+  wrong password n the account waits 2^(n-1) s (1, 2, 4, 8…); a try during the wait gets 429 + `Retry-After` and isn't
+  counted; a right password resets to 0. Attempts per account are serialised (`Security.attempt`) so parallel guesses
+  can't share one wait. **Lockout:** `settings.lockout_threshold` (default 5, 1–50) wrong passwords in a row lock the
+  account until an admin unlocks it (Settings, or `bams user unlock NAME`). Unknown names behave the same. The old
+  per-address `auth.Throttle` (10 / 10 min) stays. **Lock/unlock by hand:** an admin lock signs the account out
+  everywhere; nobody locks themselves. **IP lists:** `settings.ip_mode` `allow_all` (default) | `allowlist`,
+  `ip_allow`/`ip_block` (JSON `[{cidr, note}]`, IPv4/IPv6 addresses or CIDR, normalised); block list wins; loopback
+  always allowed; a save that would block the saver's own address is refused (400); `bams security allow-all` resets
+  the mode (a running server re-reads the policy every 10 s). Blocked addresses get 403 for everything (UI too).
+  **Traffic log:** `security.Gate` (outermost ASGI middleware) records each request (time, duration, client ip:port,
+  server, scheme, HTTP version, method, path, query, status, bytes in/out, signed-in user, user agent, allow/block)
+  into `netflow.Netflow`: a background writer, `netflow-<ms>.jsonl` files of cap/10 (≤256 MB), oldest deleted to stay
+  under `settings.netflow_max_bytes` (default 10 GB, 10 MB–100 TB); `settings.netflow_dir` (default `data/netflow`) is
+  checked (absolute, writable, not in a library or the transcode dir); old files stay when the folder changes. The
+  viewer reads backwards with a substring search and a cursor (64 MB scanned per call).
+- **Files:** new `server/bams/security.py`, `server/bams/netflow.py`, `server/tests/test_security.py` (13 tests),
+  `web/src/components/SecuritySettings.tsx`; changed `app.py` (login flow, Gate, `/api/security*` routes, user add/remove
+  clear lock state), `config.py` (`Paths.security_db`, `Paths.netflow`), `__main__.py` (`user unlock`, `security
+  allow-all`), `tests/test_auth.py` (the throttle test now guesses different names), web `Settings.tsx` (Security
+  section), `api.ts` (types), `styles.css` (IP lists, log tables). `.claude/launch.json`: `bams-test-8487`.
+- **Verified:** `test_security.py` 13/13 (doubling waits, 429 not counted, lockout + admin unlock, reset on success,
+  threshold setting, unknown names answer alike, admin lock signs out + log entries/filter/paging, CLI unlock and
+  allow-all, IP policy rules incl. IPv6 and v4-mapped, lists through the API incl. self-block refusal, every request and
+  blocked ones in the traffic log, size-cap trimming + gap-free paging + search, folder/size settings and refusals).
+  Full suite 225 passed; the 2 failures (`test_stream.py`, `test_subtitles.py`) were in code other sessions were
+  changing at the time. Browser on a test server (:8487, fresh data dir): all five cards render, Lock shows
+  "Locked by …", the sign-in log shows ok/failed rows with reasons, traffic-log sizes match the responses; no console
+  errors.
+- **Left open:** not in an installer yet (the owner's :8484 service needs a new build). The traffic log can't be
+  downloaded from the UI (the files are in the folder shown). Behind a reverse proxy on another machine all visitors
+  share the proxy's address (uvicorn trusts `X-Forwarded-For` only from 127.0.0.1). No alert/e-mail on lockouts.
 
 ### 2026-10-08: CPU/GPU choice, scan progress with what's left, library order (release 0.3.0)
 - **What / why:** the three tester requests left open in 0.2.0, which the owner asked for next. **CPU/GPU:**

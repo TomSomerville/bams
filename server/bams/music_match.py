@@ -11,6 +11,11 @@ whose names came only from file names.
 Per artist: the id found through their albums (or an unambiguous name search), MusicBrainz's sort name,
 a Wikipedia summary and a Wikimedia Commons photo when there's no local artist.jpg.
 
+Two local albums pinned to the same release (say a FLAC and an MP3 copy, or one album in two folders) are
+merged into one, when both identifications are sure: a release id in the tags, Fix match, or a search
+scoring MERGE_SCORE. Identified albums and artists are looked up again after REFRESH_AFTER (MusicBrainz
+corrections, new Wikipedia text, a better cover), a few per scan.
+
 Local art always wins over downloaded art. Genres keep coming from the files' tags (see musicbrainz.py).
 """
 
@@ -32,6 +37,9 @@ from .parse import title_key
 log = logging.getLogger(__name__)
 
 ACCEPT = 0.85
+MERGE_SCORE = 0.95  # a search match this sure can be merged with another album pinned to the same release
+REFRESH_AFTER = 120 * 86400  # look identified albums/artists up again after ~4 months
+REFRESH_PER_SCAN = 50  # at most this many per scan (MusicBrainz allows 1 request/second)
 _GIVE_UP_AFTER = 5  # consecutive service errors: MusicBrainz is down, try again next scan
 _SKIP_ARTISTS = (music.VARIOUS, music.UNKNOWN_ARTIST)
 
@@ -44,6 +52,8 @@ class MusicMatchStats:
     artists_unmatched: int = 0
     covers: int = 0
     photos: int = 0
+    refreshed: int = 0
+    merged: int = 0
     errors: int = 0
 
     def as_dict(self) -> dict:
@@ -141,16 +151,22 @@ def album_facts(con: sqlite3.Connection, album_id: int) -> dict:
     return {"title": al["parsed_title"] or al["title"], "artist": al["album_artist"], "tracks": n,
             "year": years.most_common(1)[0][0] if years else None,
             "tag_mbid": tag_ids.most_common(1)[0][0] if tag_ids else None,
-            "artist_id": al["parent_id"], "poster": al["poster"], "status": al["match_status"]}
+            "artist_id": al["parent_id"], "poster": al["poster"], "status": al["match_status"],
+            "score": al["match_score"], "poster_src": jload(al["poster_src"]) or {}, "extra": jload(al["extra"]) or {}}
 
 
 def match_album(con: sqlite3.Connection, mb: MusicBrainz, images: Path, album_id: int, *, mbid: str | None = None,
-                manual: bool = False, lang: str = "en", stats: MusicMatchStats | None = None) -> bool:
-    """Identify one album (or pin it to `mbid`). Network first, then one short transaction."""
+                manual: bool = False, refresh: bool = False, lang: str = "en",
+                stats: MusicMatchStats | None = None) -> bool:
+    """Identify one album (or pin it to `mbid`; `refresh`: look its release up again, keeping how it was
+    identified). Network first, then one short transaction. May merge it into another album pinned to the
+    same release (see merge_same_release)."""
     f = album_facts(con, album_id)
-    score: float | None = 1.0
+    score: float | None = f["score"] if refresh else 1.0
+    matched_by = f["extra"].get("matched_by") if refresh else ("manual" if manual else "tag")
     mbid = mbid or f["tag_mbid"]
     if not mbid:
+        matched_by = "search"
         artist = None if f["artist"] == music.UNKNOWN_ARTIST else f["artist"]
         results = mb.search_releases(f["title"], artist)
         if not results and artist:
@@ -163,35 +179,42 @@ def match_album(con: sqlite3.Connection, mb: MusicBrainz, images: Path, album_id
         mbid = best["id"]
         score = min(score, 1.0)  # bonuses can push a sure match past 1
     rel = mb.release(mbid)
-    if rel is None:  # stale id in the tags, or a typo in Fix match
+    if rel is None:  # stale id in the tags, a typo in Fix match, or a release since deleted
         if manual:
             raise MusicLookupError(f"MusicBrainz has no release {mbid}")
+        if refresh:  # keep what we have; try again after another REFRESH_AFTER
+            with Tx(con):
+                con.execute("UPDATE items SET metadata_at=? WHERE id=?", (now(), album_id))
+            return False
         _mark_unmatched(con, album_id, None)
         return False
+    mbid = rel.get("id") or mbid  # MusicBrainz answers a merged-away id with the release it went into
 
     rg = rel.get("release-group") or {}
     cover = None
-    if not f["poster"]:
+    if not f["poster"] or (refresh and f["poster_src"].get("from") == "caa"):
         data = mb.cover(mbid, rg.get("id"))
         cover = music._store_image(images, data) if data else None  # noqa: SLF001 - shared image store
-        if cover and stats:
+        if cover and stats and cover != f["poster"]:
             stats.covers += 1
     _, wiki = _wiki(mb, wikidata_id(rg), lang)
     extra = {"release_group": rg.get("id"), "type": rg.get("primary-type"),
              "secondary_types": rg.get("secondary-types") or [],
              "country": rel.get("country"), "date": rel.get("date"),
              "musicbrainz_url": f"https://musicbrainz.org/release/{mbid}",
-             "wikipedia": {"url": wiki["url"], "title": wiki["title"]} if wiki else None}
+             "wikipedia": {"url": wiki["url"], "title": wiki["title"]} if wiki else None,
+             "matched_by": matched_by}
     by_pos = {(m.get("position") or 1, t.get("position")): t
               for m in rel.get("media") or [] for t in m.get("tracks") or []}
     credit = rel.get("artist-credit") or []
 
     with Tx(con):
-        con.execute("""UPDATE items SET title=?, year=?, overview=?, mbid=?, extra=?, poster=COALESCE(poster, ?),
+        con.execute("""UPDATE items SET title=?, year=?, overview=?, mbid=?, extra=?, poster=COALESCE(?, poster),
+                       poster_src=CASE WHEN ? IS NULL THEN poster_src ELSE ? END,
                        match_status=?, match_score=?, metadata_at=?, updated_at=? WHERE id=?""", (
             rel.get("title") or f["title"], _year(rg.get("first-release-date")) or _year(rel.get("date")) or f["year"],
-            wiki["extract"] if wiki else None, mbid, jdump(extra), cover, "manual" if manual else "matched",
-            score, now(), now(), album_id))
+            wiki["extract"] if wiki else None, mbid, jdump(extra), cover, cover, jdump({"from": "caa"}),
+            "manual" if manual else "matched", score, now(), now(), album_id))
         # Tracks: MusicBrainz ids, and real titles for files whose name was all we had.
         for t in con.execute("""SELECT t.id, t.disc_number, t.track_number, f.parse FROM items t
                                 JOIN file_items fi ON fi.item_id=t.id JOIN files f ON f.id=fi.file_id
@@ -210,17 +233,77 @@ def match_album(con: sqlite3.Connection, mb: MusicBrainz, images: Path, album_id
             if a.get("id") and not artist_row["mbid"] and a["id"] != VARIOUS_ARTISTS_MBID \
                     and _sim(artist_row["title"], a.get("name")) >= 0.9:
                 con.execute("UPDATE items SET mbid=? WHERE id=?", (a["id"], f["artist_id"]))
-    log.info("matched album %r -> MusicBrainz %s %r", f["title"], mbid, rel.get("title"))
+    log.info("%s album %r -> MusicBrainz %s %r", "refreshed" if refresh else "matched", f["title"], mbid,
+             rel.get("title"))
+    if merge_same_release(con, album_id) != album_id and stats:
+        stats.merged += 1
     return True
+
+
+# ------------------------------------------------------------------ merging
+
+def _pinned(r: sqlite3.Row) -> bool:
+    """Sure enough of this album's release to merge it with another album on the same release."""
+    by = (jload(r["extra"]) or {}).get("matched_by")
+    return r["match_status"] == "manual" or by in ("tag", "manual") or (r["match_score"] or 0) >= MERGE_SCORE
+
+
+def merge_same_release(con: sqlite3.Connection, album_id: int) -> int:
+    """Merge this album with other albums of its library pinned to the same release (the oldest is kept).
+    Returns the id of the album it now is."""
+    me = con.execute("SELECT * FROM items WHERE id=?", (album_id,)).fetchone()
+    if not me or not me["mbid"] or not _pinned(me):
+        return album_id
+    keep = album_id
+    for o in con.execute("""SELECT * FROM items WHERE library_id=? AND kind='album' AND mbid=? AND id<>?
+                            ORDER BY id""", (me["library_id"], me["mbid"], album_id)).fetchall():
+        if _pinned(o):
+            a, b = sorted((keep, o["id"]))
+            with Tx(con):
+                merge_albums(con, a, b)
+            keep = a
+    return keep
+
+
+def merge_albums(con: sqlite3.Connection, keep: int, drop: int) -> None:
+    """Fold album `drop` into `keep` (call inside a transaction). Tracks that are the same track (same disc and
+    number, a similar title: the FLAC and the MP3 of one song) become one track with both files; the others
+    move over. Later scans file `drop`'s music under `keep` (an item_keys alias by artist + album name)."""
+    k = con.execute("SELECT * FROM items WHERE id=?", (keep,)).fetchone()
+    d = con.execute("""SELECT a.*, p.title AS album_artist FROM items a JOIN items p ON p.id=a.parent_id
+                       WHERE a.id=?""", (drop,)).fetchone()
+    con.execute("UPDATE item_keys SET item_id=? WHERE item_id=?", (keep, drop))
+    con.execute("INSERT OR REPLACE INTO item_keys (library_id, kind, title_key, year, item_id) VALUES (?, 'album', ?, 0, ?)",
+                (d["library_id"], music.album_alias(d["album_artist"], d["parsed_title"] or d["title"]), keep))
+    mine = con.execute("SELECT id, disc_number, track_number, title FROM items WHERE parent_id=? AND kind='track'",
+                       (keep,)).fetchall()
+    for t in con.execute("SELECT id, disc_number, track_number, title FROM items WHERE parent_id=? AND kind='track'",
+                         (drop,)).fetchall():
+        same = next((m for m in mine if t["track_number"] is not None and m["track_number"] == t["track_number"]
+                     and (m["disc_number"] or 1) == (t["disc_number"] or 1) and _sim(m["title"], t["title"]) >= 0.8), None)
+        if same:
+            con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (same["id"], t["id"]))
+            con.execute("UPDATE playlist_items SET item_id=? WHERE item_id=?", (same["id"], t["id"]))
+            con.execute("DELETE FROM items WHERE id=?", (t["id"],))
+        else:
+            con.execute("UPDATE items SET parent_id=?, updated_at=? WHERE id=?", (keep, now(), t["id"]))
+    if not k["poster"] and d["poster"]:
+        con.execute("UPDATE items SET poster=?, poster_src=? WHERE id=?", (d["poster"], d["poster_src"], keep))
+    con.execute("DELETE FROM items WHERE id=?", (drop,))
+    if not con.execute("SELECT 1 FROM items WHERE parent_id=?", (d["parent_id"],)).fetchone():
+        con.execute("DELETE FROM items WHERE id=? AND kind='artist'", (d["parent_id"],))  # an artist left empty
+    music.rollup(con, d["library_id"])
+    log.info("merged album %s into %s (same MusicBrainz release)", drop, keep)
 
 
 # ------------------------------------------------------------------ artists
 
 def match_artist(con: sqlite3.Connection, mb: MusicBrainz, images: Path, artist_id: int, *, mbid: str | None = None,
-                 manual: bool = False, lang: str = "en", stats: MusicMatchStats | None = None) -> bool:
+                 manual: bool = False, refresh: bool = False, lang: str = "en",
+                 stats: MusicMatchStats | None = None) -> bool:
     it = con.execute("SELECT * FROM items WHERE id=?", (artist_id,)).fetchone()
     name = it["title"]
-    score: float | None = 1.0
+    score: float | None = it["match_score"] if refresh else 1.0
     mbid = mbid or it["mbid"]
     if not mbid:
         # Only an unambiguous exact name: "Nirvana" is several bands, and guessing wrong is worse than nothing.
@@ -236,12 +319,18 @@ def match_artist(con: sqlite3.Connection, mb: MusicBrainz, images: Path, artist_
     if a is None:
         if manual:
             raise MusicLookupError(f"MusicBrainz has no artist {mbid}")
+        if refresh:
+            with Tx(con):
+                con.execute("UPDATE items SET metadata_at=? WHERE id=?", (now(), artist_id))
+            return False
         _mark_unmatched(con, artist_id, None)
         return False
+    mbid = a.get("id") or mbid
 
     ent, wiki = _wiki(mb, wikidata_id(a), lang)
     photo, credit = None, None
-    if not it["poster"] and (fname := _p18(ent)):
+    from_commons = (jload(it["poster_src"]) or {}).get("from") == "commons"
+    if (not it["poster"] or (refresh and from_commons)) and (fname := _p18(ent)):
         got = mb.commons_image(fname)
         if got and (photo := music._store_image(images, got[0])):  # noqa: SLF001
             credit = got[1]
@@ -255,11 +344,11 @@ def match_artist(con: sqlite3.Connection, mb: MusicBrainz, images: Path, artist_
              "image_credit": credit or (old.get("image_credit") if it["poster"] else None)}
     with Tx(con):
         con.execute("""UPDATE items SET mbid=?, sort_title=COALESCE(?, sort_title), overview=?, extra=?,
-                       poster=COALESCE(poster, ?), match_status=?, match_score=?, metadata_at=?, updated_at=?
-                       WHERE id=?""", (
-            mbid, a.get("sort-name"), wiki["extract"] if wiki else None, jdump(extra), photo,
-            "manual" if manual else "matched", score, now(), now(), artist_id))
-    log.info("matched artist %r -> MusicBrainz %s", name, mbid)
+                       poster=COALESCE(?, poster), poster_src=CASE WHEN ? IS NULL THEN poster_src ELSE ? END,
+                       match_status=?, match_score=?, metadata_at=?, updated_at=? WHERE id=?""", (
+            mbid, a.get("sort-name"), wiki["extract"] if wiki else None, jdump(extra), photo, photo,
+            jdump({"from": "commons"}), "manual" if manual else "matched", score, now(), now(), artist_id))
+    log.info("%s artist %r -> MusicBrainz %s", "refreshed" if refresh else "matched", name, mbid)
     return True
 
 
@@ -280,6 +369,8 @@ def match_music_library(con: sqlite3.Connection, mb: MusicBrainz, images: Path, 
         for i, item_id in enumerate(todo):
             if progress:
                 progress(f"Identifying {kind}s on MusicBrainz", i, len(todo))
+            if not con.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone():
+                continue  # merged into another album meanwhile
             try:
                 ok = fn(con, mb, images, item_id, lang=lang, stats=stats)
                 failures = 0
@@ -293,4 +384,27 @@ def match_music_library(con: sqlite3.Connection, mb: MusicBrainz, images: Path, 
                 continue
             setattr(stats, f"{kind}s_{'matched' if ok else 'unmatched'}",
                     getattr(stats, f"{kind}s_{'matched' if ok else 'unmatched'}") + 1)
+
+    # Identified a while ago: look them up again (oldest first, a few per scan).
+    stale = con.execute("""SELECT id, kind, mbid, match_status FROM items WHERE library_id=? AND kind IN ('album', 'artist')
+                           AND match_status IN ('matched', 'manual') AND mbid IS NOT NULL
+                           AND COALESCE(metadata_at, 0) < ? ORDER BY COALESCE(metadata_at, 0), id LIMIT ?""",
+                        (lib_id, now() - REFRESH_AFTER, REFRESH_PER_SCAN)).fetchall()
+    for i, r in enumerate(stale):
+        if progress:
+            progress("Refreshing music details from MusicBrainz", i, len(stale))
+        if not con.execute("SELECT 1 FROM items WHERE id=?", (r["id"],)).fetchone():
+            continue  # merged away meanwhile
+        fn = match_album if r["kind"] == "album" else match_artist
+        try:
+            if fn(con, mb, images, r["id"], mbid=r["mbid"], manual=r["match_status"] == "manual", refresh=True,
+                  lang=lang, stats=stats):
+                stats.refreshed += 1
+            failures = 0
+        except MusicLookupError as e:
+            stats.errors += 1
+            failures += 1
+            log.warning("MusicBrainz refresh failed for %s %s: %s", r["kind"], r["id"], e)
+            if failures >= _GIVE_UP_AFTER:
+                break
     return stats

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import vobsub
 from bams import jobs, readonly, stream, subtitles
 from bams.app import create_app
 from bams.config import Paths
@@ -42,6 +43,29 @@ def test_sidecars_and_labels(tmp_path):
     assert labels["Movie (2001).fre.sdh.ass"] == ("French · SDH", "fr")
     assert labels["movie (2001).German.vtt"] == ("German", "de")  # case-insensitive match
     assert labels["Movie (2001).srt"] == ("Movie (2001).srt", None)
+
+
+def test_vobsub_sidecars_are_listed(tmp_path):
+    """DVD subtitles ripped to Movie.idx + Movie.sub: one picture track per language in the index; an .idx whose
+    .sub is missing (or a .sub alone) isn't a track."""
+    v = tmp_path / "Movie (2001).mkv"
+    v.write_text("x")
+    vobsub.write(tmp_path / "Movie (2001).idx", (320, 240), [("en", [(1, 2, vobsub.box(8, 8), 0, 0)]),
+                                                              ("fr", [(1, 2, vobsub.box(8, 8), 0, 0)])])
+    vobsub.write(tmp_path / "Movie (2001).de.forced.idx", (320, 240), [("", [(1, 2, vobsub.box(8, 8), 0, 0)])])
+    (tmp_path / "Movie (2001).es.idx").write_text("id: es, index: 0\n")  # no .sub next to it
+    (tmp_path / "Movie (2001).it.sub").write_bytes(b"\0" * 2048)          # no .idx
+    readonly.set_protected_roots([tmp_path])
+    try:
+        tr = subtitles.tracks({}, v, 3)
+    finally:
+        readonly.set_protected_roots([])
+    assert [(t["id"], t["label"], t["language"], t["image"], t["url"]) for t in tr] == [
+        ("x0-0", "German · forced", "de", True, None),  # no language in the index: the file name's
+        ("x1-0", "English", "en", True, None),
+        ("x1-1", "French", "fr", True, None),
+    ]
+    assert subtitles.burn_source(tr[2], v) == (tmp_path / "Movie (2001).idx", 1)
 
 
 def test_shift():
@@ -143,3 +167,36 @@ def test_picture_subtitles_are_burned_in(film):
         assert outside < 40
         assert (inside > 180) is expect_box, (burn, k, inside)
         c.delete(f"/api/hls/{sess['id']}")
+    # the live stream (browsers without HLS), started mid-line at 3 s: the line is on screen from its first frame
+    live = tmp / "pgs-live.mp4"
+    live.write_bytes(c.get(f"{f['playback']['transcode_url']}?t=3&sub=1").content)
+    assert _luma(ff, live, 0.0, 160, 200) > 180 and _luma(ff, live, 2.9, 160, 200) < 40
+
+
+@pytest.mark.skipif(not stream.ffmpeg_path() or not stream.video_encoder(), reason="FFmpeg/H.264 encoder not installed")
+def test_vobsub_sidecar_is_burned_in(film, unguarded):
+    """A DVD subtitle pair next to the film, its line on screen from 1 to 5.5 s: burned in from segment 0, from
+    segment 1 (FFmpeg starts mid-line), and in the live stream started at 3 s. Nothing is written next to it."""
+    c, item, src, tmp = film
+    with unguarded:  # the user drops the pair in
+        vobsub.write(src.with_suffix(".idx"), (320, 240), [("en", [(1.0, 5.5, vobsub.box(200, 40), 60, 180)])])
+    before = sorted(p.name for p in src.parent.iterdir())
+    f = c.get(f"/api/items/{item['id']}").json()["files"][0]
+    track = next(t for t in f["subtitles"] if t["codec"] == "vobsub")
+    assert track["id"] == "x1-0" and track["image"] and track["label"] == "English"
+    ff = stream.ffmpeg_path()
+    for k, at in ((0, 0.5), (0, 2.0), (1, 1.0), (1, 1.8)):  # 0.5, 2, 5 and 5.8 s into the film
+        sess = c.post(f["playback"]["hls_url"], json={"burn": track["id"], "start": k * 4}).json()
+        out = tmp / f"vob-{k}.ts"
+        seg = c.get(f"/api/hls/{sess['id']}/0/{k}.ts")
+        c.delete(f"/api/hls/{sess['id']}")
+        assert seg.status_code == 200, (k, seg.text)
+        out.write_bytes(seg.content)
+        film_t = k * 4 + at
+        assert (_luma(ff, out, at, 160, 200) > 180) is (1.0 < film_t < 5.5), film_t
+    live = tmp / "vob-live.mp4"
+    live.write_bytes(c.get(f"{f['playback']['transcode_url']}?t=3&sub={track['id']}").content)
+    assert _luma(ff, live, 1.0, 160, 200) > 180 and _luma(ff, live, 2.9, 160, 200) < 40  # 4 s in: on; 5.9 s: off
+    assert c.post(f["playback"]["hls_url"], json={"burn": "x7-0"}).status_code == 422
+    assert c.post(f["playback"]["hls_url"], json={"burn": "e0"}).status_code == 422  # a text track: not burned in
+    assert sorted(p.name for p in src.parent.iterdir()) == before

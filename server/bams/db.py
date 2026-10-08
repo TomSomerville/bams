@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -264,7 +264,43 @@ def _v7(con: sqlite3.Connection) -> None:
                    WHERE l2.name COLLATE NOCASE < libraries.name COLLATE NOCASE)""")
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7}  # target version -> step
+_V8 = (
+    # CUE sheets: one file holds several tracks, each a stretch of it (seconds; NULL end = to the end of the file)
+    "ALTER TABLE file_items ADD COLUMN cue_start REAL",
+    "ALTER TABLE file_items ADD COLUMN cue_end REAL",
+    # music art: where the poster came from (JSON: {"from": "folder"|"embedded"|"caa"|"commons", "path", "size",
+    # "mtime_ns"} or {"from": null, "checked": t}), so a cover.jpg added later replaces embedded/downloaded art
+    "ALTER TABLE items ADD COLUMN poster_src TEXT",
+    # playlists imported from .m3u/.m3u8/.pls files in a music library (read there, never written)
+    """CREATE TABLE playlists (
+        id          INTEGER PRIMARY KEY,
+        library_id  INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        root_id     INTEGER REFERENCES library_roots(id) ON DELETE CASCADE,
+        rel_path    TEXT,                  -- the playlist file, relative to its root
+        name        TEXT NOT NULL,
+        size        INTEGER,
+        mtime_ns    INTEGER,
+        entries     TEXT NOT NULL,         -- JSON: the file's entries as written ({path, title, duration})
+        missing     INTEGER NOT NULL DEFAULT 0,  -- entries not found in the library
+        added_at    REAL NOT NULL,
+        updated_at  REAL NOT NULL,
+        UNIQUE (root_id, rel_path))""",
+    """CREATE TABLE playlist_items (
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+        position    INTEGER NOT NULL,
+        item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,  -- a track
+        PRIMARY KEY (playlist_id, position))""",
+    "CREATE INDEX playlist_items_item ON playlist_items(item_id)",
+)
+
+
+def _v8(con: sqlite3.Connection) -> None:
+    """v8: CUE-sheet tracks, where music art came from, imported playlists."""
+    for stmt in _V8:
+        con.execute(stmt)
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

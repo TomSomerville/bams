@@ -324,7 +324,8 @@ def test_burn_in_and_gpu_filters(monkeypatch, tmp_path):
     assert mid.count("-i") == 2 and mid[mid.index("-i") + 2:mid.index("-i") + 6] == ["-ss", "70.000", "-i", "a.mkv"]
     assert mid[mid.index("-filter_complex") + 1].startswith("[0:v:0][1:s:2]overlay")  # subtitles from 30 s before
     fmp4 = stream.transcode_cmd(Path("a.mkv"), 12, hevc, encoder="h264_nvenc", burn=0)
-    assert fmp4[fmp4.index("-itsoffset") + 1] == "-12.000" and "[1:s:0]" in fmp4[fmp4.index("-filter_complex") + 1]
+    assert "[1:s:0]" in fmp4[fmp4.index("-filter_complex") + 1] and "-copyts" in fmp4  # the file's clock, then back to 0
+    assert fmp4[fmp4.index("-output_ts_offset") + 1] == "-12.000" and fmp4.count("-ss") == 2 and "0.000" in fmp4
     assert "-hwaccel_output_format" not in stream.hls_cmd(Path("a.mkv"), 0, hevc, out, encoder="h264_nvenc", gpu=False)
     assert not stream.gpu_filters({**hevc, "hdr": "HDR10"}, "h264_nvenc", "zscale", None)
     assert not stream.gpu_filters({"codec": "H.264", "bit_depth": 10}, "h264_nvenc", None, None)  # Hi10P: no NVDEC
@@ -345,6 +346,89 @@ def test_hls_copy_cmd(monkeypatch, tmp_path):
     assert cmd[cmd.index("-hls_fmp4_init_filename") + 1] == str(out / "init_40.mp4")  # in the data dir
     assert cmd[cmd.index("-hls_segment_filename") + 1] == str(out / "%d.m4s")
     assert "0:a:1?" in cmd and cmd[cmd.index("-ac") + 1] == "6"
+    assert cmd[cmd.index("-hls_flags") + 1] == "temp_file"  # a half-written segment is never served
+    assert cmd[cmd.index("-hls_list_size") + 1] == "0"
+    copy = stream.hls_copy_cmd(Path("a.mkv"), 0, 0, "H.264", out, 0, 6, copy_audio=True)
+    assert copy[copy.index("-c:a") + 1] == "copy" and "-ac" not in copy
+    live = stream.remux_cmd(Path("a.mkv"), 5, "H.264", 0, 2, copy_audio=True)
+    assert live[live.index("-c:a") + 1] == "copy" and "-b:a" not in live
+
+
+@pytest.fixture
+def gpu(monkeypatch):
+    """Every filter 'available', no failed GPU runs remembered, no overrides in the environment."""
+    monkeypatch.setattr(stream, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(stream, "has_filter", lambda name: True)
+    monkeypatch.setattr(stream, "has_libplacebo", lambda: False)
+    monkeypatch.setattr(stream, "_gpu_broken", set())
+    for var in ("BAMS_GPU_FILTERS", "BAMS_HWACCEL", "BAMS_VAAPI_DEVICE"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_all_gpu_filters_for_quick_sync_amf_and_vaapi(gpu, monkeypatch, tmp_path):
+    """Intel Quick Sync, AMD AMF (Windows) and VAAPI (Linux) keep frames on the GPU like NVIDIA does. Their scalers
+    get the output size as numbers (from the probe's pixel aspect) and a deinterlacer only for interlaced video."""
+    out = tmp_path / "t"
+    hevc = {"codec": "HEVC", "width": 3840, "height": 2160, "bit_depth": 10, "sar": 1.0, "field_order": "progressive"}
+    dvd = {"codec": "MPEG-2", "width": 720, "height": 480, "bit_depth": 8, "sar": 32 / 27, "field_order": "tb"}
+
+    def run(video, enc, h=None):
+        cmd = stream.hls_cmd(Path("a.mkv"), 0, video, out, encoder=enc, max_height=h)
+        pre = cmd[:cmd.index("-i")]
+        fmt = pre[pre.index("-hwaccel_output_format") + 1] if "-hwaccel_output_format" in pre else None
+        return pre[pre.index("-hwaccel") + 1] if "-hwaccel" in pre else None, fmt, cmd[cmd.index("-vf") + 1]
+
+    assert run(hevc, "h264_qsv", 720) == ("qsv", "qsv", "vpp_qsv=w=1280:h=720:format=nv12,setsar=1")
+    assert run(dvd, "h264_qsv") == ("qsv", "qsv", "vpp_qsv=deinterlace=advanced:w=852:h=480:format=nv12,setsar=1")
+    monkeypatch.setattr(stream.sys, "platform", "linux")
+    hw, fmt, vf = run(dvd, "h264_vaapi")
+    assert (hw, fmt) == ("vaapi", "vaapi") and vf == "deinterlace_vaapi=auto=1,scale_vaapi=w=852:h=480:format=nv12,setsar=1"
+    cmd = stream.hls_cmd(Path("a.mkv"), 0, hevc, out, encoder="h264_vaapi")
+    assert cmd[cmd.index("-hwaccel_device") + 1] == "/dev/dri/renderD128"
+    assert cmd[cmd.index("-vf") + 1] == "scale_vaapi=w=3840:h=2160:format=nv12,setsar=1"  # progressive: no deinterlacer
+    assert not stream.gpu_filters(hevc, "h264_amf", None, None)  # AMF's all-GPU path is Windows only
+    monkeypatch.setattr(stream.sys, "platform", "win32")
+    assert run(hevc, "h264_amf", 1080) == ("d3d11va", "d3d11", "vpp_amf=w=1920:h=1080:format=nv12,setsar=1")
+    # AMF has no GPU deinterlacer, and Quick Sync isn't trusted with a stream of unknown scan type: hybrid path
+    assert not stream.gpu_filters(dvd, "h264_amf", None, None)
+    assert not stream.gpu_filters({**dvd, "field_order": None}, "h264_qsv", None, None)
+    assert stream.gpu_filters({**dvd, "field_order": None}, "h264_vaapi", None, None)  # auto=1 leaves progressive alone
+    # probed before BAMS recorded the pixel aspect: the numbers can't be worked out, so hybrid (the API tops it up)
+    assert not stream.gpu_filters({k: v for k, v in hevc.items() if k != "sar"}, "h264_qsv", None, None)
+    assert stream.gpu_filters({k: v for k, v in hevc.items() if k != "sar"}, "h264_nvenc", None, None)
+    # the same limits as NVIDIA: no HDR, no burn-in, no Hi10P; and the environment can turn it off
+    assert not stream.gpu_filters({**hevc, "hdr": "HDR10"}, "h264_qsv", "zscale", None)
+    assert not stream.gpu_filters(hevc, "h264_qsv", None, 0)
+    assert not stream.gpu_filters({**hevc, "codec": "H.264"}, "h264_qsv", None, None)
+    monkeypatch.setenv("BAMS_HWACCEL", "d3d11va")
+    assert not stream.gpu_filters(hevc, "h264_qsv", None, None) and stream.gpu_filters(hevc, "h264_amf", None, None)
+
+
+def test_a_failed_gpu_run_is_remembered(gpu):
+    hevc = {"codec": "HEVC", "width": 1920, "height": 1080, "bit_depth": 10, "profile": "Main 10", "sar": 1.0}
+    assert stream.gpu_filters(hevc, "h264_qsv", None, None)
+    stream.gpu_failed("h264_qsv", hevc)
+    assert not stream.gpu_filters(hevc, "h264_qsv", None, None)                  # hybrid from now on
+    assert stream.gpu_filters({**hevc, "profile": "Main", "bit_depth": 8}, "h264_qsv", None, None)  # other kinds aren't
+    assert stream.gpu_filters(hevc, "h264_nvenc", None, None)
+
+
+def test_output_size_squares_pixels():
+    dvd = {"width": 720, "height": 480, "sar": 32 / 27}  # anamorphic 16:9 NTSC DVD
+    assert stream.output_size(dvd, "libx264") == (852, 480)
+    assert stream.output_size({"width": 3840, "height": 2160}, "libx264") == (1920, 1080)  # CPU: 1080p at most
+    assert stream.output_size({"width": 3840, "height": 1608}, "h264_nvenc", 720) == (1280, 536)
+    assert stream.output_size({"width": 0, "height": 0}, "libx264") is None
+
+
+def test_probe_records_pixel_shape_and_scan_type():
+    s = {"codec_type": "video", "codec_name": "mpeg2video", "width": 720, "height": 576,
+         "sample_aspect_ratio": "64:45", "field_order": "tt"}
+    v = probe.summarize({"format": {}, "streams": [s]})["video"]
+    assert v["sar"] == round(64 / 45, 6) and v["field_order"] == "tt" and stream.interlaced(v)
+    v = probe.summarize({"format": {}, "streams": [{**s, "sample_aspect_ratio": "0:1", "field_order": "unknown"}]})["video"]
+    assert v["sar"] == 1.0 and v["field_order"] is None and stream.interlaced(v) is None
+    assert stream.interlaced({"codec": "HEVC"}) is False  # never interlaced in practice
 
 
 @pytest.mark.skipif(not stream.ffmpeg_path(), reason="FFmpeg not installed")
@@ -394,6 +478,23 @@ def test_remux_over_hls_lines_up_across_runs(tmp_path):
         assert next(s["channels"] for s in a["streams"] if s["codec_name"] == "aac") == 6
         assert abs(a["start"] - b["start"] - 12.0) < 0.05  # segment 6 starts 12 s after segment 0, from another run
         c.delete(f"/api/hls/{sess['id']}")
+        # Dolby pass-through: the player's device decodes AC3, so it's copied as it is (all six channels)
+        sess = c.post(f["playback"]["hls_url"], json={"remux": True, "passthrough": True, "start": 9}).json()
+        assert sess["passthrough"]
+        base = f"/api/hls/{sess['id']}/0"
+        init = c.get(f"{base}/init.mp4")
+        p = first(c.get(f"{base}/6.m4s").content, "6-pass.mp4")
+        assert {(s["codec_name"], s.get("channels")) for s in p["streams"]} == {("h264", None), ("ac3", 6)}
+        c.delete(f"/api/hls/{sess['id']}")
+        live = tmp_path / "live.mp4"
+        live.write_bytes(c.get(f"/api/files/{f['id']}/remux?t=4&passthrough=true").content)
+        r = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", str(live)],
+                           capture_output=True, text=True, check=True)
+        assert r.stdout.split() == ["h264", "ac3"]
+        live.write_bytes(c.get(f"/api/files/{f['id']}/remux?t=4").content)  # not asked: converted as before
+        r = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", str(live)],
+                           capture_output=True, text=True, check=True)
+        assert r.stdout.split() == ["h264", "aac"]
         assert src.read_bytes() == before
     finally:
         readonly.set_protected_roots([])

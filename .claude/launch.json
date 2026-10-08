@@ -10,8 +10,38 @@
     {
       "name": "bams-test",
       "runtimeExecutable": "server\\.venv\\Scripts\\python",
-      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\daa02e39-f87a-487b-a727-c7215950903f\\scratchpad\\data", "serve", "--port", "8485"],
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\d510c0e6-d6f9-45ae-a729-a9bc148df520\\scratchpad\\data", "serve", "--port", "8485"],
       "port": 8485
+    },
+    {
+      "name": "bams-test-8486",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\8a493f52-db02-4da7-8467-172851529e50\\scratchpad\\data", "serve", "--port", "8486"],
+      "port": 8486
+    },
+    {
+      "name": "bams-test-8487",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\042e4c58-3fb1-4596-989a-8557ee733cdd\\scratchpad\\data", "serve", "--port", "8487"],
+      "port": 8487
+    },
+    {
+      "name": "bams-test-8488",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\2d9ea3aa-9a7b-455a-bbf4-8778c76824af\\scratchpad\\data", "serve", "--port", "8488"],
+      "port": 8488
+    },
+    {
+      "name": "bams-test-8489",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\36b77215-8000-4de3-921a-13d2fbe2f253\\scratchpad\\data", "serve", "--port", "8489"],
+      "port": 8489
+    },
+    {
+      "name": "bams-test-8490",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\9879a6b5-9f27-41f7-a679-92f89f899a0e\\scratchpad\\data", "serve", "--port", "8490"],
+      "port": 8490
     }
   ]
 }

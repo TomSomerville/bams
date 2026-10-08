@@ -136,11 +136,19 @@ def audio_channels(audio: dict | None, want: int = 2) -> int:
     return 6 if want >= 6 and ((audio or {}).get("channels") or 2) >= 6 else 2
 
 
-def _aac(channels: int = 2) -> list[str]:
+# Audio a remux may copy untouched when the player says its device decodes it (TVs, Safari, Edge, Chromecast
+# and set-top boxes often do, and hand it on to an AV receiver). Both go into MP4 cleanly; DTS and TrueHD don't.
+PASSTHROUGH_AUDIO = {"AC3", "EAC3"}
+
+
+def _aac(channels: int = 2, copy: bool = False) -> list[str]:
+    if copy:
+        return ["-c:a", "copy"]
     return ["-c:a", "aac", "-ac", str(channels), "-b:a", "384k" if channels > 2 else "192k"]
 
 
-def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: int = 0, channels: int = 2) -> list[str]:
+def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: int = 0, channels: int = 2,
+              copy_audio: bool = False) -> list[str]:
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -152,9 +160,10 @@ def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: in
             "-c:v", "copy"]
     if video_codec == "HEVC":
         cmd += ["-tag:v", "hvc1"]  # the tag browsers expect for HEVC in MP4
-    cmd += [*_aac(channels),
+    cmd += [*_aac(channels, copy_audio),
             "-sn", "-dn", "-map_metadata", "-1", "-avoid_negative_ts", "make_zero",
-            "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+            # AC3/EAC3's header box needs its first packet: delay_moov holds the header back until it's seen
+            "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof" + ("+delay_moov" if copy_audio else ""),
             "pipe:1"]
     return cmd
 
@@ -405,42 +414,122 @@ def transcode_filters(video: dict | None, encoder: str, tonemap: str | None, max
     return ",".join(chain)
 
 
-# Codecs NVDEC decodes on any card that has NVENC (newer cards add AV1). Anything else, or an all-GPU run
-# that fails anyway (a profile the card can't decode), takes the hybrid path.
+# Codecs the GPU decoders handle on any card that has the matching encoder (newer cards add AV1). Anything
+# else, or an all-GPU run that fails anyway (a profile the card can't decode), takes the hybrid path.
 GPU_DECODE = {"H.264", "HEVC", "VP9", "AV1", "MPEG-2", "VC-1"}
+# How each GPU encoder's all-GPU run decodes: the -hwaccel and the frame format that stays on the card.
+# AMF decodes through Direct3D 11 (Windows only); its vpp_amf scaler and encoder take D3D11 frames.
+_GPU_DECODER = {"h264_nvenc": ("cuda", "cuda"), "h264_qsv": ("qsv", "qsv"), "h264_vaapi": ("vaapi", "vaapi"),
+                "h264_amf": ("d3d11va", "d3d11")}
+_GPU_SCALER = {"h264_nvenc": "scale_cuda", "h264_qsv": "vpp_qsv", "h264_vaapi": "scale_vaapi", "h264_amf": "vpp_amf"}
+_NEVER_INTERLACED = {"HEVC", "AV1", "VP9"}  # field order doesn't matter: practically always progressive
+_gpu_broken: set[tuple] = set()  # (encoder, codec, profile, bit depth) whose all-GPU run failed here
 
 
-def gpu_filters(video: dict | None, encoder: str, tonemap: str | None, burn: int | None) -> bool:
-    """Whether a transcode can stay on the GPU from decode to encode (NVIDIA: NVDEC -> bwdif_cuda/scale_cuda
-    -> NVENC; frames never come back to system memory). Not for HDR (the tone-mapping filters run on the
-    CPU or through Vulkan) or burned-in subtitles (overlay is a CPU filter). `BAMS_GPU_FILTERS=0` turns it off."""
-    if encoder != "h264_nvenc" or tonemap or burn is not None or os.environ.get("BAMS_GPU_FILTERS") == "0":
+def interlaced(video: dict | None) -> bool | None:
+    """Whether the video is interlaced, from the field order ffprobe reports (None: unknown)."""
+    v = video or {}
+    if v.get("field_order") in ("tt", "bb", "tb", "bt"):
+        return True
+    if v.get("field_order") == "progressive" or v.get("codec") in _NEVER_INTERLACED:
         return False
-    if os.environ.get("BAMS_HWACCEL", "auto") not in ("auto", "cuda"):
+    return None
+
+
+def _gpu_key(encoder: str, video: dict | None) -> tuple:
+    v = video or {}
+    return encoder, v.get("codec"), v.get("profile"), v.get("bit_depth")
+
+
+def gpu_failed(encoder: str, video: dict | None) -> None:
+    """An all-GPU run of this kind of video failed: use the hybrid path for it until the server restarts, rather
+    than failing first every time (a decoder that lacks the profile, a driver without the filter...)."""
+    key = _gpu_key(encoder, video)
+    if key not in _gpu_broken:
+        _gpu_broken.add(key)
+        log.warning("all-GPU conversion failed on %s for %s video; using the hybrid path for it from now on",
+                    ENCODER_NAMES.get(encoder, encoder), (video or {}).get("codec"))
+
+
+def gpu_filters(video: dict | None, encoder: str, tonemap: str | None, burn) -> bool:
+    """Whether a transcode can stay on the GPU from decode to encode, frames never coming back to system memory:
+    NVIDIA (NVDEC -> bwdif_cuda/scale_cuda -> NVENC), Intel Quick Sync (-> vpp_qsv -> QSV), VAAPI on Linux
+    (-> deinterlace_vaapi/scale_vaapi -> VAAPI) and AMD on Windows (D3D11 -> vpp_amf -> AMF). Not for HDR (the
+    tone-mapping filters run on the CPU or through Vulkan) or burned-in subtitles (overlay is a CPU filter).
+    `BAMS_GPU_FILTERS=0` turns it off.
+
+    CUDA's filters work out pixel shape and interlacing per frame; the others are given the output size up front
+    and a deinterlacer only when the stream says it's interlaced, so they need the probe's `sar`/`field_order`
+    (`probe.video_geometry` for files probed before those were recorded). AMF has no GPU deinterlacer: interlaced
+    video takes the hybrid path there, as does video whose scan type nobody knows on Quick Sync."""
+    if encoder not in _GPU_DECODER or tonemap or burn is not None or os.environ.get("BAMS_GPU_FILTERS") == "0":
+        return False
+    if os.environ.get("BAMS_HWACCEL", "auto") not in ("auto", _GPU_DECODER[encoder][0]):
         return False
     v = video or {}
     if v.get("codec") not in GPU_DECODE or (v.get("codec") == "H.264" and (v.get("bit_depth") or 8) > 8):
         return False
-    return has_filter("scale_cuda") and has_filter("bwdif_cuda")
+    if _gpu_key(encoder, v) in _gpu_broken or not has_filter(_GPU_SCALER[encoder]):
+        return False
+    if encoder == "h264_nvenc":
+        return has_filter("bwdif_cuda")
+    if v.get("sar") is None or not v.get("width") or not v.get("height"):
+        return False
+    scan = interlaced(v)
+    if encoder == "h264_vaapi":
+        return scan is False or has_filter("deinterlace_vaapi")  # auto=1 passes progressive frames through
+    if encoder == "h264_qsv":
+        return scan is not None
+    return sys.platform == "win32" and scan is False  # AMF
 
 
-def _gpu_filter_chain(encoder: str, max_height: int | None) -> str:
-    max_w, max_h = _box(encoder, max_height)
-    k = f"min(1,min({max_w}/(iw*sar),{max_h}/ih))"
-    return ("bwdif_cuda=mode=send_frame:deint=interlaced,"
-            f"scale_cuda=w='trunc(iw*sar*{k}/2)*2':h='trunc(ih*{k}/2)*2':format=nv12,setsar=1")
+def output_size(video: dict | None, encoder: str, max_height: int | None = None) -> tuple[int, int] | None:
+    """The frame size a conversion makes: square pixels, shrunk to fit the box, never enlarged, even sizes. The
+    same sum as the scale expression in `transcode_filters`."""
+    v = video or {}
+    w, h = v.get("width"), v.get("height")
+    if not w or not h:
+        return None
+    sar = v.get("sar") or 1.0
+    bw, bh = _box(encoder, max_height)
+    k = min(1.0, bw / (w * sar), bh / h)
+    return int(w * sar * k / 2) * 2, int(h * k / 2) * 2
+
+
+def _gpu_filter_chain(video: dict | None, encoder: str, max_height: int | None) -> str:
+    if encoder == "h264_nvenc":
+        max_w, max_h = _box(encoder, max_height)
+        k = f"min(1,min({max_w}/(iw*sar),{max_h}/ih))"
+        return ("bwdif_cuda=mode=send_frame:deint=interlaced,"
+                f"scale_cuda=w='trunc(iw*sar*{k}/2)*2':h='trunc(ih*{k}/2)*2':format=nv12,setsar=1")
+    w, h = output_size(video, encoder, max_height)
+    deint = interlaced(video) is not False
+    if encoder == "h264_vaapi":
+        return f"{'deinterlace_vaapi=auto=1,' if deint else ''}scale_vaapi=w={w}:h={h}:format=nv12,setsar=1"
+    if encoder == "h264_qsv":
+        return f"vpp_qsv={'deinterlace=advanced:' if deint else ''}w={w}:h={h}:format=nv12,setsar=1"
+    return f"vpp_amf=w={w}:h={h}:format=nv12,setsar=1"
+
+
+def _burn_source(burn, sub_input: list[str] | None) -> str:
+    """The filter-graph label of the subtitle stream to paint on. `burn` is the n-th subtitle stream of the video
+    itself, or (sidecar file, n): a DVD subtitle (.idx/.sub) next to it, always read as the second input."""
+    if isinstance(burn, tuple):
+        return f"[1:s:{burn[1]}]"
+    return f"[1:s:{burn}]" if sub_input else f"[0:s:{burn}]"
 
 
 SUB_LEAD = 30.0  # seconds of subtitles read before the start of a burned-in conversion
 
 
-def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | None, burn: int | None = None,
+def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | None, burn=None,
                      gpu: bool = True, sub_input: list[str] | None = None) -> tuple[str, list, list]:
     """What every transcode output shares: (ffmpeg, args before -i, what follows the input: the video map +
     filters + encoder args). `gpu=False` forces the hybrid path (after an all-GPU run failed).
-    `burn`: an image subtitle stream (the n-th subtitle) painted onto the picture. A subtitle shows from the
-    moment its event starts, so a run starting mid-line would miss the line on screen: `sub_input` (input
-    options + -i of the same file, seeked SUB_LEAD earlier) is a second input the subtitles are read from."""
+    `burn`: an image subtitle stream painted onto the picture: the n-th subtitle stream, or (sidecar .idx, n).
+    A subtitle shows from the moment its event starts, so a run starting mid-line would miss the line on screen:
+    `sub_input` (input options + -i of the same file or the sidecar, seeked SUB_LEAD earlier) is a second input
+    the subtitles are read from."""
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -450,8 +539,10 @@ def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | 
     tonemap = tonemap_mode(video)
     pre = ["-vaapi_device", vaapi_device()] if enc == "h264_vaapi" else []
     if gpu and gpu_filters(video, enc, tonemap, burn):
-        pre += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
-        vmap = ["-map", "0:v:0", "-vf", _gpu_filter_chain(enc, max_height)]
+        hwaccel, frames = _GPU_DECODER[enc]
+        pre += ["-hwaccel", hwaccel, *(["-hwaccel_device", vaapi_device()] if enc == "h264_vaapi" else []),
+                "-hwaccel_output_format", frames]
+        vmap = ["-map", "0:v:0", "-vf", _gpu_filter_chain(video, enc, max_height)]
     else:
         pre += hwaccel_args(enc)
         vf = transcode_filters(video, enc, tonemap, max_height)
@@ -460,7 +551,7 @@ def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | 
         else:
             # subtitles go on at the source size, before scaling and tone-mapping (HDR discs' subtitles are
             # HDR too); a subtitle stream that ends early just lets the video through
-            src = f"[1:s:{burn}]" if sub_input else f"[0:s:{burn}]"
+            src = _burn_source(burn, sub_input)
             vmap = [*(sub_input or []),
                     "-filter_complex", f"[0:v:0]{src}overlay=eof_action=pass:repeatlast=0,{vf}[v]", "-map", "[v]"]
     out = [*vmap, *_encoder_args(enc, quality_bitrate(video, enc, max_height))]
@@ -474,17 +565,29 @@ _NO_EXTRAS = ["-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1"]
 
 def transcode_cmd(path: Path, start: float, video: dict | None, audio_index: int = 0,
                   encoder: str | None = None, max_height: int | None = None, channels: int = 2,
-                  burn: int | None = None) -> list[str]:
+                  burn=None) -> list[str]:
     """Video -> H.264, audio -> AAC, as fragmented MP4 on stdout. Re-encoding makes the seek
     frame-accurate: the stream really starts at `start` (no keyframe dance like the remux).
-    The player uses HLS (`hls_cmd`) when it can; this is for browsers without it."""
-    # without -copyts each input counts from its own seek point: the earlier subtitle input is shifted back
-    lead = min(start, SUB_LEAD)
-    sub_input = ["-ss", f"{start - lead:.3f}", "-itsoffset", f"{-lead:.3f}", "-i", str(path)] if burn is not None and lead > 0 else None
-    exe, pre, out = _transcode_parts(video, encoder, max_height, burn, sub_input=sub_input)
+    The player uses HLS (`hls_cmd`) when it can; this is for browsers without it.
+    Only NVIDIA's all-GPU path is used here: this stream can't retry on the hybrid path if a GPU run fails."""
+    # Burning in from mid-film: both inputs keep the file's own clock (-copyts, like `hls_cmd`), the subtitles
+    # read from SUB_LEAD earlier, and the output is moved back to start at 0. (Shifting the subtitle input with
+    # -itsoffset instead lost a line that was already on screen.) A sidecar is always the second input.
+    sub_file = burn[0] if isinstance(burn, tuple) else path
+    clock = burn is not None and start > 0
+    sub_input = None
+    if clock:
+        sub_input = ["-ss", f"{max(0.0, start - SUB_LEAD):.3f}", "-i", str(sub_file)]
+    elif isinstance(burn, tuple):
+        sub_input = ["-i", str(sub_file)]
+    exe, pre, out = _transcode_parts(video, encoder, max_height, burn, sub_input=sub_input,
+                                     gpu=(encoder or video_encoder()) == "h264_nvenc")
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin", *pre]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
+    if clock:
+        cmd += ["-copyts", "-start_at_zero"]
+        out = [*out, "-output_ts_offset", f"{-start:.3f}"]
     cmd += ["-i", str(path), *out, "-map", f"0:a:{audio_index}?",
             # a keyframe every 2 s: each one closes an MP4 fragment the browser can play
             "-force_key_frames", "expr:gte(t,n_forced*2)",
@@ -499,7 +602,7 @@ SEGMENT = 4.0  # HLS segment length, seconds
 
 def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_index: int = 0,
             encoder: str | None = None, max_height: int | None = None, channels: int = 2,
-            burn: int | None = None, gpu: bool = True) -> list[str]:
+            burn=None, gpu: bool = True) -> list[str]:
     """HLS segments `{n}.ts` in `out_dir` (the data dir, never a media folder) from segment `segment` on.
 
     Segments from different runs must line up, because the player seeks by asking for any segment and
@@ -511,7 +614,10 @@ def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_i
     timestamps (B-frames, AAC priming), which the muxer fixes by shifting that run only."""
     start = segment * SEGMENT
     # -copyts keeps both inputs on the file's own clock, so the earlier subtitle input lines up by itself
-    sub_input = ["-ss", f"{max(0.0, start - SUB_LEAD):.3f}", "-i", str(path)] if burn is not None and start > 0 else None
+    # (a sidecar .idx counts from the film's start too, and has no start time for -start_at_zero to take off)
+    sub_file = burn[0] if isinstance(burn, tuple) else path
+    seek = ["-ss", f"{max(0.0, start - SUB_LEAD):.3f}"] if start > 0 else []
+    sub_input = [*seek, "-i", str(sub_file)] if burn is not None and (start > 0 or isinstance(burn, tuple)) else None
     exe, pre, out = _transcode_parts(video, encoder, max_height, burn, gpu, sub_input)
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin", *pre]
     if start > 0:
@@ -567,9 +673,9 @@ def keyframes(path: Path, timeout: float = 900) -> list[float] | None:
 
 
 def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None, out_dir: Path,
-                 audio_index: int = 0, channels: int = 2) -> list[str]:
-    """The audio-only remux as HLS: video copied, audio -> AAC, one fMP4 segment per source keyframe
-    (`{n}.m4s`, with `init_{segment}.mp4`), numbered from `segment`.
+                 audio_index: int = 0, channels: int = 2, copy_audio: bool = False) -> list[str]:
+    """The audio-only remux as HLS: video copied, audio -> AAC (or copied too: `copy_audio`, Dolby pass-through),
+    one fMP4 segment per source keyframe (`{n}.m4s`, with `init_{segment}.mp4`), numbered from `segment`.
 
     `seek` is the time asked of FFmpeg's input seek. Copying can only start where the file's index allows,
     which (in MKV) is often a keyframe or two before the target, so the caller first asks `remux_start` where
@@ -588,11 +694,12 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
             "-c:v", "copy"]
     if video_codec == "HEVC":
         cmd += ["-tag:v", "hvc1"]
-    cmd += [*_aac(channels), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",
+    cmd += [*_aac(channels, copy_audio), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",
             "-max_muxing_queue_size", "1024",
             "-f", "hls", "-hls_time", "0.1", "-hls_segment_type", "fmp4",
             "-hls_segment_options", "movflags=+frag_discont", "-hls_fmp4_init_filename",
-            str(out_dir / f"init_{segment}.mp4"),  # absolute: a bare name lands in FFmpeg's working dir "-hls_list_size", "0", "-hls_flags", "temp_file",
+            str(out_dir / f"init_{segment}.mp4"),  # absolute: a bare name lands in FFmpeg's working dir
+            "-hls_list_size", "0", "-hls_flags", "temp_file",  # a segment appears under its name once complete
             "-start_number", str(segment), "-hls_segment_filename", str(out_dir / "%d.m4s"),
             str(out_dir / f"ffmpeg_{segment}.m3u8")]
     return cmd
@@ -607,13 +714,16 @@ BROWSER_AUDIO_FILES = {
     ("OGG", "Vorbis"), ("OGG", "Opus"), ("OGG", "FLAC"), ("WAV", "PCM"),
 }
 _BROWSER_AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wav"}  # before ffprobe
+# What music browsers can't play is converted to (admin setting "music_output"): AAC 256k, or lossless FLAC
+# (every current browser plays FLAC; about 4x the data of AAC, so meant for home networks).
+MUSIC_OUTPUTS = ("aac", "flac")
 
 
-def plan_audio(probe_info: dict | None, rel_path: str) -> dict:
+def plan_audio(probe_info: dict | None, rel_path: str, output: str = "aac") -> dict:
     """How to play a music file in a browser.
 
     mode: "file"      -> the original bytes (Range/seeking supported)
-          "transcode" -> FFmpeg converts it to AAC (seek by restarting at ?t=)"""
+          "transcode" -> FFmpeg converts it to `output` (AAC or FLAC; seek by restarting at ?t=)"""
     audio = (probe_info or {}).get("audio") or []
     if audio:
         container, codec, source = probe_info.get("container"), audio[0].get("codec"), "ffprobe"
@@ -625,21 +735,33 @@ def plan_audio(probe_info: dict | None, rel_path: str) -> dict:
     mode = "file" if ok or not ffmpeg_path() else "transcode"
     return {"method": "direct_play" if ok else "transcode", "mode": mode, "source": source, "container": container,
             "audio_codec": codec, "video_codec": None, "audio_ok": ok,
+            "output": output if mode == "transcode" else None,
             "duration": (probe_info or {}).get("duration")}
 
 
-def audio_cmd(path: Path, start: float, sample_rate: int | None = None) -> list[str]:
-    """Any audio -> AAC 256k stereo in fragmented MP4 on stdout. Audio seeks are sample-accurate,
-    so the stream really starts at `start` (no keyframe dance like the video remux)."""
+def audio_cmd(path: Path, start: float, audio: dict | None = None, output: str = "aac") -> list[str]:
+    """Any audio -> AAC 256k stereo in fragmented MP4, or (`output="flac"`) lossless FLAC, on stdout. `audio` is
+    the source's ffprobe audio stream. Audio seeks are sample-accurate, so the stream really starts at `start`
+    (no keyframe dance like the video remux)."""
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
+    audio = audio or {}
+    rate = audio.get("sample_rate")
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin"]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-i", str(path), "-map", "0:a:0", "-vn", "-sn", "-dn",
-            "-c:a", "aac", "-b:a", "256k", "-ac", "2"]
-    if not sample_rate or sample_rate > 48000:
+    cmd += ["-i", str(path), "-map", "0:a:0", "-vn", "-sn", "-dn"]
+    if output == "flac":
+        # 24-bit sources (and DSD, decoded to PCM) stay 24-bit; channels are kept (browsers mix down themselves)
+        deep = (audio.get("bit_depth") or 16) > 16 or audio.get("codec") == "DSD"
+        cmd += ["-c:a", "flac", "-compression_level", "2",
+                *(["-sample_fmt", "s32", "-bits_per_raw_sample", "24"] if deep else ["-sample_fmt", "s16"])]
+        if rate and rate > 96000:  # 192 kHz, and DSD (2.8 MHz, decoded to 352.8 kHz): browsers are happiest at <= 96
+            cmd += ["-ar", "96000" if rate % 48000 == 0 else "88200"]
+        return cmd + ["-map_metadata", "-1", "-f", "flac", "pipe:1"]
+    cmd += ["-c:a", "aac", "-b:a", "256k", "-ac", "2"]
+    if not rate or rate > 48000:
         cmd += ["-ar", "48000"]  # hi-res and DSD sources: AAC tops out at 96 kHz and browsers want <= 48
     cmd += ["-map_metadata", "-1", "-f", "mp4", "-movflags", "empty_moov+default_base_moof",
             "-frag_duration", "1000000", "pipe:1"]

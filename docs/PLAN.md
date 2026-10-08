@@ -20,7 +20,7 @@ Plex Media Server (PMS) has six main parts. BAMS needs a version of each one.
 | **Scanner** | Turns file paths into a structure: *this file is S02E05 of Show X* | Filename/folder regexes tuned to their [naming guide](https://support.plex.tv/articles/naming-and-organizing-your-tv-show-files/); no internet lookup | Filename parser (`guessit`) + our own rules for folder layout |
 | **Agent (metadata)** | Matches the parsed title to a database and pulls the poster, plot, cast, ratings | Plex's own metadata service, built on TMDB / TheTVDB with IMDb IDs and ratings | TMDB API as the main source. Store the IMDb ID for every item. |
 | **Media analysis** | Reads container, codecs, resolution, audio tracks, subtitles, duration | Their fork of FFmpeg (ffprobe-like) | `ffprobe`, results stored per file |
-| **Library refresh** | Finds new, changed and deleted files | A filesystem watcher, a scheduled scan, and a manual "Scan Library Files" button | The same three: watcher + scheduler (every N hours) + scan button / API |
+| **Library refresh** | Finds new, changed and deleted files | A filesystem watcher, a scheduled scan, and a manual "Scan Library Files" button | Scheduler (every N hours) + scan button / API. No watcher (owner decision: scheduled + manual scans are enough) |
 | **Playback** | Picks Direct Play, Direct Stream (remux) or Transcode based on what the client can play | Client sends a capability profile; Plex Transcoder (FFmpeg fork) outputs HLS/DASH | The same decision logic; FFmpeg → HLS; NVENC on your RTX 5070 Ti |
 | **Extras** | Watch state, Continue Watching, On Deck, users, downloads, remote access | Server DB + plex.tv account relay | Watch state and users in v1; downloads in v1 (friend's request); remote access later |
 
@@ -58,18 +58,18 @@ metadata item (Movie | Show > Season > Episode)   ← what it IS (title, plot, p
 | Filename parsing | **guessit** (LGPL-3.0) | Handles the messy real-world names (`Show.S01E02.1080p.x265-GRP.mkv`) |
 | Scheduling | **APScheduler** (MIT) + **watchdog** (Apache-2.0) | Interval scans + filesystem events |
 | Frontend | **React + Vite + TypeScript** (MIT), **hls.js** (Apache-2.0) | Netflix-style poster grid; hls.js plays the HLS streams |
-| Packaging | Windows installer + `.deb` (Debian/Ubuntu/Mint) + Docker | See §3a |
+| Packaging | Windows installer + `.deb` (Debian/Ubuntu/Mint) | See §3a |
 
 A .NET or Go backend would also work (Jellyfin is .NET). I'm recommending Python because it's quickest to iterate on.
 
 ### 3a. Windows + Debian / Ubuntu / Linux Mint
 
-Both platforms are first-class from day one. CI runs the test suite on `windows-latest` and `ubuntu-latest`.
+Both platforms are first-class from day one. (No CI: owner decision; tests and `.deb` Docker checks run locally.)
 
 | Concern | Windows | Debian / Ubuntu / Mint |
 |---|---|---|
 | Runs as | Windows service (WinSW wrapper) + optional tray icon | `systemd` unit under a `bams` system user |
-| Install | Installer (Inno Setup, open source) or a portable zip | `.deb` package (`apt install ./bams_x.y.deb`); Docker as an alternative |
+| Install | Installer (Inno Setup, open source) or a portable zip | `.deb` package (`apt install ./bams_x.y.deb`) |
 | FFmpeg | Not bundled. The installer offers to fetch a gyan.dev/BtbN build, or the user points to their own | `Depends: ffmpeg` (the distro package) |
 | Config / data dirs | `%ProgramData%\BAMS\` | `/etc/bams/`, `/var/lib/bams/` (DB, image cache, transcode temp) |
 | Mounted drives | **Use UNC paths (`\\nas\media`)**: a service can't see the drive letters you mapped as a user. The service account needs share credentials | `/mnt/...` or `/media/...` via `fstab` (cifs/nfs). The `bams` user needs read access. Start the service after `remote-fs.target` |
@@ -207,36 +207,34 @@ Decision flow per play request: client sends what it can play → server picks
 - A CLI and a hardened systemd unit.
 
 Not yet done:
-- Filesystem watcher (periodic scans cover it for now).
 - Done since: accounts + login, per-user watch state (resume, watched, Continue Watching), subtitles (WebVTT, burn-in),
   audio track picker + 5.1, HLS for the audio-only remux, automatic quality, all-GPU filters on NVIDIA. Earlier: HLS
   for conversions, GPU decoding, a quality picker, a conversion limit, Dolby Vision tone-mapping, on-the-fly audio
   conversion (AC3/EAC3/DTS → AAC, video copied) and video transcoding to H.264 on the GPU (Xvid/MPEG-2/VC-1…, and
   HEVC for browsers that can't decode it).
 - Windows service packaging.
-- CI.
 - Final UI design (the current UI is wired to real data but its layout is still the prototype one, until mockups land).
 
 **Phase 0: skeleton (≈ 1 weekend)**
 - Repo, FastAPI app, SQLite schema (libraries, metadata items, media, parts, streams), React shell with the BAMS logo
 - Config: library roots, scan interval, TMDB key
-- CI running the tests on Windows and Ubuntu from the first commit
 
 **Phase 1: watchable movie & TV library (MVP)**
 - Scanner (walk/diff/parse/probe), guessit parser + unit-test corpus incl. your friend's `Season 00` style
 - TMDB matcher, image cache, "Unmatched / Fix match" screen
-- Scheduler + watcher + Scan Now
+- Scheduler + Scan Now
 - Netflix-style browse: rows, poster grid, show → seasons → episodes, detail page with plot/backdrop
 - Player: direct play + remux + NVENC transcode via HLS; resume position, mark watched, Continue Watching
 
 **Phase 2: daily driver**
 - Downloads (original + optimized), multi-user + login, search (FTS5), subtitles (external `.srt`, embedded)
 - Collections, "Recently Added", trailers/extras folders, thumbnails for scrubbing
-- Packaging: Windows service + installer, `.deb` + systemd unit (tested on Debian 12/13, Ubuntu 24.04, Mint 22), Docker image
+- Packaging: Windows service + installer, `.deb` + systemd unit (tested on Debian 12/13, Ubuntu 24.04, Mint 22)
 
 **Phase 3: beyond video**
 - Music library: ✅ built 2026-10-08 (ffprobe tags instead of mutagen, which is GPL; MusicBrainz/Cover Art Archive/Wikipedia
-  identification; album/artist views; now-playing bar). Still to do: gapless audio, CUE sheets, playlists
+  identification; album/artist views; now-playing bar). CUE sheets, playlist import, gapless hand-over, album merges,
+  refresh and FLAC conversion added the same day. Still to do: sample-perfect gapless (MSE), authoring playlists
 - ISO support, intro/credits detection (audio fingerprinting across episodes), remote access, TV/mobile clients (DLNA or a Jellyfin-compatible API so existing apps work)
 
 ---

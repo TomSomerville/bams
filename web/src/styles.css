@@ -573,7 +573,11 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .user-row { padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
 .user-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .user-row .key-row { margin-top: 10px; }
-.pref-row { margin-top: 16px; }
+.home-rows { list-style: none; margin: 12px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 10px; }
+.home-row { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 2px; min-height: 42px; }
+.home-row + .home-row { border-top: 1px solid var(--border); }
+.home-row .check { color: var(--text); min-width: 0; }
+.home-row.off .check { color: var(--muted); }
 .watch-form { display: grid; grid-template-columns: max-content 1fr; gap: 10px 14px; align-items: center; margin: 12px 0 4px; }
 .watch-form > label { font-size: 13px; font-weight: 600; color: var(--muted); }
 .num-input { width: 84px; margin-right: 6px; }
@@ -658,3 +662,30 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .lib-order { display: inline-flex; gap: 2px; }
 .lib-order .icon-btn:disabled { opacity: 0.3; cursor: default; }
 @media (max-width: 1100px) { .nav-handle { display: none; } .nav-row .nav-item { padding-right: 12px; } }
+
+/* Settings -> Security */
+.root-badge.ok { background: rgba(94, 200, 239, 0.15); color: var(--cyan); }
+.lib-head .icon-btn.push { margin-left: auto; }
+.text-input.wide { flex: 1 1 260px; min-width: 0; }
+.key-row.tight { margin-top: 0; }
+.ip-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 16px; }
+.ip-list h4 { margin: 0; font-size: 14px; }
+.ip-list .fine-print { margin: 4px 0 8px; }
+.ip-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ip-list li { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; background: var(--bg); }
+.ip-list .key-row { margin-top: 8px; }
+.ip-list .key-row .text-input { flex: 1 1 140px; min-width: 0; }
+.log-wrap { margin: 14px 0 10px; max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.log-wrap > .muted { padding: 10px 12px; margin: 0; }
+.log-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.log-table th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-weight: 600; color: var(--muted); padding: 7px 10px; white-space: nowrap; }
+.log-table td { padding: 6px 10px; border-top: 1px solid var(--border); vertical-align: top; white-space: nowrap; }
+.log-table td.req { white-space: normal; word-break: break-all; min-width: 220px; }
+.log-table tr.blocked td { background: rgba(195, 75, 115, 0.08); }
+.log-table .root-badge { margin-left: 0; }
+
+/* Music: settings sub-section, playlist cover mosaics */
+.settings-sub { margin: 18px 0 4px; font-size: 14px; }
+.mosaic { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; width: 100%; height: 100%; }
+.mosaic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.music-art .mosaic { border-radius: inherit; overflow: hidden; }

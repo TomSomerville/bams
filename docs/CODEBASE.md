@@ -33,11 +33,14 @@ bams/
 │   │   ├── __main__.py        CLI entry (`python -m bams …` / `bams …`): serve, library, scan, tmdb-key, user, status
 │   │   ├── app.py             FastAPI app: bootstrap, serialisers, LoginRequired middleware, ALL HTTP routes, SPA hosting
 │   │   ├── auth.py            Accounts: scrypt hashes, users CRUD (last-admin rules), sessions (hashed tokens), Throttle
+│   │   ├── security.py        Sign-in waits/lockout + sign-in log (security.db), IP allow/block policy, Gate middleware (IP check + traffic record)
+│   │   ├── netflow.py         Traffic log: background writer of JSON-lines files under a size cap, backwards reader/search, folder check
 │   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, thresholds (admin settings)
-│   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars, language labels), WebVTT conversion + cache, shift()
+│   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars incl. VobSub .idx/.sub, language labels), WebVTT
+│   │   │                      conversion + cache, shift(), burn_source() (what stream paints on)
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
-│   │   ├── db.py              SQLite schema (v1 + migration steps to v6), connect(), migrate(), Tx, settings, JSON helpers
-│   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker + quick_hash
+│   │   ├── db.py              SQLite schema (v1 + migration steps to v8), connect(), migrate(), Tx, settings, JSON helpers
+│   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
 │   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions
@@ -45,18 +48,24 @@ bams/
 │   │   ├── identify.py        Files identified by hand (files.manual): parsed_for() (scanner), store(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
 │   │   ├── tmdb.py            TMDB HTTP client (Bearer or api_key), throttle/retry, image cache download
-│   │   ├── probe.py           ffprobe discovery + JSON → compact summary (codecs, resolution, HDR + DV profile, tracks)
+│   │   ├── probe.py           ffprobe discovery + JSON → compact summary (codecs, resolution, HDR + DV profile, sar +
+│   │   │                      field_order via geometry(), tracks); video_geometry() for older probes
 │   │   ├── stream.py          Playback plan (direct play / direct stream file|remux / transcode), FFmpeg remux,
-│   │   │                      video transcode (encoder detection, GPU decode, all-GPU filters, filter chain,
-│   │   │                      tone-mapping, subtitle burn-in, transcode_cmd, hls_cmd), keyframes() + hls_copy_cmd;
-│   │   │                      music: plan_audio() + audio_cmd() (any audio → AAC fMP4)
-│   │   ├── music.py           Music: parse_track() (tags + folder layout), link_track(), rollup(), fill_artwork()
-│   │   ├── music_match.py     Music identification: match_album/match_artist/match_music_library (MusicBrainz & co.)
+│   │   │                      video transcode (encoder detection, GPU decode, all-GPU filters for NVENC/QSV/
+│   │   │                      VAAPI/AMF + failure memory, output_size, filter chain, tone-mapping, subtitle burn-in,
+│   │   │                      transcode_cmd, hls_cmd), keyframes() + hls_copy_cmd; Dolby pass-through (PASSTHROUGH_AUDIO);
+│   │   │                      music: plan_audio() + audio_cmd() (any audio → AAC fMP4, or FLAC)
+│   │   ├── music.py           Music: parse_track() (tags + folder layout), parse_cue_tracks(), link_tracks(), album_alias(),
+│   │   │                      rollup(), fill_artwork() (folder art wins, picked up when added later; poster_src)
+│   │   ├── cue.py             CUE sheets: parse() → CueSheet/CueFile/CueTrack (start/end s), file_for(), splits()
+│   │   ├── playlists.py       Imported .m3u/.m3u8/.pls: parse(), import_files() (per root, follows the files), resolve() (entries → tracks)
+│   │   ├── music_match.py     Music identification: match_album/match_artist/match_music_library (MusicBrainz & co.),
+│   │   │                      merge_same_release/merge_albums, refresh after REFRESH_AFTER
 │   │   ├── musicbrainz.py     HTTP clients: MusicBrainz (1 req/s, shared), Cover Art Archive, Wikidata/Wikipedia/Commons
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 172 tests, see §7
+│   └── tests/                 pytest: 227 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
@@ -70,15 +79,18 @@ bams/
 │       ├── settings.tsx       SettingsProvider: server TMDB status (configured/last4), serverError
 │       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
+│       ├── homeRows.ts        Home's rows: defaultRows(libs) (default order, labels) + homeRows(saved, libs) (user order merged with what exists)
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
 │       │   ├── Sidebar.tsx    Logo, Home, one link per library in the admin's order (admins drag to reorder), Settings
-│       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries
+│       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
-│       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out, Home banner pref) + admins' "Who can sign in" (users CRUD)
+│       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out) + admins' "Who can sign in" (users CRUD)
+│       │   ├── HomeSettings.tsx  Your Home page: banner pref + rows on/off and order (drag/arrow keys/▲▼), reset → `home_rows` pref
 │       │   ├── PasswordInput.tsx  Password field with a show/hide button (sign-in, setup, accounts)
 │       │   ├── WatchSettings.tsx  Playback card: "started after" seconds and "watched at" %
+│       │   ├── SecuritySettings.tsx  Settings → Security: wrong-password threshold, account locks, IP lists, sign-in log, traffic log
 │       │   ├── Identify.tsx   UnrecognizedFiles list (all libraries or one) + IdentifyForm (link lookup, fields with suggestions, undo)
 │       │   ├── Combo.tsx      Text field with as-you-type suggestions (keyboard + mouse)
 │       │   ├── ConfigBanner.tsx  "TMDB key not configured" (admins) → /settings#tmdb; "can't reach server"
@@ -86,7 +98,7 @@ bams/
 │       │   ├── Cards.tsx      PosterCard (+ WatchMarks), ContinueCard, AlbumCard, ArtistCard, ItemCard, PlayBadge
 │       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
 │       │   ├── MusicFixMatch.tsx  Modal: MusicBrainz search → POST /api/items/{id}/music-match
-│       │   ├── MusicSettings.tsx  Music identification on/off card
+│       │   ├── MusicSettings.tsx  Music identification on/off + converted-music format (AAC/FLAC) card
 │       │   ├── TranscodeSettings.tsx  Playback card: encoder in use, CPU/GPU choice (EncoderChoice), conversion limit
 │       │   ├── Art.tsx        Poster / Backdrop with gradient fallback when there's no artwork
 │       │   ├── FolderPicker.tsx  Modal: browse server folders via /api/fs/browse
@@ -94,10 +106,11 @@ bams/
 │       │   ├── TmdbSettings.tsx  TMDB key card (save = server-verified; test; replace; remove)
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
-│           ├── Home.tsx       Hero + Continue Watching (/api/continue) + rows from /api/items and /api/libraries
+│           ├── Home.tsx       Hero + rows (Continue Watching, Recently Added, libraries, Top Rated, genres) in the user's order (homeRows.ts)
 │           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id: show (season tabs → episodes, watched toggles) or movie (Resume, TechInfo); music → MusicDetail
-│           ├── Music.tsx      MusicLibrary (Artists/Albums tabs), artist page, album page + TrackList, Fix match
+│           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs), artist page, album page + TrackList, Fix match,
+│           │                  PlaylistPage (/playlist/:id), PlaylistCard + cover Mosaic
 │           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next,
 │           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
@@ -143,23 +156,29 @@ bams/
 **Startup** (`app.bootstrap`): create the data dir → migrate the schema → install the audit hook → register
 library roots as protected. Then `create_app` starts the Scheduler in the FastAPI lifespan.
 
+**Every request** first passes `security.Gate` (outermost ASGI middleware): addresses the IP lists keep out get 403,
+and every request, allowed or blocked, goes to the traffic log (`netflow.Netflow.record`, written by a background
+thread) when it finishes.
+
 **Every request to `/api/`** passes `LoginRequired` (plain ASGI middleware): the `bams_session` cookie → `lookup()`
 (cached a minute per token, cleared on sign-out / password / user changes) → `auth.session_user` → the user dict in
 `request.state.user`, else 401. Non-GET requests whose Origin isn't this host get 403. Routes take
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v7)
+## 3. Data model (`db.py`, schema v8)
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic) |
+| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `music_output` ("aac" default \| "flac": what unplayable music is converted to), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic) |
 | `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status`, `sort_order` (v7: the admin's order; `library.ORDER`) |
 | `library_roots` | its folders | `library_id`, `path` (absolute, as given) |
-| `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit…); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
-| `item_keys` | grouping aliases | (`library_id`, `kind`, `title_key`, `year`) → `item_id`; survives merges so renamed folders keep joining the same show |
-| `files` | **actual files** | `root_id` + `rel_path` ('/'-separated, relative to root), `size`, `mtime_ns`, `quick_hash`, `parse` JSON (incl. `v` = parser version; `manual: true` when identified by hand), `probe` JSON, `available`, `missing_since`, `manual` (v6: JSON identification entered by hand, used instead of the name) |
-| `file_items` | file ↔ items | many-to-many: one file can be several episodes; a movie can have several files (versions) |
+| `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit, `matched_by` tag\|search\|manual…), `poster_src` (v8, JSON: where the poster came from: `{from: folder, file, size, mtime_ns}` \| `embedded` \| `caa` \| `commons`, or `{from: null, checked}`); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
+| `item_keys` | grouping aliases | (`library_id`, `kind`, `title_key`, `year`) → `item_id`; survives merges so renamed folders keep joining the same show. Merged albums: `kind='album'`, `title_key` = `music.album_alias(artist, album)` ("artistkey\|albumkey", names not ids) |
+| `files` | **actual files** | `root_id` + `rel_path` ('/'-separated, relative to root), `size`, `mtime_ns`, `quick_hash`, `parse` JSON (incl. `v` = parser version; `manual: true` when identified by hand; music: `cues` = the folder's cue sheets as [rel, size, mtime], `cue` = {sheet, tracks} when split), `probe` JSON (`pv` = `probe.PROBE_VERSION`; `cuesheet` when the tags hold one), `available`, `missing_since`, `manual` (v6: JSON identification entered by hand, used instead of the name) |
+| `file_items` | file ↔ items | many-to-many: one file can be several episodes; a movie can have several files (versions); a CUE image is several tracks, `cue_start`/`cue_end` (v8, s; end NULL = to the end of the file); a merged album's track can have several files |
+| `playlists` | imported playlists (v8) | `library_id`, `root_id` + `rel_path` of the playlist file, `name`, `size`/`mtime_ns` (re-read when they change), `entries` JSON as written ({path, title, duration}), `missing` |
+| `playlist_items` | playlist → tracks (v8) | (`playlist_id`, `position`) → `item_id`; rebuilt by `playlists.resolve` after every scan |
 | `scans` | scan history | `trigger`, `status` ok\|partial\|error, `stats` JSON |
 | `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`) |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
@@ -168,7 +187,8 @@ web UI, `/docs`.
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
 created at v1 and run every step too, so each step is exercised by every test. Before migrating an existing DB,
 `migrate()` copies it to `data/backups/bams-schema-v{N}-{time}.db`. v2 rebuilt `items` (SQLite can't change a
-CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. Music items: tracks are 1:1 with files (Plex-style);
+CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. Music items: tracks are 1:1 with files (Plex-style) except CUE images
+(one file, many tracks) and merged albums (one track, several files);
 albums are found by `(parent_id=artist, title_key)` from the *parsed* title, so renaming an album to its
 MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist'`).
 
@@ -195,10 +215,16 @@ MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist
 ### 4.1b Music scan (`scanner.scan_library` with a music library)
 Walk with `AUDIO_EXTS` (no extras-folder skipping) → diff as above, but new/changed/moved files are **not** linked
 yet → ffprobe (8 threads) → `music.parse_track(rel, probe)` (tags first, then the folder layout) →
-`music.link_track` (artist/album get-or-create, the track row is reused per file) → `cleanup_orphans` →
-`music.rollup` (album year/duration/genres, artist genres; matched albums keep MusicBrainz's year). Then in
-`jobs.run_scan`: `music.fill_artwork` (folder images, else the embedded picture via FFmpeg to a pipe; only albums
-whose tracks changed since `metadata_at`), then `music_match.match_music_library` if `music_lookup` is on.
+`music.link_tracks` (artist/album get-or-create via `_album`, which checks merge aliases first; track rows reused per
+file, by track number for CUE files) → `cleanup_orphans` → `music.rollup` (album year/duration/genres, artist genres;
+matched albums keep MusicBrainz's year) → `playlists.resolve`. The walk also collects **side files** (`.cue`, images,
+playlists: `readonly.walk(side_exts, side)`, kept in `ScanStats.side` by folder): `sheet_for` picks the cue sheet
+that splits a file (`.cue` next to it, else a CUESHEET tag) → `music.parse_cue_tracks`; an unchanged file whose
+folder's cue sheets changed (`parse.cues`) is re-read; files ≥ 10 min probed before `PROBE_VERSION` 2 are probed
+again; `playlists.import_files` per root. Then in `jobs.run_scan`: `music.fill_artwork(side)` (each album's best
+folder image vs `poster_src`: new/changed → replaces any art; else the embedded picture via FFmpeg, only when a track
+changed since the last look; same for `artist.jpg`, which drops a Commons credit), then
+`music_match.match_music_library` if `music_lookup` is on.
 `music.PARSER_VERSION` is separate from `parse.PARSER_VERSION`.
 
 ### 4.2 Match (`matcher.match_title`)
@@ -215,7 +241,8 @@ whose tracks changed since `metadata_at`), then `music_match.match_music_library
 - `mode:"file"` → `<video src=/api/files/{id}/stream>`: the original bytes; the browser seeks with Range.
 - `mode:"remux"` (browser-OK video, but AC3/EAC3/DTS/TrueHD/PCM… audio, or a container the browser can't open; the
   player also uses it for another audio track than the first) → **HLS with the video copied** (4.3c, `remux:true`),
-  else (no MSE/native HLS, or keyframes unreadable → 409) the live stream `<video src=/api/files/{id}/remux?t=X>`. FFmpeg runs `-ss X -c:v copy -c:a aac -ac 2` → fragmented MP4 on
+  else (no MSE/native HLS, or keyframes unreadable → 409) the live stream `<video src=/api/files/{id}/remux?t=X>`. FFmpeg runs `-ss X -c:v copy -c:a aac -ac 2` (or `-c:a copy`
+  with `passthrough`, + `delay_moov`, see Dolby below) → fragmented MP4 on
   stdout, streamed by an async generator. The process is killed when the client disconnects. To seek, the
   player asks `/seek?t=X` for the real start (an FFmpeg dry run reports the first keyframe it lands on), sets
   `offset`, and reloads `src`. The clock shows `offset + currentTime` and the duration comes from the probe.
@@ -241,20 +268,32 @@ whose tracks changed since `metadata_at`), then `music_match.match_music_library
 - Audio: `file_info.audio_tracks` (labels via `subtitles.language`); every converting endpoint takes the track
   (`audio`) and a channel wish (`ch`/`channels` 6 → `stream.audio_channels`: 5.1 AAC 384k if the track has ≥ 6
   channels, else stereo 192k). The player picks: remembered language → browser language → default-flagged track.
-- GPU: with NVENC, `stream.gpu_filters()` keeps SDR, non-burn conversions of NVDEC codecs on the GPU
-  (`-hwaccel_output_format cuda`, `bwdif_cuda`, `scale_cuda`). A failed HLS run sets `Variant.gpu=False` and retries
-  on the hybrid path (CPU filters).
+- GPU: `stream.gpu_filters()` keeps SDR, non-burn conversions of GPU-decodable codecs on the GPU. NVENC:
+  `-hwaccel cuda` + `bwdif_cuda`/`scale_cuda` (size and pixel shape worked out per frame). Quick Sync: `-hwaccel qsv`
+  + `vpp_qsv`; VAAPI: `-hwaccel vaapi` + `deinterlace_vaapi=auto=1`/`scale_vaapi`; AMF (Windows): `-hwaccel d3d11va
+  -hwaccel_output_format d3d11` + `vpp_amf` (`_GPU_DECODER`, `_GPU_SCALER`, `_gpu_filter_chain`). Those three get the
+  size as numbers (`stream.output_size`, from the probe's `sar`) and a deinterlacer only when `stream.interlaced()`
+  says so; they need `sar`/`field_order` in the probe (`app._video` reads them with `probe.video_geometry` for older
+  probes). Interlaced on AMF and unknown scan type on QSV → hybrid. A failed HLS run sets `Variant.gpu=False`, retries
+  on the hybrid path, and `stream.gpu_failed()` remembers that encoder + codec/profile/bit depth until restart
+  (`_gpu_broken`). The live `/transcode` uses only NVIDIA's all-GPU path (it can't retry). QSV/AMF/VAAPI untested on
+  real hardware.
+- **Dolby pass-through:** `Player.tsx` `canPassThrough()` asks `MediaSource.isTypeSupported('audio/mp4;
+  codecs="ac-3"|"ec-3"')`; if yes (and `bams.passthrough` isn't "0") a remux sends `passthrough` →
+  `app._copy_audio` (track codec in `stream.PASSTHROUGH_AUDIO` = AC3/EAC3) → `-c:a copy` in `remux_cmd` /
+  `hls_copy_cmd` (`Session.copy_audio`). A media error then → `passFailed`, the same stream with AAC from there.
+  Conversions always output AAC.
 
 ### 4.3c HLS sessions (`hls.py`)
-`POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, start?}` → `Transcodes.create` →
+`POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, passthrough?, start?}` → `Transcodes.create` →
 a `Session` (`data/transcode/<sid>/`) of one or more **variants** (`Variant`, folder `<sid>/<v>/`), each with its own
 FFmpeg, `bounds` (segment start times), `wanted`, `job_start`:
 - a fixed size → one conversion variant; `auto` → `hls.ladder()`: full size + 1080/720/480 below it (hls.js ABR,
-  `capLevelToPlayerSize`); `burn` → `stream._transcode_parts(burn=)`;
+  `capLevelToPlayerSize`); `burn` (track id or embedded stream number → `app._burn`) → `stream._transcode_parts(burn=)`;
 - `remux` → one **copy** variant: bounds = every keyframe (`Keyframes.get` → `stream.keyframes`, cached as
   `data/cache/keyframes/{file}-{size}-{mtime}.json`), segments `{k}.m4s` + `init.mp4`, made by `hls_copy_cmd`. Before
   each run `_restart` dry-runs the seek (`remux_start(zero=True)`) and numbers from where it lands. Copy sessions don't
-  count against the limit.
+  count against the limit. `passthrough` (AC3/EAC3 track) → `Session.copy_audio`: audio copied too.
 `GET /api/hls/{sid}/index.m3u8` = master playlist (one `STREAM-INF` per variant) → `/{v}/index.m3u8` (VOD, every
 segment listed up front) → `/{v}/{k}.ts|m4s` → `Transcodes.segment(s, v, k)` (blocking, thread pool):
 - on disk → served. Missing but within `SOON` of what the running FFmpeg is making → waited for. Otherwise FFmpeg
@@ -273,12 +312,16 @@ segment listed up front) → `/{v}/{k}.ts|m4s` → `Transcodes.segment(s, v, k)`
 
 ### 4.3d Subtitles (`subtitles.py`)
 `file_info(with_subtitles=True)` (a movie's/episode's own page) lists `subtitles.tracks()`: embedded streams `e{n}`
-then sidecars `x{n}` (`Name.srt`, `Name.en.forced.srt`… in the video's folder, listed with `os.scandir`). Text tracks
+then sidecars `x{n}` (`Name.srt`, `Name.en.forced.srt`… in the video's folder, listed with `os.scandir`). A VobSub
+pair (`Name.idx` with `Name.sub` beside it) gives one picture track per `id:` line of the .idx (`x{n}-{k}`,
+`vobsub_streams`, read with `readonly.open_ro`; language from the .idx, else the file name). Text tracks
 have a `url` → `GET /api/files/{id}/subtitles/{track}.vtt?shift=` → `subtitles.webvtt` (FFmpeg → WebVTT, cached in
 `data/cache/subtitles/`; sidecars decoded UTF-8/UTF-16/cp1252 and copied as UTF-8 into the cache first) → `shift()`
-for live streams. The player adds a `<track>` and sets its mode. Image tracks (`image:true`) are burned in: the HLS
-session/`/transcode?sub=` overlays `[1:s:n]` from a second input of the same file seeked `SUB_LEAD` (30 s) earlier
-(`-copyts` keeps them aligned; the fMP4 transcode uses `-itsoffset`).
+for live streams. The player adds a `<track>` and sets its mode. Image tracks (`image:true`) are burned in: the player
+sends the track id as `burn` (HLS) / `sub` (`/transcode`); `app._burn` → `subtitles.burn_source` = the embedded
+stream number, or `(sidecar .idx, k)`. The overlay reads `[1:s:n]` from a second input: the same file seeked
+`SUB_LEAD` (30 s) earlier, or the .idx (always, even from 0). Both outputs keep the file's clock with `-copyts
+-start_at_zero` (the fMP4 transcode then `-output_ts_offset -t`); the .idx has no start time, so it needs no offset.
 
 ### 4.3e Watch state (`watch.py`)
 The player PUTs `/api/items/{id}/progress {position, duration}` every 10 s, on pause, on leaving (keepalive) and at
@@ -290,11 +333,17 @@ decides: resume it, or the next unwatched episode via `next_episode`). `get_item
 player's up-next countdown). `items.merge_titles` moves watch state to the kept item.
 
 ### 4.3b Music playback (`stream.plan_audio` → `music.tsx`)
-`GET /api/items/{id}/tracks` returns the play queue of an artist/album/track with `playback` per track:
-`mode:"file"` (MP3, AAC, FLAC, Ogg Vorbis/Opus/FLAC, WAV: `/api/files/{id}/stream`) or `mode:"transcode"`
-(`/api/files/{id}/audio?t=X`: FFmpeg → AAC 256k stereo, fragmented MP4; ≤48 kHz). Audio seeks are sample-accurate,
-so the player just restarts at `?t=` and offsets its clock. `MusicProvider` (in `main.tsx`, above the router)
-keeps one `<audio>` alive across pages; `App.tsx` pauses it when `/play/:id` (video) opens.
+`GET /api/items/{id}/tracks` (and `/api/playlists/{id}` → `tracks`) returns a play queue built by `app._queue`:
+one file per track (available, then playable as-is, then biggest), `start`/`end` for CUE tracks, `playback` per
+track: `mode:"file"` (MP3, AAC, FLAC, Ogg Vorbis/Opus/FLAC, WAV: `/api/files/{id}/stream`) or `mode:"transcode"`
+(`/api/files/{id}/audio?t=X`: FFmpeg → AAC 256k stereo fMP4 ≤48 kHz, or with `music_output=flac` FLAC (24-bit kept,
+≤96 kHz, channels kept), `playback.output` says which). Audio seeks are sample-accurate, so the player restarts at
+`?t=` and offsets its clock. `MusicProvider` (in `main.tsx`, above the router) keeps **two** `<audio>` elements alive
+across pages: the next track is loaded into the idle one `PRELOAD_BEFORE` (20 s) before the end and started at the
+end (a timer armed `ARM_BEFORE` from the element's clock where the end is known: CUE end or a file's duration;
+`ended` otherwise); only the active element's events count. CUE tracks: seek to `start`, move on at `end`;
+consecutive CUE tracks of one file (`continuous()`) keep the same stream. `App.tsx` pauses music when `/play/:id`
+(video) opens.
 
 ### 4.4 Read-only guard (`readonly.py`)
 `install_guard()` adds `sys.addaudithook(_hook)`, which raises `ReadOnlyViolation` for write-mode `open`,
@@ -315,6 +364,13 @@ MusicBrainz sort name. "Various Artists"/"Unknown Artist" are never looked up. F
 the run (rest waits for the next scan). All network calls happen outside transactions. MusicBrainz is throttled
 process-wide (`_mb_lock`), so Fix match and the scan worker together stay at 1 request/second.
 `link_track` keeps a matched track's title when the file has no title tag; `rollup` keeps a matched album's year.
+After an album match, `merge_same_release` folds other albums of the library with the same release into the oldest,
+when both are pinned (`_pinned`: Fix match, `extra.matched_by` tag/manual, or score ≥ `MERGE_SCORE` 0.95):
+`merge_albums` moves tracks (same disc + number + similar title → one track with both files), adds the
+`album_alias`, deletes an emptied artist. Then up to `REFRESH_PER_SCAN` (50) matched albums/artists older than
+`REFRESH_AFTER` (120 days) are looked up again (`refresh=True`: keeps status, score, `matched_by`; re-downloads art
+only when `poster_src` is caa/commons; a 404 just bumps `metadata_at`). A merged-away MusicBrainz id is replaced by
+the id MusicBrainz answers with.
 
 ### 4.4c Accounts (`auth.py`)
 `GET /api/auth/state` → `{user, setup, setup_here}`. No users → the UI shows "create your admin account", which
@@ -322,6 +378,21 @@ process-wide (`_mb_lock`), so Fix match and the scan worker together stay at 1 r
 `authenticate` (constant-ish time for unknown names) → `new_session` → cookie `bams_session` (HttpOnly, Lax,
 30 days, Secure on https). `Throttle`: 10 failures / 10 min per address → 429. Password changes and resets delete the
 user's sessions. Last admin can't be demoted/removed; nobody removes themselves.
+
+### 4.4e Security (`security.py`, `netflow.py`)
+Outside `bams.db`: `security.db` (data dir) has `login_state` (`key` = `u<id>` or `n:<casefolded name>`,
+`failures`, `last_fail`, `locked_at`, `locked_by` NULL = wrong passwords / admin name) and `auth_log` (`event`
+sign-in|lock|unlock, `result` ok|failed|admin, name, user_id, ip, reason, user_agent; newest `AUTH_LOG_KEEP` kept).
+Settings in `bams.db` `settings`: `lockout_threshold`, `ip_mode`, `ip_allow`, `ip_block`, `netflow_dir`,
+`netflow_max_bytes`.
+Login (`app.auth_login`): same-origin → `Throttle` (per address) → `Security.attempt(key)` lock → `refusal()`
+(locked → 403, waiting → 429 + Retry-After; neither counted) → `authenticate` → wrong: `failed()` (count, lock at the
+threshold) → 401/403; right: `succeeded()` (count back to 0). Every outcome → `Security.log`. `wait_after(n)` = 2^(n-1) s.
+IP policy: `IpPolicy.allowed(host)`: loopback always; block list wins; `allowlist` mode needs an allow match.
+`Security.load_policy()` on save and every 10 s from `Gate`. `save_policy` refuses to block the saver.
+Traffic log: `Netflow` files `netflow-<ms>.jsonl`, rotated at `segment_size(cap)` (cap/10, 1–256 MB), `_trim` deletes the
+oldest past the cap; `read(q, before, limit)` walks backwards (`_lines_backwards`), cursor `"<file>:<offset>"`.
+Recovery CLI: `bams user unlock NAME`, `bams security allow-all`.
 
 ### 4.4d Identify by hand (`identify.py`)
 Settings → Unrecognized files (`GET /api/unrecognized`) and a library's Unrecognized tab list unplaced files (hint +
@@ -355,6 +426,10 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 |---|---|---|
 | `GET /api/auth/state` · `POST /api/auth/login {name,password}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
 | `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin) | accounts | AccountSettings |
+| `GET /api/security` (admin) → `{lockout_threshold, ip{mode,allow,block}, your_ip, netflow{folder,default_folder,custom,max_bytes,bytes,files,oldest,dropped}}` | security settings + traffic-log usage | SecuritySettings |
+| `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
+| `GET /api/security/accounts` · `PUT /api/security/accounts/{id}/lock {locked}` (admin) | lock state per account / lock (signs out) or unlock | SecuritySettings |
+| `GET /api/security/auth-log?result=ok\|failed\|admin&before=&limit=` · `GET /api/security/netflow/entries?q=&before=&limit=` (admin) → `{entries, next}` | sign-in log / traffic log, newest first | SecuritySettings |
 | `PUT /api/items/{id}/progress {position,duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` | watch state of the signed-in user | Player, Detail, Home |
 | `GET /api/status` | version, data dir, ffprobe/ffmpeg paths, `video_encoder` `{id,name,hardware,hw_decode}`, `transcodes` `{running,limit}`, TMDB configured, guard, scan running/queued | TopBar, Settings |
 | `GET /api/settings` | TMDB status (never the key) | SettingsProvider |
@@ -367,24 +442,26 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
 | `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |
-| `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback` | Music pages, NowPlaying |
+| `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback`, `start`/`end` (CUE) | Music pages, NowPlaying |
+| `GET /api/libraries/{id}/playlists` · `GET /api/playlists/{id}` | imported playlists (`track_count`, `duration`, `missing`, `covers`) · one with its `tracks` (queue) | MusicLibrary, PlaylistPage |
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music Fix match | MusicFixMatch |
 | `PUT /api/settings/music-lookup {enabled}` (state in `GET /api/settings` → `music_lookup`) | identification on/off | MusicSettings |
+| `PUT /api/settings/music-output {output: aac\|flac}` (admin; state in `GET /api/settings` → `music_output`) | what unplayable music is converted to | MusicSettings |
 | `GET /api/settings/encoders` · `PUT /api/settings/encoder {encoder\|null}` (admin) → `{choice, active, automatic, forced, options[{id,name,hardware}]}` | CPU/GPU choice (only encoders that pass a test encode; 400 otherwise) | TranscodeSettings |
 | `PUT /api/settings/transcoding {max_transcodes}` (state in `GET /api/settings` → `max_transcodes`, `max_transcodes_auto`) | conversion limit | TranscodeSettings |
 | `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`) + hand-identified ones (`manual`), with `library_*` | Identify.tsx |
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
 | `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` (admin) | TMDB/IMDb link → fields (409 without a key, 400 wrong type/unreadable) · names in a library for suggestions | Identify.tsx |
-| `PUT /api/me/prefs {home_hero}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`) | auth.tsx, AccountSettings |
+| `PUT /api/me/prefs {home_hero?, home_rows?: [{id, show}]}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`); only sent fields change | auth.tsx, HomeSettings |
 | `PUT /api/settings/watch {watched_percent 50–100, resume_after 0–600}` (admin; state in `GET /api/settings` → `watch`) | when titles count as watched / started | WatchSettings |
 | `GET /api/tmdb/search?kind=&q=` · `POST /api/items/{id}/match {tmdb_id}` | Fix match | FixMatch |
 | `GET /api/files/{id}/stream` · `/download` | original bytes (Range) / attachment | Player, Detail |
-| `GET /api/files/{id}/remux?t=&audio=&ch=` · `/seek?t=` | audio-converting live stream (fallback) / its real start | Player |
-| `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video → H.264 + audio → AAC (fMP4), starting exactly at `t` (fallback; 503 at the limit) | Player |
-| `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, start?}` → `{id, playlist, variants, copy, channels}` | open an HLS session (503 at the limit, 409 if not probed / no keyframes) | Player |
+| `GET /api/files/{id}/remux?t=&audio=&ch=&passthrough=` · `/seek?t=` | audio-converting live stream (fallback; `passthrough`: AC3/EAC3 copied) / its real start | Player |
+| `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video → H.264 + audio → AAC (fMP4), starting exactly at `t` (fallback; 503 at the limit). `sub` = picture track id or embedded stream number | Player |
+| `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, passthrough?, start?}` → `{id, playlist, variants, copy, channels, passthrough}` | open an HLS session (503 at the limit, 409 if not probed / no keyframes, 422 unknown `burn` track) | Player |
 | `GET /api/hls/{sid}/index.m3u8` · `/{v}/index.m3u8` · `/{v}/init.mp4` · `/{v}/{k}.ts\|m4s` · `DELETE /api/hls/{sid}` | master / variant playlist / copy header / segment (made on demand; 409 superseded, 504 too slow) / close | Player (hls.js) |
 | `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track as WebVTT (400 for picture tracks) | Player |
-| `GET /api/files/{id}/audio?t=` | music converted to AAC (fMP4) from `t` | music.tsx |
+| `GET /api/files/{id}/audio?t=` | music converted to AAC (fMP4, `audio/mp4`) or FLAC (`audio/flac`, per `music_output`) from `t` | music.tsx |
 | `GET /api/images/{path}` | cached artwork (path-traversal checked) | everywhere |
 | everything else | `web/dist` with SPA fallback (`SpaFiles`) | — |
 
@@ -399,11 +476,12 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | Data dir | `--data-dir` > `BAMS_DATA_DIR` > systemd `STATE_DIRECTORY` > `%LOCALAPPDATA%\BAMS` / `~/.local/share/bams` (`config.default_data_dir`) |
 | Host/port | `bams serve --host --port` (default 127.0.0.1:8484; `0.0.0.0` for the LAN, login required) |
-| Accounts | web UI (Settings → Accounts), or `bams user add NAME [--admin] \| list \| passwd NAME \| remove NAME`; session length `auth.SESSION_DAYS`, `auth.MIN_PASSWORD` |
+| Accounts | web UI (Settings → Accounts), or `bams user add NAME [--admin] \| list \| passwd NAME \| remove NAME \| unlock NAME`; session length `auth.SESSION_DAYS`, `auth.MIN_PASSWORD` |
+| Security | Settings → Security: `settings.lockout_threshold` (default 5), `ip_mode`/`ip_allow`/`ip_block`, `netflow_dir` (default `data/netflow`), `netflow_max_bytes` (default 10 GB); `bams security allow-all` |
 | ffprobe / ffmpeg | `BAMS_FFPROBE` / `BAMS_FFMPEG`, then the Windows installer's `<install>fmpegin` (`probe.app_ffmpeg_dir`), PATH, winget package folder |
 | Video encoder | Settings → Playback (`settings.video_encoder`, `stream.set_preferred`), else auto-detected (`stream.ENCODERS`); `BAMS_VIDEO_ENCODER=h264_nvenc\|h264_qsv\|h264_amf\|h264_vaapi\|libx264\|h264_mf`; VAAPI device `BAMS_VAAPI_DEVICE` (default `/dev/dri/renderD128`) |
 | GPU decoding | on with a GPU encoder (`stream.hwaccel_args`); `BAMS_HWACCEL=none` turns it off, or names a method (`cuda`, `d3d11va`, `vaapi`…) |
-| All-GPU filters (NVIDIA) | on for SDR NVDEC codecs (`stream.gpu_filters`); `BAMS_GPU_FILTERS=0` turns them off |
+| All-GPU filters (NVIDIA, Quick Sync, VAAPI, AMF) | on for SDR GPU-decodable codecs (`stream.gpu_filters`); `BAMS_GPU_FILTERS=0` turns them off; `BAMS_HWACCEL` other than auto / the encoder's own method turns them off too |
 | Conversion limit | Settings → Playback (`settings.max_transcodes`); HLS tuning constants at the top of `hls.py` |
 | Web UI dir | `bams/web` inside the package (installed copies), else `../web/dist` (repo checkout); `__main__._web_dir` |
 | Installed service settings | Windows: tasks in the installer (rewritten into `serviceams-service.xml`); Linux: `/etc/default/bams` (`BAMS_USER`, `BAMS_HOST`, `BAMS_PORT`) + `sudo dpkg-reconfigure bams` |
@@ -418,17 +496,20 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
-| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials), per user, merges keep state, threshold settings, per-user prefs |
+| `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
+| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
 | `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB |
-| `test_subtitles.py` | language names, sidecar matching + labels, shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track burned in (also when the run starts mid-line) |
+| `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
+| `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |
 | `test_readonly.py` | 15 write attempts must all raise and leave the tree byte-identical; reads allowed; full scan leaves media untouched; root validation |
 | `test_parse.py` | real-world names: scene packs, Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, movies |
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration |
-| `test_stream.py` | audio channels, burn-in + GPU filter commands, copy-HLS command, a real remux over HLS through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
+| `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
+| `test_music_extras.py` | cue parsing, CUE image split / sheet edited or removed, queue `start`/`end`, real FLAC with an embedded sheet; playlist parsing, import, follow-the-file; a cover/artist image added later vs CAA/Commons; album merge + rescan + best file, unsure matches not merged; refresh; FLAC command + API |
 | `test_music_match.py` | identification against fake MusicBrainz/CAA/Wikimedia (`httpx.MockTransport`): matching, tag ids, unmatched/ambiguous, rescans keep data, local art wins, service down, settings toggle + Fix match API |
 
 ## 8. Where to change X
@@ -446,18 +527,29 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Add a scan step to the progress display | call `progress(step, done, total, bytes_done, bytes_total)`; units per step in `unitOf()` (`Settings.tsx`) |
 | Tune HLS segment length | `stream.SEGMENT` (conversions; copies follow the file's keyframes) |
 | Which codecs the browser is asked about | `canDecode()` in `web/src/pages/Player.tsx` |
+| Which audio may pass through untouched | `stream.PASSTHROUGH_AUDIO` + `PASS_TYPES` in `Player.tsx` (must go into MP4 cleanly) |
+| All-GPU path for an encoder | `stream._GPU_DECODER`, `_GPU_SCALER`, `gpu_filters`, `_gpu_filter_chain` (+ `test_all_gpu_filters_…`) |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |
 | Password / session rules | `auth.py` (`MIN_PASSWORD`, `SESSION_DAYS`, `_SCRYPT`, `Throttle`) |
+| Wrong-password waits / lockout / sign-in log | `security.py` (`wait_after`, `MAX_WAIT`, `DEFAULT_THRESHOLD`, `AUTH_LOG_KEEP`), login flow `app.auth_login` |
+| IP list rules | `security.IpPolicy` (`allowed`), `clean_entries`, `save_policy`; UI `SecuritySettings.tsx` `IpCard` |
+| What the traffic log records / how it rotates | record dict in `security.Gate`; `netflow.py` (`segment_size`, `SCAN_BUDGET`, `DEFAULT_MAX_BYTES`) |
 | When something counts as watched, what Continue Watching offers | admin settings via `watch.thresholds` (defaults `WATCHED_PERCENT`, `RESUME_AFTER`), `continue_watching`, `next_episode` |
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
-| Add a per-user preference | `auth.PREFS` + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
-| Recognise more sidecar subtitle names / languages | `subtitles.sidecars`, `subtitles.tracks` (`_FLAGS`), `subtitles.language` |
+| Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
+| Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + its rendering in `pages/Home.tsx`; ids are saved in users' `home_rows`, so keep old ids stable |
+| Recognise more sidecar subtitle names / languages | `subtitles.sidecars`, `subtitles.tracks` (`_FLAGS`), `subtitles.language`; VobSub: `vobsub_streams` |
 | Auto quality sizes | `hls.LADDER`, `hls.ladder` |
 | How far ahead / behind HLS works | `AHEAD`, `SOON`, `KEEP`, `SWITCHED`, `IDLE` in `hls.py` (seconds) |
 | Add a file type to index | `config.VIDEO_EXTS` / `config.AUDIO_EXTS` + FORMATS.md |
 | Recognise a new music folder/file layout | `music.parse_track` / `_clean_title` (+ a case in `test_music.py`, bump `music.PARSER_VERSION`) |
 | Which music formats play as-is | `stream.BROWSER_AUDIO_FILES` (+ `test_plan_audio`, FORMATS.md §5) |
 | Tune music matching | `music_match.score_release`, `ACCEPT`; artist rule in `match_artist` |
+| When albums merge / how often music refreshes | `music_match._pinned`, `MERGE_SCORE`; `REFRESH_AFTER`, `REFRESH_PER_SCAN` |
+| CUE sheet reading / which sheet applies | `cue.parse`, `cue.file_for`; `scanner.scan_library` → `sheet_for` |
+| Playlist formats / entry matching | `playlists.parse_*`, `playlists.resolve` (`find`) |
+| Gapless timing / music player behaviour | `web/src/music.tsx` (`PRELOAD_BEFORE`, `ARM_BEFORE`, `advance`, `tick`) |
+| Converted-music formats | `stream.MUSIC_OUTPUTS`, `stream.audio_cmd`; setting in `app.put_music_output` |
 | Add a music metadata source | `musicbrainz.py` (client) + `music_match.py` (apply) + credit in `pages/Music.tsx` `About` |
 | Add a DB column/table | `db.SCHEMA` + `SCHEMA_VERSION` + migration step |
 | Anything that touches media files | **only** through `readonly.py`; never write; keep `test_readonly.py` green |

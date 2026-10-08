@@ -85,8 +85,8 @@ export default function NowPlaying() {
 
       <div className="np-right">
         {t.playback.mode === "transcode" && (
-          <span className="np-badge" title={`${t.playback.audio_codec ?? "This format"} doesn't play in browsers; the server converts it to AAC while streaming.`}>
-            Converted
+          <span className="np-badge" title={`${t.playback.audio_codec ?? "This format"} doesn't play in browsers; the server converts it to ${t.playback.output === "flac" ? "FLAC (lossless)" : "AAC"} while streaming.`}>
+            {t.playback.output === "flac" ? "FLAC" : "Converted"}
           </span>
         )}
         <Icon name="volume" size={18} />

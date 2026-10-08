@@ -9,9 +9,14 @@ Where the facts come from, best first:
        Artist_-_01_-_Title.ext                (FMA/archive.org style; artist/album prefixes are dropped)
 Every audio file becomes a track (like Plex): nothing is left "unrecognised".
 
+CUE sheets (cue.py): a whole album in one file plus a .cue (or a CUESHEET tag) becomes one track per
+sheet entry, each a stretch of the file (file_items.cue_start/cue_end).
+
 Artwork, best first: an image next to the music (cover.jpg, folder.jpg... / artist.jpg one folder up),
-then the picture embedded in a track. Either way the bytes are READ from the media folder and the
-copy goes into the data dir (images/music/); nothing is ever written next to the media.
+then the picture embedded in a track, then (music_match) the Cover Art Archive / Wikimedia Commons. Either
+way the bytes are READ from the media folder and the copy goes into the data dir (images/music/); nothing
+is ever written next to the media. items.poster_src remembers where a poster came from, so a cover.jpg
+added later replaces embedded or downloaded art.
 """
 
 from __future__ import annotations
@@ -26,14 +31,14 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import readonly, stream
+from . import cue, readonly, stream
 from .config import ALBUM_ART_NAMES, ART_EXTS, ARTIST_ART_NAMES
 from .db import Tx, jdump, jload, now
 from .parse import title_key
 
 log = logging.getLogger(__name__)
 
-PARSER_VERSION = 1  # bump to make the next scan re-read every music file's tags/path
+PARSER_VERSION = 2  # bump to make the next scan re-read every music file's tags/path (2: CUE sheets)
 VARIOUS = "Various Artists"
 UNKNOWN_ARTIST = "Unknown Artist"
 UNKNOWN_ALBUM = "Unknown Album"
@@ -58,7 +63,9 @@ class Track:
     genres: list[str] = field(default_factory=list)
     duration: float | None = None
     compilation: bool = False
-    source: str = "path"               # "tags" if artist/album came from the file's tags
+    source: str = "path"               # "tags" if artist/album came from the file's tags, "cue" from a cue sheet
+    start: float | None = None         # CUE tracks: where in the file this track runs (seconds)
+    end: float | None = None
 
     recognized = True  # every audio file is placed somewhere
 
@@ -176,6 +183,29 @@ def parse_track(rel: str, probe: dict | None = None) -> Track:
     )
 
 
+def parse_cue_tracks(rel: str, probe: dict | None, sheet: cue.CueSheet, block: cue.CueFile) -> list[Track]:
+    """One Track per entry of a cue sheet's FILE block. The sheet was written for this rip, so its album,
+    performer and titles come first; the file's own tags and folders fill what it leaves out."""
+    base = parse_track(rel, probe)
+    total = (probe or {}).get("duration")
+    album_artist = (sheet.performer or "").strip() or base.album_artist
+    out = []
+    for ct in block.tracks:
+        end = ct.end if ct.end is not None else total
+        performer = (ct.performer or "").strip() or None
+        if performer and title_key(performer) == title_key(album_artist):
+            performer = None
+        out.append(Track(
+            title=(ct.title or "").strip() or f"Track {ct.number}",
+            album=(sheet.title or "").strip() or base.album, album_artist=album_artist, artist=performer,
+            year=_year(sheet.date) or base.year, track=ct.number, disc=base.disc,
+            genres=_genres(sheet.genre) or base.genres,
+            duration=round(end - ct.start, 3) if end is not None else None,
+            compilation=base.compilation, source="cue" if ct.title else "path",
+            start=round(ct.start, 3), end=round(ct.end, 3) if ct.end is not None else None))
+    return out
+
+
 # ------------------------------------------------------------------ item graph
 
 def _insert(con: sqlite3.Connection, lib_id: int, kind: str, title: str, **cols) -> int:
@@ -197,8 +227,20 @@ def _artist(con: sqlite3.Connection, lib_id: int, name: str) -> int:
     return item_id
 
 
-def _album(con: sqlite3.Connection, lib_id: int, artist_id: int, title: str) -> int:
-    """Albums group by album artist + album title (so one album split over two folders stays one)."""
+def album_alias(artist: str, title: str) -> str:
+    """The item_keys key under which an album merged into another one is still found: by names, not ids,
+    because the merged-away album's artist may have been deleted (and re-created by a later scan)."""
+    return f"{title_key(artist) or artist.casefold()}|{title_key(title) or title.casefold()}"
+
+
+def _album(con: sqlite3.Connection, lib_id: int, artist: str, title: str) -> int:
+    """Albums group by album artist + album title (so one album split over two folders stays one). An album
+    that was merged into another (same MusicBrainz release, music_match.merge_albums) goes to that one."""
+    alias = con.execute("SELECT item_id FROM item_keys WHERE library_id=? AND kind='album' AND title_key=?",
+                        (lib_id, album_alias(artist, title))).fetchone()
+    if alias:
+        return alias["item_id"]
+    artist_id = _artist(con, lib_id, artist)
     key = title_key(title) or title.casefold()
     row = con.execute("SELECT id FROM items WHERE parent_id=? AND kind='album' AND title_key=?",
                       (artist_id, key)).fetchone()
@@ -209,25 +251,36 @@ def _album(con: sqlite3.Connection, lib_id: int, artist_id: int, title: str) -> 
 
 
 def link_track(con: sqlite3.Connection, lib_id: int, file_id: int, t: Track) -> list[int]:
-    """(Re)attach a file to its track, creating the artist/album as needed. The track row is kept
-    across re-reads (its id is what play history will hang off), only its fields and album change."""
-    prev = con.execute("""SELECT i.id, i.match_status FROM file_items fi JOIN items i ON i.id=fi.item_id
-                          WHERE fi.file_id=? AND i.kind='track'""", (file_id,)).fetchone()
+    return link_tracks(con, lib_id, file_id, [t])
+
+
+def link_tracks(con: sqlite3.Connection, lib_id: int, file_id: int, tracks: list[Track]) -> list[int]:
+    """(Re)attach a file to its track(s) (several for a CUE image), creating the artist/album as needed. Track
+    rows are kept across re-reads (their ids are what playlists and history hang off), matched up by track
+    number for CUE files; only their fields and album change."""
+    prev = con.execute("""SELECT i.id, i.match_status, i.track_number FROM file_items fi JOIN items i ON i.id=fi.item_id
+                          WHERE fi.file_id=? AND i.kind='track' ORDER BY fi.cue_start, i.id""", (file_id,)).fetchall()
     con.execute("DELETE FROM file_items WHERE file_id=?", (file_id,))
-    album = _album(con, lib_id, _artist(con, lib_id, t.album_artist), t.album)
-    cols = {"parent_id": album, "title": t.title, "parsed_title": t.title, "title_key": title_key(t.title),
-            "disc_number": t.disc, "track_number": t.track, "artist": t.artist, "year": t.year,
-            "duration": t.duration, "genres": jdump(t.genres) if t.genres else None}
-    if prev and prev["match_status"] in ("matched", "manual") and t.source == "path":
-        del cols["title"]  # MusicBrainz's title beats one guessed from the file name
-    if prev:
-        track_id = prev["id"]
-        con.execute(f"UPDATE items SET {', '.join(f'{k}=?' for k in cols)}, updated_at=? WHERE id=?",
-                    (*cols.values(), now(), track_id))
-    else:
-        track_id = _insert(con, lib_id, "track", t.title, **{k: v for k, v in cols.items() if k != "title"})
-    con.execute("INSERT INTO file_items (file_id, item_id) VALUES (?, ?)", (file_id, track_id))
-    return [track_id]
+    by_num = {p["track_number"]: p for p in prev}
+    ids: list[int] = []
+    for t in tracks:
+        old = (by_num.pop(t.track, None) if len(tracks) > 1 else None) or (prev[0] if len(tracks) == 1 and prev else None)
+        album = _album(con, lib_id, t.album_artist, t.album)
+        cols = {"parent_id": album, "title": t.title, "parsed_title": t.title, "title_key": title_key(t.title),
+                "disc_number": t.disc, "track_number": t.track, "artist": t.artist, "year": t.year,
+                "duration": t.duration, "genres": jdump(t.genres) if t.genres else None}
+        if old and old["match_status"] in ("matched", "manual") and t.source == "path":
+            del cols["title"]  # MusicBrainz's title beats one guessed from the file name
+        if old and old["id"] not in ids:
+            track_id = old["id"]
+            con.execute(f"UPDATE items SET {', '.join(f'{k}=?' for k in cols)}, updated_at=? WHERE id=?",
+                        (*cols.values(), now(), track_id))
+        else:
+            track_id = _insert(con, lib_id, "track", t.title, **{k: v for k, v in cols.items() if k != "title"})
+        con.execute("INSERT OR IGNORE INTO file_items (file_id, item_id, cue_start, cue_end) VALUES (?, ?, ?, ?)",
+                    (file_id, track_id, t.start, t.end))
+        ids.append(track_id)
+    return ids
 
 
 def rollup(con: sqlite3.Connection, lib_id: int) -> None:
@@ -287,19 +340,38 @@ def _store_image(images: Path, data: bytes) -> str | None:
     return rel
 
 
-def _folder_image(folder: Path, names: tuple[str, ...]) -> Path | None:
-    """cover.jpg / Folder.JPG / ... in `folder` (case-insensitive), in the order of `names`."""
-    try:
-        with os.scandir(folder) as it:
-            found = {e.name.casefold(): Path(e.path) for e in it
-                     if os.path.splitext(e.name)[1].casefold() in ART_EXTS and e.is_file()}
-    except OSError:
-        return None
+def _folder_image(folder: Path, names: tuple[str, ...],
+                  side: dict[Path, list[readonly.FileEntry]] | None = None) -> readonly.FileEntry | None:
+    """cover.jpg / Folder.JPG / ... in `folder` (case-insensitive), in the order of `names`. `side` holds the
+    images the scan's walk already saw, by folder; without it the folder is listed."""
+    if side is not None:
+        found = {e.path.name.casefold(): e for e in side.get(folder, ())
+                 if os.path.splitext(e.path.name)[1].casefold() in ART_EXTS}
+    else:
+        try:
+            with os.scandir(folder) as it:
+                found = {}
+                for e in it:
+                    if os.path.splitext(e.name)[1].casefold() in ART_EXTS and e.is_file():
+                        st = e.stat()
+                        found[e.name.casefold()] = readonly.FileEntry(Path(e.path), Path(e.path).as_posix(),
+                                                                      st.st_size, st.st_mtime_ns)
+        except OSError:
+            return None
     for n in names:
         for ext in ART_EXTS:
             if (p := found.get(n + ext)) is not None:
                 return p
     return None
+
+
+def _folder_src(img: readonly.FileEntry) -> dict:
+    """poster_src for an image read from a folder: a different file, or the same one changed, gets read again."""
+    return {"from": "folder", "file": img.rel, "size": img.size, "mtime_ns": img.mtime_ns}
+
+
+def _same_src(src: dict | None, new: dict) -> bool:
+    return bool(src) and all(src.get(k) == v for k, v in new.items())
 
 
 def _read_image(path: Path, limit: int = 20_000_000) -> bytes | None:
@@ -329,23 +401,28 @@ def embedded_picture(path: Path) -> bytes | None:
     return r.stdout if r.returncode == 0 and r.stdout else None
 
 
-def fill_artwork(con: sqlite3.Connection, images: Path, lib_id: int) -> ArtStats:
-    """Album covers and artist images for albums/artists that don't have one yet.
+def fill_artwork(con: sqlite3.Connection, images: Path, lib_id: int,
+                 side: dict[Path, list[readonly.FileEntry]] | None = None) -> ArtStats:
+    """Album covers and artist images.
 
-    An album is looked at again only when one of its tracks changed since the last look
-    (metadata_at), so albums without any art don't cost a folder listing every scan."""
+    A cover.jpg (or folder.jpg, artist.jpg...) next to the music always wins: a new or changed one replaces
+    whatever the album/artist had (an embedded picture, a Cover Art Archive cover, a Commons photo). Without
+    one, an album's embedded picture is looked for again only when one of its tracks changed since the last
+    look, so albums without any art don't cost an FFmpeg run every scan. `side` = the images the scan's walk
+    saw, by folder (no extra folder listings); without it the folders are listed."""
     stats = ArtStats()
     roots = {r["id"]: Path(r["path"]) for r in con.execute("SELECT id, path FROM library_roots WHERE library_id=?", (lib_id,))}
-    albums = con.execute("""SELECT a.id, a.parent_id FROM items a WHERE a.library_id=? AND a.kind='album' AND a.poster IS NULL
-                            AND (a.metadata_at IS NULL OR EXISTS (SELECT 1 FROM items t WHERE t.parent_id=a.id
-                                                                  AND t.updated_at > a.metadata_at))""", (lib_id,)).fetchall()
+    tracks_of: dict[int, list[sqlite3.Row]] = {}
+    for t in con.execute("""SELECT t.parent_id album, t.updated_at, f.root_id, f.rel_path, f.probe FROM items t
+                            JOIN file_items fi ON fi.item_id=t.id JOIN files f ON f.id=fi.file_id
+                            WHERE t.library_id=? AND t.kind='track' AND f.available=1
+                            ORDER BY t.disc_number, t.track_number, t.title""", (lib_id,)):
+        tracks_of.setdefault(t["album"], []).append(t)
+    albums = con.execute("SELECT id, parent_id, poster, poster_src FROM items WHERE library_id=? AND kind='album'",
+                         (lib_id,)).fetchall()
     artist_dirs: dict[int, set[Path]] = {}
     for al in albums:
-        stats.albums_checked += 1
-        tracks = con.execute("""SELECT f.root_id, f.rel_path, f.probe FROM items t JOIN file_items fi ON fi.item_id=t.id
-                                JOIN files f ON f.id=fi.file_id WHERE t.parent_id=? AND f.available=1
-                                ORDER BY t.disc_number, t.track_number, t.title""", (al["id"],)).fetchall()
-        poster = None
+        tracks = tracks_of.get(al["id"], [])
         folders: list[Path] = []
         for t in tracks:
             root = roots.get(t["root_id"])
@@ -357,21 +434,31 @@ def fill_artwork(con: sqlite3.Connection, images: Path, lib_id: int) -> ArtStats
             else:
                 folders.append(folder)
         folders = list(dict.fromkeys(folders))  # unique, in order
-        for folder in folders:
-            if (img := _folder_image(folder, ALBUM_ART_NAMES)) and (data := _read_image(img)):
-                poster = _store_image(images, data)
-                if poster:
-                    break
-        if not poster:
-            for t in tracks:
-                if (jload(t["probe"]) or {}).get("cover") and t["root_id"] in roots:
-                    data = embedded_picture(roots[t["root_id"]] / t["rel_path"])
-                    if data and (poster := _store_image(images, data)):
-                        break
-        with Tx(con):
-            con.execute("UPDATE items SET poster=COALESCE(?, poster), metadata_at=? WHERE id=?", (poster, now(), al["id"]))
-        if poster:
-            stats.album_covers += 1
+        src = jload(al["poster_src"]) or {}
+        poster, new_src = None, None
+        img = next((i for f in folders if (i := _folder_image(f, ALBUM_ART_NAMES, side))), None)
+        if img is not None:
+            if not _same_src(src, _folder_src(img)):
+                stats.albums_checked += 1
+                if (data := _read_image(img.path)) and (poster := _store_image(images, data)):
+                    new_src = _folder_src(img)
+        elif al["poster"] is None or src.get("from") == "embedded":
+            checked = src.get("checked") or 0
+            if not checked or any(t["updated_at"] > checked for t in tracks):
+                stats.albums_checked += 1
+                for t in tracks:
+                    if (jload(t["probe"]) or {}).get("cover") and t["root_id"] in roots:
+                        data = embedded_picture(roots[t["root_id"]] / t["rel_path"])
+                        if data and (poster := _store_image(images, data)):
+                            break
+                new_src = {"from": "embedded" if poster else (src.get("from") if al["poster"] else None),
+                           "checked": now()}
+        if new_src is not None:
+            with Tx(con):
+                con.execute("UPDATE items SET poster=COALESCE(?, poster), poster_src=? WHERE id=?",
+                            (poster, jdump(new_src), al["id"]))
+            if poster and poster != al["poster"]:
+                stats.album_covers += 1
         # the artist's folder is the one holding the album folders (never the library root itself)
         for folder in folders[:1]:
             album_folder = folder.parent if _DISC_DIR_RE.match(folder.name) else folder
@@ -380,12 +467,17 @@ def fill_artwork(con: sqlite3.Connection, images: Path, lib_id: int) -> ArtStats
                 artist_dirs.setdefault(al["parent_id"], set()).add(parent)
 
     for artist_id, dirs in artist_dirs.items():
-        if con.execute("SELECT poster FROM items WHERE id=?", (artist_id,)).fetchone()["poster"]:
+        img = next((i for d in sorted(dirs) if (i := _folder_image(d, ARTIST_ART_NAMES, side))), None)
+        if img is None:
             continue
-        for d in sorted(dirs):
-            if (img := _folder_image(d, ARTIST_ART_NAMES)) and (data := _read_image(img)) and (rel := _store_image(images, data)):
-                with Tx(con):
-                    con.execute("UPDATE items SET poster=? WHERE id=?", (rel, artist_id))
-                stats.artist_images += 1
-                break
+        row = con.execute("SELECT poster, poster_src, extra FROM items WHERE id=?", (artist_id,)).fetchone()
+        if _same_src(jload(row["poster_src"]), _folder_src(img)):
+            continue
+        if (data := _read_image(img.path)) and (rel := _store_image(images, data)):
+            extra = jload(row["extra"]) or {}
+            extra.pop("image_credit", None)  # a Commons photo's credit doesn't belong to the owner's own picture
+            with Tx(con):
+                con.execute("UPDATE items SET poster=?, poster_src=?, extra=? WHERE id=?",
+                            (rel, jdump(_folder_src(img)), jdump(extra) if extra else None, artist_id))
+            stats.artist_images += 1
     return stats

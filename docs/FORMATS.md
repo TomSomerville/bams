@@ -10,7 +10,7 @@ Every video and audio format BAMS knows about: whether it's **indexed** (found b
 | **Direct Play** | MP4 + H.264 + browser-friendly audio | Sends the original file (HTTP Range, so seeking works) |
 | **Direct Stream: file** | Browser-friendly video *and* audio in MKV/WebM/MP4 | Sends the original file; Chrome/Edge open MKV fine |
 | **Direct Stream: remux** | Browser-friendly video, but audio browsers can't decode, or a container they can't open | FFmpeg **copies the video** and **converts the audio to AAC**, served as **HLS** cut at the file's own keyframes (listed once with ffprobe, cached), so seeking is native; plain fragmented MP4 (restarted to seek) where HLS isn't possible. Little CPU, no video quality loss |
-| **Transcode** | The video codec itself isn't browser-friendly (or the browser says it can't decode HEVC/AV1/VP9), or the viewer picked a lower quality or **Auto** (several sizes; the player picks by throughput), or picture subtitles are burned in | FFmpeg **re-encodes the video to H.264** (GPU: NVENC / QSV / AMF / VAAPI, else x264; GPU decoding too, and on NVIDIA SDR sources the filters run on the GPU as well) and the audio to AAC, served as **HLS** (4 s segments made on demand, so seeking is native; plain fragmented MP4 for browsers without HLS). Deinterlaces, fixes anamorphic pixels, tone-maps HDR |
+| **Transcode** | The video codec itself isn't browser-friendly (or the browser says it can't decode HEVC/AV1/VP9), or the viewer picked a lower quality or **Auto** (several sizes; the player picks by throughput), or picture subtitles are burned in | FFmpeg **re-encodes the video to H.264** (GPU: NVENC / QSV / AMF / VAAPI, else x264; GPU decoding too, and for SDR sources the filters run on the GPU as well: tested on NVIDIA, built but untested on Intel/AMD/VAAPI, falls back to CPU filters if a GPU run fails) and the audio to AAC, served as **HLS** (4 s segments made on demand, so seeking is native; plain fragmented MP4 for browsers without HLS). Deinterlaces, fixes anamorphic pixels, tone-maps HDR |
 
 Legend: ✅ yes · ⚠️ depends (hardware, OS or browser version) · ❌ no · 🔜 planned
 
@@ -65,8 +65,9 @@ The server only *reads* media files, whatever the format ([READ-ONLY.md](READ-ON
 When a file is **transcoded**, HDR10 and HLG are tone-mapped to SDR (BT.709, Hable curve) if FFmpeg has the `zscale` filter.
 Dolby Vision goes through FFmpeg's `libplacebo` filter (needs Vulkan; tested once at startup), which applies the DV
 metadata. That matters for **profile 5**, which has no HDR10 base layer and shows green/purple without it; the player
-converts profile 5 for browsers that don't report Dolby Vision support (`dvh1`). Without libplacebo, Dolby Vision
-falls back to the HDR10 tone-map (right for profile 8, wrong colours for profile 5). The profile is recorded by the
+converts profile 5 for browsers that don't report Dolby Vision support (`dvh1`). Checked on a real profile 5 file
+(Jellyfin's CC BY-SA test clip): same colours as the SDR version of the clip. Without libplacebo, Dolby Vision falls
+back to the HDR10 tone-map: right for profile 8, but a profile 5 file then fails to convert (zscale can't read it). The profile is recorded by the
 scan (`probe.dv_profile`; files probed before this have none).
 
 ## 3. Audio codecs inside video files
@@ -80,8 +81,8 @@ This is what decides "plays with sound" vs "plays silently" (the Bob's Burgers i
 | Opus | | ✅ | ✅ | ⚠️ | Kept as-is |
 | Vorbis | | ✅ | ✅ | ⚠️ | Kept as-is |
 | FLAC | | ✅ | ✅ | ✅ | Kept as-is |
-| AC3 | Dolby Digital, DD 5.1 | ❌ | ❌ | ✅ | **Converted to AAC** (remux) |
-| E-AC3 | Dolby Digital Plus, DD+, DDP, Atmos (lossy) | ❌ | ❌ | ✅ | **Converted to AAC** |
+| AC3 | Dolby Digital, DD 5.1 | ❌ | ❌ | ✅ | **Converted to AAC** (remux); **passed through** where the device decodes it |
+| E-AC3 | Dolby Digital Plus, DD+, DDP, Atmos (lossy) | ❌ | ❌ | ✅ | **Converted to AAC**; **passed through** where the device decodes it |
 | DTS | DTS, DTS-ES | ❌ | ❌ | ❌ | **Converted to AAC** |
 | DTS-HD MA / DTS:X | | ❌ | ❌ | ❌ | **Converted to AAC** |
 | TrueHD | Dolby TrueHD, Atmos (lossless) | ❌ | ❌ | ❌ | **Converted to AAC** |
@@ -95,7 +96,11 @@ Conversions make **stereo AAC 192 kbps** by default. In the player's sound menu 
 the choice is remembered per browser. Files with several audio tracks get a **track picker** (labels like
 "English · EAC3 5.1 · Commentary"). A browser only plays a file's first track, so picking another one plays the file
 through the remux (video copied, that track converted). With nothing remembered, the player picks the browser's
-language, else the track the file marks as default. 🔜 Pass-through for clients that decode Dolby (TV apps).
+language, else the track the file marks as default. **Dolby pass-through:** when the browser says it decodes AC3/E-AC3
+(TV browsers, Safari, Edge, Chromecast often do), the remux copies that audio as it is, so an AV receiver gets the
+original; Sound menu → Original / Convert to AAC; if it then doesn't play, the player converts by itself. Only the
+remux (video copied): conversions always output AAC. DTS and TrueHD are always converted (they don't go into MP4
+cleanly).
 
 ## 4. Subtitles
 
@@ -107,7 +112,7 @@ language, else the track the file marks as default. 🔜 Pass-through for client
 | MP4 timed text | text | embedded in MP4 (`mov_text`) | ❌ | Converted to WebVTT |
 | TTML / DFXP | text | `.ttml` `.dfxp` | ❌ | ❌ not read (FFmpeg can't read TTML) |
 | PGS | image | embedded in MKV/M2TS (Blu-ray) | ❌ | Burned into a converted video |
-| VobSub | image | embedded (DVD) | ❌ | Burned in; ❌ `.sub` + `.idx` sidecars aren't read yet |
+| VobSub | image | embedded (DVD), `.idx` + `.sub` sidecars | ❌ | Burned in (a sidecar .idx with several languages = one track each) |
 | DVB subtitles | image | embedded in TS (broadcast) | ❌ | Burned in |
 
 How it works (`server/bams/subtitles.py`):
@@ -128,9 +133,10 @@ How it works (`server/bams/subtitles.py`):
 ## 5. Music (audio-only files)
 
 Indexed in **Music** libraries (`config.AUDIO_EXTS`). Test albums are in `C:\Users\Beached\MyMusic`.
-"Plays as-is" = the original file is streamed (seeking via HTTP Range). "Converted" = FFmpeg converts it to
-**AAC 256 kbps stereo** (≤ 48 kHz) in fragmented MP4 while streaming (`/api/files/{id}/audio?t=`); seeking restarts
-the conversion at the new point. The rule is `stream.BROWSER_AUDIO_FILES` (container + codec, from ffprobe).
+"Plays as-is" = the original file is streamed (seeking via HTTP Range). "Converted" = FFmpeg converts it while
+streaming (`/api/files/{id}/audio?t=`) to **AAC 256 kbps stereo** (≤ 48 kHz, fragmented MP4; the default) or, when
+the admin picks it in Settings → Music, **FLAC** (lossless: 24-bit kept, ≤ 96/88.2 kHz, channels kept; about 4x the
+data). Seeking restarts the conversion at the new point. The rule is `stream.BROWSER_AUDIO_FILES` (container + codec, from ffprobe).
 
 | Format | Extensions | Lossless | Chromium | Firefox | Safari | BAMS today |
 |---|---|---|---|---|---|---|
@@ -145,12 +151,22 @@ the conversion at the new point. The rule is `stream.BROWSER_AUDIO_FILES` (conta
 | WMA (incl. Pro / Lossless) | `.wma` | ⚠️ | ❌ | ❌ | ❌ | Converted |
 | Monkey's Audio | `.ape` | ✅ | ❌ | ❌ | ❌ | Converted |
 | WavPack | `.wv` | ✅ | ❌ | ❌ | ❌ | Converted |
-| DSD | `.dsf` `.dff` | ✅ | ❌ | ❌ | ❌ | Converted (resampled to 48 kHz) |
+| DSD | `.dsf` `.dff` | ✅ | ❌ | ❌ | ❌ | Converted (to PCM: 48 kHz AAC, or 88.2 kHz 24-bit FLAC) |
 | Matroska audio | `.mka` | depends | ❌ | ❌ | ❌ | Converted |
 | AC3 / DTS files | `.ac3` `.dts` | | ❌ | ❌ | ⚠️ | Converted |
 | MP2 | `.mp2` | | ❌ | ❌ | ❌ | Converted |
-| CUE sheet + one big file | `.cue` + `.flac`/`.ape`/`.wav` | | n/a | n/a | n/a | 🔜 (the big file is indexed as one track today) |
-| Playlists | `.m3u` `.m3u8` `.pls` | | n/a | n/a | n/a | 🔜 import as BAMS playlists |
+| CUE sheet + one big file | `.cue` + any audio file above, or a CUESHEET tag inside it | | n/a | n/a | n/a | ✅ One track per sheet entry (the file plays as-is or converted, from each track's start; consecutive tracks gapless) |
+| Playlists | `.m3u` `.m3u8` `.pls` | | n/a | n/a | n/a | ✅ Imported as BAMS playlists, kept in step with the file |
+
+**CUE sheets** (`cue.py`): the sheet's `FILE` must name the audio file, or the same name with another extension (a
+sheet made for a `.wav` later compressed to `.flac`/`.ape`), or be the only sheet next to the folder's only audio
+file. Sheets in UTF-8/UTF-16/Windows-1252 are read. A track runs from its `INDEX 01` to the next track's (pregaps stay
+with the track before, as CD players play them). Sheets that just describe one track per file change nothing.
+
+**Playlists** (`playlists.py`): extended M3U (`#EXTINF`, `#PLAYLIST:` name), M3U8 (UTF-8), PLS (`FileN=`). Entries
+are matched to the library by a path relative to the playlist, an absolute path under a library folder, a `file://`
+URL, or (made on another computer) the end of the path when only one file in the library ends that way. Streams
+(`http://…`) and files outside the library count as missing. An entry naming a CUE image plays all its tracks.
 
 Before ffprobe has seen a file, the extension decides (an `.m4a` is assumed AAC until probed). Without FFmpeg,
 "Converted" files are sent as-is (best effort).
@@ -163,4 +179,5 @@ is used (`Artist/Album (Year)/01 - Title`, `CD1`/`Disc 2` folders, `Artist - Alb
 **Artwork**: `cover`/`folder`/`front`/`album`/`albumart` `.jpg/.jpeg/.png/.webp` in the album folder (or its parent
 for disc folders), else the picture embedded in a track (extracted by FFmpeg to a pipe); `artist`/`folder`/`poster`
 images in the artist folder. Then, when music identification is on, the Cover Art Archive and Wikimedia Commons fill
-what's still missing. Copies live in `data/images/music/`.
+what's still missing. A folder image added or changed later replaces embedded or downloaded art on the next scan.
+Copies live in `data/images/music/`.

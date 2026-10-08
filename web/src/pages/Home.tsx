@@ -6,6 +6,7 @@ import { AlbumCard, ContinueCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { fmtRuntime, seasonsLabel } from "../format";
+import { homeRows } from "../homeRows";
 import { useAuth } from "../auth";
 import { useApi } from "../useApi";
 
@@ -95,26 +96,33 @@ export default function Home() {
     <div className={`home ${hero.length ? "" : "no-hero"}`}>
       {hero.length > 0 && <Hero items={hero} />}
       <div className="rows">
-        {!!resume?.length && <Row title="Continue Watching">{resume.map((i) => <ContinueCard key={i.id} item={i} />)}</Row>}
-        {recent.length > 0 && <Row title="Recently Added">{recent.map((i) => <PosterCard key={i.id} item={i} />)}</Row>}
-        {libs.filter((l) => l.type === "music").map((l) => {
-          const la = (albums ?? []).filter((a) => a.library_id === l.id).slice(0, 30);
-          return la.length ? (
-            <Row key={l.id} title={`${l.name}: recently added`} to={`/library/${l.id}`}>
-              {la.map((a) => <AlbumCard key={a.id} item={a} />)}
-            </Row>
-          ) : null;
-        })}
-        {libs.filter((l) => l.type !== "music").map((l) => {
+        {homeRows(prefs.home_rows, libs).filter((r) => r.show).map((r) => {
+          if (r.id === "continue") {
+            return !!resume?.length && <Row key={r.id} title={r.label}>{resume.map((i) => <ContinueCard key={i.id} item={i} />)}</Row>;
+          }
+          if (r.id === "recent") {
+            return recent.length > 0 && <Row key={r.id} title={r.label}>{recent.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
+          }
+          if (r.id === "top_rated") {
+            return rated.length >= 4 && <Row key={r.id} title={r.label}>{rated.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
+          }
+          if (r.id === "genres") {
+            return topGenres.map((g) => (
+              <Row key={`genre:${g}`} title={g}>{items.filter((i) => i.genres.includes(g)).map((i) => <PosterCard key={i.id} item={i} />)}</Row>
+            ));
+          }
+          const l = libs.find((x) => `lib:${x.id}` === r.id)!;
+          if (l.type === "music") {
+            const la = (albums ?? []).filter((a) => a.library_id === l.id).slice(0, 30);
+            return la.length > 0 && (
+              <Row key={r.id} title={r.label} to={`/library/${l.id}`}>{la.map((a) => <AlbumCard key={a.id} item={a} />)}</Row>
+            );
+          }
           const li = items.filter((i) => i.library_id === l.id).sort((a, b) => a.title.localeCompare(b.title));
-          return li.length ? (
-            <Row key={l.id} title={l.name} to={`/library/${l.id}`}>{li.map((i) => <PosterCard key={i.id} item={i} />)}</Row>
-          ) : null;
+          return li.length > 0 && (
+            <Row key={r.id} title={r.label} to={`/library/${l.id}`}>{li.map((i) => <PosterCard key={i.id} item={i} />)}</Row>
+          );
         })}
-        {rated.length >= 4 && <Row title="Top Rated">{rated.map((i) => <PosterCard key={i.id} item={i} />)}</Row>}
-        {topGenres.map((g) => (
-          <Row key={g} title={g}>{items.filter((i) => i.genres.includes(g)).map((i) => <PosterCard key={i.id} item={i} />)}</Row>
-        ))}
       </div>
     </div>
   );

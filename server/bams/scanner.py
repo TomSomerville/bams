@@ -1,7 +1,9 @@
 """Library scan: walk -> diff -> parse -> link -> probe. Read-only on the media folders.
 
 Music libraries go walk -> diff -> probe -> parse -> link instead: a track's artist/album/title
-come mostly from its tags, which ffprobe reads, so files are linked after they're probed.
+come mostly from its tags, which ffprobe reads, so files are linked after they're probed. Their walk also
+notes cue sheets, cover images and playlists (same directory listings): a file with a cue sheet becomes
+several tracks, and playlists are imported (playlists.py).
 
 Everything a scan learns is written to the database in the data directory; nothing is ever
 written next to the media.
@@ -9,15 +11,17 @@ written next to the media.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-from . import identify, items, library, music, probe, readonly
-from .config import AUDIO_EXTS, EXTRAS_DIRS, SKIP_DIRS, VIDEO_EXTS
+from . import cue, identify, items, library, music, playlists, probe, readonly
+from .config import ART_EXTS, AUDIO_EXTS, CUE_EXTS, EXTRAS_DIRS, PLAYLIST_EXTS, SKIP_DIRS, VIDEO_EXTS
 from .db import Tx, jdump, jload, now
 from .parse import PARSER_VERSION
 
@@ -40,18 +44,31 @@ class ScanStats:
     reparsed: int = 0                  # unchanged files re-read with a newer parser
     probed: int = 0
     orphans_removed: int = 0
+    cue_files: int = 0                 # files split into tracks by a cue sheet (music)
+    playlists: int = 0                 # playlists imported or updated (music)
     roots_offline: list[str] = field(default_factory=list)
+    # music: cue sheets / images / playlists the walk saw, by folder (for the artwork step; not in as_dict)
+    side: dict[Path, list[readonly.FileEntry]] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
-        return asdict(self)
+        return {f.name: getattr(self, f.name) for f in fields(self) if f.name != "side"}
 
 
 def _store_parse(con: sqlite3.Connection, lib_id: int, lib_type: str, file_id: int, rel: str, stats: ScanStats,
-                 probe_info: dict | None = None) -> None:
+                 probe_info: dict | None = None, sheet: tuple | None = None, cues: list | None = None) -> None:
     if lib_type == "music":
-        t = music.parse_track(rel, probe_info)
-        con.execute("UPDATE files SET parse=? WHERE id=?", (jdump(t.to_dict()), file_id))
-        music.link_track(con, lib_id, file_id, t)
+        if sheet:  # (CueSheet, its FILE block for this file, where the sheet is: a rel path or "embedded")
+            tracks = music.parse_cue_tracks(rel, probe_info, sheet[0], sheet[1])
+            p = {**tracks[0].to_dict(), "title": None, "track": None, "start": None, "end": None, "duration": None,
+                 "source": "cue" if any(t.source == "cue" for t in tracks) else "path",
+                 "cue": {"sheet": sheet[2], "tracks": len(tracks)}}
+            stats.cue_files += 1
+        else:
+            tracks = [music.parse_track(rel, probe_info)]
+            p = tracks[0].to_dict()
+        p["cues"] = cues or []
+        con.execute("UPDATE files SET parse=? WHERE id=?", (jdump(p), file_id))
+        music.link_tracks(con, lib_id, file_id, tracks)
         return
     p = identify.parsed_for(con, file_id, rel, lib_type)  # identified by hand, else by its name
     con.execute("UPDATE files SET parse=? WHERE id=?", (jdump(p.to_dict()), file_id))
@@ -71,6 +88,39 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
     parser_version = music.PARSER_VERSION if is_music else PARSER_VERSION
     relink: list[tuple[int, str]] = []  # music: (file_id, rel) to parse + link once probed
     stats = ScanStats()
+    side: list[readonly.FileEntry] = []          # music: cue sheets, images, playlists seen by the walk
+    side_exts = CUE_EXTS | frozenset(ART_EXTS) | PLAYLIST_EXTS if is_music else frozenset()
+    audio_in: Counter[Path] = Counter()          # music: audio files per folder
+    sheets: dict[Path, cue.CueSheet] = {}        # cue sheets read this scan
+
+    def cues_near(path: Path) -> list[list]:
+        """The cue sheets in a file's folder, as [rel, size, mtime]: when they change, its tracks are re-read."""
+        return sorted([e.rel, e.size, e.mtime_ns] for e in stats.side.get(path.parent, ())
+                      if e.path.suffix.casefold() in CUE_EXTS)
+
+    def sheet_for(path: Path, probe_info: dict | None) -> tuple | None:
+        """The cue sheet that cuts this file into tracks: a .cue next to it naming it, else one in its tags."""
+        for e in sorted((e for e in stats.side.get(path.parent, ()) if e.path.suffix.casefold() in CUE_EXTS),
+                        key=lambda e: e.rel):
+            if e.path not in sheets:
+                sheets[e.path] = cue.parse(readonly.read_text(e.path) or "")
+            block = cue.file_for(sheets[e.path], path.name, only_audio_file=audio_in[path.parent] == 1)
+            if cue.splits(block):
+                return sheets[e.path], block, e.rel
+        if text := (probe_info or {}).get("cuesheet"):
+            sh = cue.parse(text)
+            block = sh.files[0] if len(sh.files) == 1 else cue.file_for(sh, path.name)
+            if cue.splits(block):
+                return sh, block, "embedded"
+        return None
+
+    def store(file_id: int, path: Path, rel: str, probe_info: dict | None = None) -> None:
+        if is_music:
+            _store_parse(con, lib_id, lib_type, file_id, rel, stats, probe_info, sheet_for(path, probe_info),
+                         cues_near(path))
+        else:
+            _store_parse(con, lib_id, lib_type, file_id, rel, stats, probe_info)
+
     to_probe: list[tuple[int, Path]] = []
     new_files: list[tuple[int, readonly.FileEntry]] = []   # (root_id, entry)
     seen_ids: set[int] = set()
@@ -87,13 +137,19 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
         online_roots.append(root["id"])
         known = {r["rel_path"]: r for r in con.execute(
             "SELECT id, rel_path, size, mtime_ns, json_extract(parse, '$.v') AS pv, "
-            f"{'probe' if is_music else 'NULL AS probe'} FROM files WHERE root_id=?", (root["id"],))}
+            + ("probe, json_extract(parse, '$.cues') AS cues, json_extract(probe, '$.pv') AS ppv, "
+               "json_extract(probe, '$.duration') AS pdur " if is_music else
+               "NULL AS probe, NULL AS cues, NULL AS ppv, NULL AS pdur ")
+            + "FROM files WHERE root_id=?", (root["id"],))}
         report("Looking for files", stats.files_seen, None, seen_bytes)
         # Walk first, with no transaction open: listing a big (network) tree can take minutes, and holding the
         # write lock meanwhile made every other write (logins, adding a library) fail with "database is locked".
         known_entries: list[tuple[sqlite3.Row, readonly.FileEntry]] = []
-        for entry in readonly.walk(root_path, exts, SKIP_DIRS, nested_skip):
+        side.clear()
+        for entry in readonly.walk(root_path, exts, SKIP_DIRS, nested_skip, side_exts, side):
             stats.files_seen += 1
+            if is_music:
+                audio_in[entry.path.parent] += 1
             seen_bytes += entry.size
             if stats.files_seen % 50 == 0:
                 report("Looking for files", stats.files_seen, None, seen_bytes)
@@ -103,15 +159,25 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
             else:
                 seen_ids.add(row["id"])
                 known_entries.append((row, entry))
+        for e in side:
+            stats.side.setdefault(e.path.parent, []).append(e)
+        if is_music:
+            stats.playlists += playlists.import_files(con, lib_id, root["id"],
+                                                      [e for e in side if e.path.suffix.casefold() in PLAYLIST_EXTS])
         for i in range(0, len(known_entries), BATCH):
             with Tx(con):
                 for row, entry in known_entries[i:i + BATCH]:
                     t = now()
                     if row["size"] == entry.size and row["mtime_ns"] == entry.mtime_ns:
                         con.execute("UPDATE files SET last_seen=?, available=1, missing_since=NULL WHERE id=?", (t, row["id"]))
-                        if (row["pv"] or 0) < parser_version:
+                        if is_music and row["pdur"] and row["pdur"] >= 600 and (row["ppv"] or 0) < probe.PROBE_VERSION:
+                            # a long file probed before embedded cue sheets were read: probe it again, then re-read
+                            con.execute("UPDATE files SET probed_at=NULL WHERE id=?", (row["id"],))
+                            relink.append((row["id"], entry.rel))
+                        elif (row["pv"] or 0) < parser_version or (
+                                is_music and json.loads(row["cues"] or "[]") != cues_near(entry.path)):
                             stats.reparsed += 1
-                            _store_parse(con, lib_id, lib_type, row["id"], entry.rel, stats, jload(row["probe"]))
+                            store(row["id"], entry.path, entry.rel, jload(row["probe"]))
                     else:
                         stats.changed += 1
                         con.execute("""UPDATE files SET size=?, mtime_ns=?, quick_hash=NULL, probe=NULL, probed_at=NULL,
@@ -120,7 +186,7 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
                         if is_music:
                             relink.append((row["id"], entry.rel))  # tags may have changed: re-read after probing
                         else:
-                            _store_parse(con, lib_id, lib_type, row["id"], entry.rel, stats)
+                            store(row["id"], entry.path, entry.rel)
                         to_probe.append((row["id"], entry.path))
 
     # Files the DB knows (in online roots) that weren't seen: candidates for "moved" or "missing".
@@ -159,7 +225,7 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
                     if is_music:
                         relink.append((twin["id"], entry.rel))
                     else:
-                        _store_parse(con, lib_id, lib_type, twin["id"], entry.rel, stats)
+                        store(twin["id"], entry.path, entry.rel)
                     continue
                 stats.added += 1
                 fid = con.execute("""INSERT INTO files (library_id, root_id, rel_path, size, mtime_ns, quick_hash,
@@ -168,7 +234,7 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
                 if is_music:
                     relink.append((fid, entry.rel))
                 else:
-                    _store_parse(con, lib_id, lib_type, fid, entry.rel, stats)
+                    store(fid, entry.path, entry.rel)
                 to_probe.append((fid, entry.path))
 
     with Tx(con):
@@ -215,9 +281,11 @@ def scan_library(con: sqlite3.Connection, lib_id: int, *, do_probe: bool = True,
             report("Reading tags", i, len(relink))
             with Tx(con):
                 for fid, rel in relink[i:i + BATCH]:
-                    row = con.execute("SELECT probe FROM files WHERE id=?", (fid,)).fetchone()
-                    _store_parse(con, lib_id, lib_type, fid, rel, stats, jload(row["probe"]))
+                    row = con.execute("""SELECT f.probe, r.path root FROM files f JOIN library_roots r ON r.id=f.root_id
+                                         WHERE f.id=?""", (fid,)).fetchone()
+                    store(fid, Path(row["root"]) / rel, rel, jload(row["probe"]))
         with Tx(con):
             stats.orphans_removed += items.cleanup_orphans(con, lib_id)  # albums/artists emptied by re-reads
             music.rollup(con, lib_id)
+            playlists.resolve(con, lib_id)  # entries -> tracks, now that every file is linked
     return stats

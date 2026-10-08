@@ -3,6 +3,48 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.4.0 (2026-10-08)
+
+Security settings, a better music library, your own Home page, and the last playback gaps.
+
+### New
+- **Settings → Security (admins):** a log of every sign-in (successful or failed, and why) and every lock/unlock;
+  after a wrong password the account waits a little longer each time (1, 2, 4, 8… seconds); after 5 wrong passwords
+  in a row (you can change the number) the account is locked until an admin unlocks it, in Settings or with
+  `bams user unlock NAME`. Admins can also lock and unlock accounts by hand.
+- **Allow or block addresses:** a block list, and optionally an allow list so only listed addresses (or ranges) can
+  reach BAMS. The computer BAMS runs on is always allowed, and BAMS won't let you block yourself. If you lock
+  yourself out anyway, `bams security allow-all` turns the allow list off.
+- **Traffic log:** every request to BAMS (who, from where, what, how big), with search, in Settings → Security. It
+  keeps up to 10 GB by default (you can change the size and the folder) and deletes the oldest first.
+- **Choose your Home page:** Settings → Home page. Turn each row (Continue Watching, Recently Added, each library,
+  Top Rated, Genres) and the banner on or off, and drag them into your own order. Per person.
+- **Music: CUE sheets.** An album ripped as one big file with a `.cue` sheet now shows as its separate tracks.
+- **Music: playlists.** `.m3u`, `.m3u8` and `.pls` files in your music folders appear in a new Playlists tab.
+- **Music: gapless playback.** Albums that run from one track into the next play without a pause.
+- **Music: lossless conversion.** Settings → Music → *Converted music* can send FLAC instead of a compressed format.
+- **Subtitles:** VobSub (`.idx` + `.sub`) subtitle files next to a video can be picked like any other subtitle.
+- **Dolby audio pass-through:** if your device can play Dolby Digital (AC3/EAC3) itself, BAMS sends it unchanged
+  (Sound menu in the player). If it turns out the device can't, the player switches to AAC by itself.
+
+### Improved
+- The same album found twice (for example in two folders) becomes one album once both are identified as the same
+  release; a track found in both plays the better file.
+- Music details from MusicBrainz are refreshed every few months, and downloaded covers and artist photos with them.
+  Your own `cover.jpg` is never replaced.
+- A `cover.jpg` you add to an album folder later now replaces the cover BAMS found before.
+- Converting video entirely on the GPU now also works with Intel Quick Sync, AMD and Linux VAAPI (before: NVIDIA
+  only). If the GPU fails on a video, BAMS remembers and uses the CPU for it next time.
+- Videos with non-square pixels (some DVDs) are converted at the right shape.
+
+### Fixed
+- A subtitle line already on screen when you started burned-in subtitles part-way through was missing.
+- A converted video could rarely fetch a half-written piece and stutter.
+
+### When you update
+- The database is upgraded on the first start (a backup is kept). The next music scan re-reads your music library
+  once (for CUE sheets, playlists and covers), so it takes longer than usual.
+
 ## 0.3.0 (2026-10-08)
 
 The rest of the first round of testing.

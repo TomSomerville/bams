@@ -4,9 +4,11 @@ import { api, LIBRARIES_CHANGED, type ServerLibrary, type ServerStatus } from ".
 import { useAuth } from "../auth";
 import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
+import { HomeSettings } from "../components/HomeSettings";
 import Icon from "../components/Icon";
 import { UnrecognizedFiles } from "../components/Identify";
 import MusicSettings from "../components/MusicSettings";
+import SecuritySettings from "../components/SecuritySettings";
 import TranscodeSettings from "../components/TranscodeSettings";
 import WatchSettings from "../components/WatchSettings";
 import TmdbSettings from "../components/TmdbSettings";
@@ -273,7 +275,7 @@ export default function Settings() {
       <div className="page narrow">
         <div className="page-head"><h1>Settings</h1></div>
         <div className="section-head"><h2 className="section-title">Your account</h2></div>
-        <div className="lib-list"><AccountSettings /></div>
+        <div className="lib-list"><AccountSettings /><HomeSettings /></div>
         <p className="muted">Libraries and server settings are managed by an admin.</p>
       </div>
     );
@@ -379,8 +381,14 @@ function AdminSettings() {
       <div className="section-head"><h2 className="section-title">Playback</h2></div>
       <div className="lib-list"><TranscodeSettings status={status} onChange={changed} /><WatchSettings /></div>
 
+      <div className="section-head"><h2 className="section-title">Home page</h2></div>
+      <div className="lib-list"><HomeSettings /></div>
+
       <div className="section-head"><h2 className="section-title">Accounts</h2></div>
       <div className="lib-list"><AccountSettings /><UsersSettings /></div>
+
+      <div className="section-head" id="security"><h2 className="section-title">Security</h2></div>
+      <SecuritySettings />
     </div>
   );
 }

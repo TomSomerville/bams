@@ -7,7 +7,7 @@ import PasswordInput from "./PasswordInput";
 
 /** Your own account: who you are, a new password, signing out. */
 export function AccountSettings() {
-  const { user, signOut, refresh, prefs, setPrefs } = useAuth();
+  const { user, signOut, refresh } = useAuth();
   const { hash } = useLocation();
   const card = useRef<HTMLElement>(null);
   const [current, setCurrent] = useState("");
@@ -58,11 +58,6 @@ export function AccountSettings() {
         <button type="button" className="btn small ghost" onClick={signOut}>Sign out</button>
       </form>
       {msg && <p className={`key-msg ${msg.ok ? "ok" : "bad"}`}>{msg.text}</p>}
-      <label className="check pref-row">
-        <input type="checkbox" checked={prefs.home_hero}
-          onChange={(e) => setPrefs({ home_hero: e.target.checked }).catch((err) => setMsg({ ok: false, text: err.message }))} />
-        Show the rotating "Recently added" banner at the top of Home
-      </label>
     </section>
   );
 }

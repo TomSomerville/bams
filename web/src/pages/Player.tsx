@@ -16,7 +16,9 @@ import { useApi } from "../useApi";
 //                quality (several sizes, hls.js picks), or picture subtitles burned in. Over HLS, else the
 //                live fMP4 stream /transcode?t= (starts exactly at t).
 // The server can't know what this browser decodes, so HEVC/AV1/VP9 arrive as "file"/"remux". The player
-// converts when the browser says it can't decode them, or when it fails to.
+// converts when the browser says it can't decode them, or when it fails to. Likewise Dolby audio: on a device
+// that decodes AC3/EAC3 itself (TV browsers, Safari, Edge, Chromecast...) the remux copies it as it is
+// ("pass-through", so an AV receiver gets the original), unless the viewer turns that off or it fails to play.
 type Mode = "file" | "remux" | "transcode";
 /** null = the default: the original when it plays as-is, else automatic */
 type Quality = "auto" | number | null;
@@ -25,7 +27,8 @@ const QUALITIES = [2160, 1440, 1080, 720, 480, 360];
 const FULL = 99999;  // "Full size": converted (the browser can't play the original) at the largest size
 const SPEED_MIN = 0.1, SPEED_MAX = 3;
 const clampSpeed = (r: number) => Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, r)) * 100) / 100;
-const KEYS = { quality: "bams.quality", audioLang: "bams.audioLang", subLang: "bams.subLang", surround: "bams.surround" };
+const KEYS = { quality: "bams.quality", audioLang: "bams.audioLang", subLang: "bams.subLang", surround: "bams.surround",
+               passthrough: "bams.passthrough" };
 
 function pref(key: string): string | null {
   try {
@@ -58,6 +61,16 @@ function canDecode(v: Probe["video"] | undefined): boolean {
   // Dolby Vision profile 5 has no HDR10 base layer: without DV support it decodes but shows green/purple
   if (v.hdr === "Dolby Vision" && v.dv_profile === 5 && !supported(`video/mp4; codecs="dvh1.05.06"`)) return false;
   return supported(type);
+}
+
+/** Dolby audio the server can pass through (stream.PASSTHROUGH_AUDIO), as MP4 codec strings. */
+const PASS_TYPES: Record<string, string> = { AC3: 'audio/mp4; codecs="ac-3"', EAC3: 'audio/mp4; codecs="ec-3"' };
+/** Whether this device says it decodes the audio codec itself, so it needn't be converted to AAC. */
+function canPassThrough(codec: string | null | undefined): boolean {
+  const type = codec ? PASS_TYPES[codec] : undefined;
+  if (!type) return false;
+  return "MediaSource" in window ? MediaSource.isTypeSupported(type)
+    : document.createElement("video").canPlayType(type) !== "";
 }
 
 const nativeHls = () => document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== "";
@@ -120,6 +133,8 @@ function Player({ id }: { id: string }) {
   const [audio, setAudio] = useState(0);
   const [sub, setSub] = useState<string | null>(null);
   const [surround, setSurround] = useState(() => pref(KEYS.surround) === "1");
+  const [passPref, setPassPref] = useState(() => pref(KEYS.passthrough) !== "0"); // on unless turned off
+  const [passFailed, setPassFailed] = useState(false); // the device said it decodes Dolby, then didn't
   const [menu, setMenu] = useState<"quality" | "audio" | "subs" | "speed" | null>(null);
   const [rate, setRate] = useState(1);      // playback speed; each video starts at normal speed
   const [playing, setPlaying] = useState(false);
@@ -137,7 +152,7 @@ function Player({ id }: { id: string }) {
   const audioTracks = file?.audio_tracks ?? [];
   const subTracks = file?.subtitles ?? [];
   const subTrack = subTracks.find((s) => s.id === sub) ?? null;
-  const burn = subTrack?.image ? subTrack.index : null;
+  const burn = subTrack?.image ? subTrack.id : null;  // painted on by the server: embedded or a VobSub sidecar
   const decodable = useMemo(() => canDecode(file?.probe?.video), [file]);
   const srcHeight = file?.probe?.video?.height ?? 0;
   const canConvert = !!(pb?.hls_url || pb?.transcode_url);  // only with FFmpeg on the server
@@ -150,17 +165,21 @@ function Player({ id }: { id: string }) {
     : canConvert && (pb.mode === "remux" || audio > 0) ? "remux"
     : pb.mode === "transcode" ? "file" : pb.mode;
   const channels = surround ? 6 : 2;
+  const trackCodec = audioTracks[audio]?.codec ?? pb?.audio_codec;
+  const passOk = useMemo(() => canPassThrough(trackCodec), [trackCodec]);
+  const passthrough = mode === "remux" && passOk && passPref && !passFailed;
   const hlsOk = !!pb?.hls_url && !!file?.probe?.duration && (mseHls() || nativeHls());
   const useHls = hlsOk && (mode === "transcode" || (mode === "remux" && !copyFailed));
   const live = !useHls && (mode === "remux" || mode === "transcode"); // a stream FFmpeg makes from ?t=
   const total = live ? (pb?.duration ?? file?.probe?.duration ?? 0) : (fileDur || file?.probe?.duration || 0);
   const pos = live ? offset + t : t;
-  const hlsKey = `${mode}|${auto}|${height}|${audio}|${channels}|${burn}`;
+  const hlsKey = `${mode}|${auto}|${height}|${audio}|${channels}|${burn}|${passthrough}`;
   const liveParams = new URLSearchParams({ t: String(reqT) });
   if (audio) liveParams.set("audio", String(audio));
   if (channels > 2) liveParams.set("ch", String(channels));
+  if (passthrough) liveParams.set("passthrough", "true");
   if (mode === "transcode" && height) liveParams.set("h", String(height));
-  if (mode === "transcode" && burn !== null) liveParams.set("sub", String(burn));
+  if (mode === "transcode" && burn !== null) liveParams.set("sub", burn);
   const liveUrl = mode === "transcode" ? pb?.transcode_url : file && `/api/files/${file.id}/remux`;
   const src = !ready || useHls || !pb ? undefined : live ? `${liveUrl}?${liveParams}` : pb.url;
   const watchable = item?.kind === "movie" || item?.kind === "episode";
@@ -205,11 +224,16 @@ function Player({ id }: { id: string }) {
     const remux = mode === "remux";
     const withMse = mseHls();
     const body = { remux, auto: !remux && auto, height: remux ? null : height, audio, channels,
-                   burn: remux ? null : burn, start: startAt.current };
+                   burn: remux ? null : burn, passthrough, start: startAt.current };
     const toLive = () => {  // copying didn't work out: the live remux, from here
       if (gone) return;
       continueAt(posRef.current);
       setCopyFailed(true);
+    };
+    const toAac = () => {  // the device didn't play the Dolby audio after all: converted, from here
+      if (gone) return;
+      continueAt(posRef.current);
+      setPassFailed(true);
     };
     Promise.all([api.post<{ id: string; playlist: string }>(file.playback.hls_url, body),
                  withMse ? import("hls.js").then((m) => m.default) : null])
@@ -226,6 +250,7 @@ function Player({ id }: { id: string }) {
           });
           hls.on(HlsJs.Events.ERROR, (_e, d) => {
             if (!d.fatal) return;
+            if (remux && passthrough && d.type === HlsJs.ErrorTypes.MEDIA_ERROR) return toAac();
             if (remux && d.response?.code !== 503) return toLive();
             const code = d.response?.code;
             setProblem(code === 503
@@ -363,6 +388,14 @@ function Player({ id }: { id: string }) {
     if (mode !== "file") continueAt(pos);
     setSurround(on);
   };
+  const pickPass = (on: boolean) => {
+    setMenu(null);
+    setPref(KEYS.passthrough, on ? null : "0");
+    if (on === passthrough) return;
+    if (mode === "remux") continueAt(pos);
+    setPassFailed(false);
+    setPassPref(on);
+  };
   const pickSub = (sid: string | null) => {
     setMenu(null);
     const next = subTracks.find((s) => s.id === sid) ?? null;
@@ -409,7 +442,10 @@ function Player({ id }: { id: string }) {
   const fmt = (sec: number) => fmtClock(sec) || "0:00";
   const vcodec = pb?.video_codec ?? "Video";
   const acodec = audioTracks[audio]?.codec ?? pb?.audio_codec;
-  const note = mode === "remux"
+  const note = passthrough
+    ? { text: `${acodec} pass-through`,
+        why: `This device decodes ${acodec} itself (and can hand it on to an AV receiver), so the server sends the original audio; the video is passed through untouched too` }
+    : mode === "remux"
     ? { text: `${acodec} → AAC${channels > 2 && (audioTracks[audio]?.channels ?? 0) >= 6 ? " 5.1" : ""}`,
         why: `${acodec} audio converted to AAC by the server; the video is passed through untouched` }
     : mode !== "transcode" ? null
@@ -453,7 +489,7 @@ function Player({ id }: { id: string }) {
               startAt.current = 0;
             }
           }}
-          onError={() => !useHls && toTranscode(mode === "transcode"
+          onError={() => passthrough ? (continueAt(pos), setPassFailed(true)) : !useHls && toTranscode(mode === "transcode"
             ? "The server couldn't convert this file (its log has the FFmpeg error). You can download it instead."
             : `This browser can't play this file (${pb?.video_codec ?? "unknown codec"}), and the server can't convert it (no FFmpeg). You can download it.`)}
         >
@@ -541,14 +577,20 @@ function Player({ id }: { id: string }) {
               ))}
             </Menu>
           )}
-          {(audioTracks.length > 1 || (surroundSource && canConvert)) && (
+          {(audioTracks.length > 1 || (surroundSource && canConvert) || (passOk && mode === "remux")) && (
             <Menu label={<Icon name="volume" size={20} />} title="Sound" open={menu === "audio"}
               setOpen={(o) => setMenu(o ? "audio" : null)}>
               {audioTracks.length > 1 && audioTracks.map((a) => (
                 <Choice key={a.index} on={a.index === audio} onClick={() => pickAudio(a.index)}
                   note={a.index > 0 && !canConvert ? "needs FFmpeg" : undefined}>{a.label}</Choice>
               ))}
-              {surroundSource && canConvert && <>
+              {passOk && mode === "remux" && <>
+                <div className="menu-title">{trackCodec} audio</div>
+                <Choice on={passthrough} onClick={() => pickPass(true)}
+                  note={passFailed ? "didn't play here" : "this device decodes it"}>Original (pass-through)</Choice>
+                <Choice on={!passthrough} onClick={() => pickPass(false)}>Convert to AAC</Choice>
+              </>}
+              {surroundSource && canConvert && !passthrough && <>
                 <div className="menu-title">When converting</div>
                 <Choice on={!surround} onClick={() => pickSurround(false)}>Stereo</Choice>
                 <Choice on={surround} onClick={() => pickSurround(true)} note="keeps 5.1">Surround</Choice>

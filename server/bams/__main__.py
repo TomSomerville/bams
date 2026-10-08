@@ -6,7 +6,8 @@
     bams scan NAME [--no-match] [--rematch]
     bams tmdb-key                    paste your own TMDB key (hidden prompt); --clear to remove
     bams user add NAME [--admin]     create an account (password prompt)
-    bams user list | passwd NAME | remove NAME
+    bams user list | passwd NAME | remove NAME | unlock NAME
+    bams security allow-all          let every address in again (if the IP lists shut you out)
     bams status
 """
 
@@ -93,6 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("name")
     ur = us.add_parser("remove")
     ur.add_argument("name")
+    ul = us.add_parser("unlock", help="unlock an account locked after wrong passwords (or by an admin)")
+    ul.add_argument("name")
+
+    se = sub.add_parser("security", help="security settings").add_subparsers(dest="scmd", required=True)
+    se.add_parser("allow-all", help="switch the IP lists to 'allow everyone except the block list'")
 
     sub.add_parser("status")
     a = p.parse_args(argv)
@@ -170,12 +176,18 @@ def main(argv: list[str] | None = None) -> int:
                 elif a.ucmd == "list":
                     for u in con.execute("SELECT * FROM users ORDER BY name COLLATE NOCASE"):
                         print(f"{u['name']}{'  (admin)' if u['is_admin'] else ''}")
-                elif a.ucmd in ("passwd", "remove"):
+                elif a.ucmd in ("passwd", "remove", "unlock"):
                     u = auth.get_user(con, a.name)
                     if not u:
                         print(f"error: no account called {a.name!r}", file=sys.stderr)
                         return 2
-                    if a.ucmd == "passwd":
+                    if a.ucmd == "unlock":
+                        from . import security
+                        sec = security.Security(paths.security_db, paths.db)
+                        sec.unlock(u["id"])
+                        sec.log("unlock", "admin", name=u["name"], user_id=u["id"], reason="by the command line")
+                        print(f"unlocked {u['name']!r}")
+                    elif a.ucmd == "passwd":
                         auth.update_user(con, u["id"], password=_new_password())
                         print(f"password changed for {u['name']!r}")
                     else:
@@ -184,6 +196,10 @@ def main(argv: list[str] | None = None) -> int:
             except auth.AuthError as e:
                 print(f"error: {e}", file=sys.stderr)
                 return 2
+        elif a.cmd == "security":
+            set_setting(con, "ip_mode", "allow_all")
+            print("IP lists: every address may connect except those on the block list (a running server picks "
+                  "this up within 10 seconds)")
         elif a.cmd == "status":
             libs = [library.describe(con, r) for r in library.listed(con)]
             from . import probe, readonly

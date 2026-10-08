@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 195 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 227 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -99,6 +99,16 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Music scans link files after probing** (tags come from ffprobe). Matched albums keep MusicBrainz's year in
   `music.rollup`, and matched tracks keep MusicBrainz titles when the file has no title tag: don't undo either.
   Music parser changes bump `music.PARSER_VERSION` (separate from `parse.PARSER_VERSION`).
+- **CUE tracks are stretches of one file** (`file_items.cue_start/cue_end`): don't assume one track = one file or
+  one file = one track (merged albums give a track several files; `app._queue` picks one). Queries joining tracks to
+  files must expect both. The player plays `start`..`end`; never cut a copy of the file.
+- **Music art: `items.poster_src` says where a poster came from.** Any code that sets a music poster must set it
+  too, or a later `cover.jpg` can't replace it (or a refresh re-downloads over the owner's art). `match_album` used
+  to overwrite `extra` wholesale; it now writes `matched_by` into it, which merges rely on.
+- **Album merges are remembered by name** (`music.album_alias`, artist + album name in `item_keys`), not ids: the
+  merged-away artist is deleted and a rescan would re-create it with a new id. `_album` checks the alias first.
+- **The music player has two `<audio>` elements** (gapless). Only the active one's events count; the other only
+  preloads. Calling `load()` after setting `src` resets a CUE track's start position: don't.
 - **Generated test clips:** lavfi `testsrc` + libx264 defaults to 4:4:4 ("High 4:4:4"), which `stream.plan()`
   rightly sends to the transcoder. Add `-pix_fmt yuv420p` when a test needs browser-playable H.264.
 - **HEVC/AV1/VP9 stay pass-through on the server.** Only the browser knows whether it decodes them;
@@ -149,4 +159,18 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   directly, or a rescan would undo what an admin entered (`files.manual`).
 - **The owner's :8484 is the installed Windows service** (`C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`), not
   this checkout: restarting it doesn't load repo changes; a new installer does, and running it needs the owner.
+- **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `recent`, `lib:<id>`, `top_rated`, `genres`).
+  Renaming an id silently resets that row for everyone who reordered; add new rows in `homeRows.ts` `defaultRows`.
+- **Security state lives in `security.db`, not `bams.db`** (no migration; `CREATE TABLE IF NOT EXISTS`). Login tests
+  that fail a password and retry within a second get 429 (the per-account wait): advance the `clock` fixture
+  (`test_security.py`, patches `security.now`) or use a different name. `security.Gate` is added last in `create_app`
+  so it stays the outermost middleware: keep it so, or blocked/401 requests vanish from the traffic log. A test with
+  the IP lists in `allowlist` mode must give TestClient a real `client=(ip, port)` ("testclient" isn't an address).
+- **AC3/EAC3 copied into streamed MP4** (Dolby pass-through) needs `+delay_moov` in `-movflags` or FFmpeg refuses
+  ("Cannot write moov atom before AC3 packets"). The HLS fMP4 muxer copes by itself.
+- **Live burn-in keeps the file's clock** (`-copyts -start_at_zero`, `-output_ts_offset -t`), like HLS. `-itsoffset`
+  on the subtitle input lost a line already on screen. VobSub `.idx` inputs have no start time: no offset needed.
+- **All-GPU paths other than NVIDIA are untested on hardware** (QSV, VAAPI, AMF: the owner's PC has only NVIDIA;
+  `scale_d3d11` can't create textures on the NVIDIA driver, VAAPI didn't work through WSL/Docker). Keep the hybrid
+  fallback and `stream.gpu_failed` memory; tests that touch `gpu_filters` reset `stream._gpu_broken`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

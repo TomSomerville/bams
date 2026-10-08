@@ -128,8 +128,9 @@ class Session:
     dir: Path
     variants: list[Variant]
     channels: int = 2
-    burn: int | None = None      # image subtitle stream painted onto the picture
+    burn: int | tuple | None = None  # image subtitle painted on: n-th subtitle stream, or (sidecar .idx, n)
     video_codec: str | None = None
+    copy_audio: bool = False     # copy variant: Dolby audio passed through as-is (the player's device decodes it)
     closed: bool = False
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -157,12 +158,7 @@ def copy_bounds(keyframes: list[float]) -> list[float]:
 
 def output_size(video: dict | None, encoder: str | None, height: int | None) -> tuple[int, int] | None:
     """The frame size a conversion makes (what `transcode_filters` scales to), for the master playlist."""
-    w, h = (video or {}).get("width"), (video or {}).get("height")
-    if not w or not h or not encoder:
-        return None
-    bw, bh = stream._box(encoder, height)  # noqa: SLF001
-    k = min(1.0, bw / w, bh / h)
-    return int(w * k) // 2 * 2, int(h * k) // 2 * 2
+    return stream.output_size(video, encoder, height) if encoder else None
 
 
 def ladder(video: dict | None, encoder: str | None) -> list[int | None]:
@@ -204,7 +200,7 @@ class Keyframes:
 
 def _default_cmd(s: Session, v: Variant, k: int) -> list[str]:
     if v.copy:
-        return stream.hls_copy_cmd(s.path, k, v.seek, s.video_codec, v.dir, s.audio, s.channels)
+        return stream.hls_copy_cmd(s.path, k, v.seek, s.video_codec, v.dir, s.audio, s.channels, s.copy_audio)
     return stream.hls_cmd(s.path, k, s.video, v.dir, s.audio, max_height=v.height, channels=s.channels,
                           burn=s.burn, gpu=v.gpu)
 
@@ -265,9 +261,9 @@ class Transcodes:
 
     # -- sessions
     def create(self, file_id: int, path: Path, video: dict | None, duration: float, audio: int = 0,
-               heights: list[int | None] | None = None, *, channels: int = 2, burn: int | None = None,
+               heights: list[int | None] | None = None, *, channels: int = 2, burn: int | tuple | None = None,
                keyframes: list[float] | None = None, video_codec: str | None = None, start: float = 0.0,
-               encoder: str | None = None, bitrate: int | None = None) -> Session:
+               encoder: str | None = None, bitrate: int | None = None, copy_audio: bool = False) -> Session:
         """A conversion (`heights`: one or more sizes; None = full size) or, with `keyframes`, a copy of the
         video with converted audio. `start`: where the player begins, so the first FFmpeg run starts there."""
         copy = keyframes is not None
@@ -294,7 +290,7 @@ class Transcodes:
             v.wanted = v.at(start)
             v.job_start = v.wanted
         s = Session(sid, file_id, path, video, audio, duration, d, variants, channels=channels, burn=burn,
-                    video_codec=video_codec)
+                    video_codec=video_codec, copy_audio=copy and copy_audio)
         with self._lock:
             self._sessions[sid] = s
         log.info("HLS %s: file %s, %.0f s, %s", sid, file_id, duration,
@@ -380,6 +376,9 @@ class Transcodes:
             if v.gpu and not v.copy:
                 log.warning("HLS %s: FFmpeg failed (exit code %s); retrying without GPU filters", s.id, p.returncode)
                 v.gpu = False
+                enc = stream.video_encoder()
+                if enc and stream.gpu_filters(s.video, enc, stream.tonemap_mode(s.video), s.burn):
+                    stream.gpu_failed(enc, s.video)  # (it was an all-GPU run): not again for this kind of video
             else:
                 raise RuntimeError(f"FFmpeg stopped with exit code {p.returncode} (see the server log)")
         self._restart(s, v, k)  # first start, stopped for being far ahead, or retrying on the CPU path

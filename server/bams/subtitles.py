@@ -6,6 +6,8 @@
   burn them into the converted video instead (`stream._transcode_parts(burn=...)`).
 - Sidecars: `Movie.srt`, `Movie.en.srt`, `Movie.eng.forced.srt`, `Movie.English.sdh.srt`... in the video's
   folder. They're only read (listed, then opened read-only), like everything in a media folder.
+- DVD subtitles ripped to a sidecar pair, `Movie.idx` + `Movie.sub` (VobSub), are pictures too: burned in, read
+  by FFmpeg as a second input. One .idx often holds several languages; each is a track ("x{n}-{k}").
 """
 
 from __future__ import annotations
@@ -60,18 +62,36 @@ def _label(lang_name: str | None, title: str | None, forced: bool, sdh: bool, fa
 
 
 def sidecars(video: Path) -> list[Path]:
-    """Subtitle files that belong to `video`, sorted by name. Only the video's own folder is listed."""
+    """Subtitle files that belong to `video`, sorted by name. Only the video's own folder is listed. A VobSub
+    pair is listed by its .idx, and only when the .sub with the pictures is there too."""
     stem = video.stem.casefold()
     try:
         names = sorted(e.name for e in os.scandir(video.parent) if e.is_file())
     except OSError:
         return []
+    lower = {n.casefold() for n in names}
     out = []
     for n in names:
         base, ext = os.path.splitext(n)
-        if ext.casefold() in SIDECAR_EXTS and (base.casefold() == stem or base.casefold().startswith(stem + ".")):
+        if not (base.casefold() == stem or base.casefold().startswith(stem + ".")):
+            continue
+        if ext.casefold() in SIDECAR_EXTS or (ext.casefold() == ".idx" and f"{base}.sub".casefold() in lower):
             out.append(video.parent / n)
     return out
+
+
+_IDX_ID = re.compile(r"^\s*id\s*:\s*([A-Za-z-]*)\s*,\s*index\s*:\s*(\d+)", re.M)
+
+
+def vobsub_streams(idx: Path) -> list[str | None]:
+    """The language code of each subtitle stream in a VobSub .idx, in order (FFmpeg makes one stream per `id:`
+    line). Empty if it can't be read."""
+    try:
+        with readonly.open_ro(idx) as f:
+            text = f.read(2_000_000).decode("latin-1")
+    except OSError:
+        return []
+    return [m[1] or None for m in _IDX_ID.finditer(text)]
 
 
 def tracks(probe: dict | None, video: Path | None, file_id: int) -> list[dict]:
@@ -95,11 +115,28 @@ def tracks(probe: dict | None, video: Path | None, file_id: int) -> list[dict]:
                 flags.add(_FLAGS[t.casefold()])
             elif code is None:
                 code, name = language(t)
+        if p.suffix.casefold() == ".idx":  # DVD pictures: one track per language stream in the index
+            langs = vobsub_streams(p)
+            for k, lang in enumerate(langs):
+                c, nm = language(lang) if lang else (code, name)
+                fallback = p.name if len(langs) == 1 else f"{p.name} #{k + 1}"
+                out.append({"id": f"x{n}-{k}", "index": n, "stream": k, "source": "file", "language": c,
+                            "codec": "vobsub", "label": _label(nm, None, "forced" in flags, "sdh" in flags, fallback),
+                            "forced": "forced" in flags, "sdh": "sdh" in flags, "image": True, "file": p.name,
+                            "url": None})
+            continue
         out.append({"id": f"x{n}", "index": n, "source": "file", "language": code, "codec": p.suffix[1:].lower(),
                     "label": _label(name, None, "forced" in flags, "sdh" in flags, p.name),
                     "forced": "forced" in flags, "sdh": "sdh" in flags, "image": False, "file": p.name,
                     "url": f"/api/files/{file_id}/subtitles/x{n}.vtt"})
     return out
+
+
+def burn_source(track: dict, video: Path) -> int | tuple[Path, int]:
+    """What `stream` paints on for a picture track: the n-th subtitle stream of the video, or (sidecar .idx, n)."""
+    if track["source"] == "embedded":
+        return track["index"]
+    return video.parent / track["file"], track["stream"]
 
 
 # ------------------------------------------------------------------ conversion
