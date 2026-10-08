@@ -13,7 +13,7 @@ from collections import deque
 
 from . import library, matcher, music, music_match, scanner
 from .config import Paths
-from .db import connect, get_setting, jdump, now
+from .db import connect, get_setting, jdump, now, set_setting
 from .musicbrainz import MusicBrainz
 from .tmdb import InvalidKey, Tmdb, TmdbError
 
@@ -39,6 +39,16 @@ def music_lookup_enabled(con) -> bool:
 def language(con) -> str:
     """'en-US' -> 'en' (Wikipedia language)."""
     return (get_setting(con, "language", "en-US") or "en").split("-")[0].lower()
+
+
+def should_rematch(con, lib_id: int, *, requested: bool, reparsed: int) -> bool:
+    """Retry a library's 'unmatched' titles when asked, when files were re-parsed (a parser upgrade may have fixed
+    their names), or when the matching rules changed since this library was last matched (`MATCHER_VERSION`)."""
+    return requested or reparsed > 0 or get_setting(con, f"matcher_version:{lib_id}") != str(matcher.MATCHER_VERSION)
+
+
+def note_matched(con, lib_id: int) -> None:
+    set_setting(con, f"matcher_version:{lib_id}", str(matcher.MATCHER_VERSION))
 
 
 def run_scan(paths: Paths, lib_id: int, trigger: str = "manual", *, do_match: bool = True,
@@ -74,8 +84,10 @@ def run_scan(paths: Paths, lib_id: int, trigger: str = "manual", *, do_match: bo
                 result["match"] = "skipped: no TMDB key configured"
             else:
                 try:
+                    retry = should_rematch(con, lib_id, requested=retry_unmatched, reparsed=scanned.reparsed)
                     result["match"] = matcher.match_library(con, tmdb, paths.images, lib_id,
-                                                            retry_unmatched=retry_unmatched, progress=progress).as_dict()
+                                                            retry_unmatched=retry, progress=progress).as_dict()
+                    note_matched(con, lib_id)
                 except InvalidKey:
                     result["match"] = "skipped: TMDB rejected the configured key"
                 except TmdbError as e:

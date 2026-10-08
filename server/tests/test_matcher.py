@@ -109,3 +109,25 @@ def test_franchise_prefix_matches_tmdb_top_hit():
     assert s < matcher.ACCEPT
     best, s = matcher.choose([{"id": 5, "name": "Dor"}], "Star Wars Andor", None, "show")
     assert s < matcher.ACCEPT
+
+
+def test_unmatched_titles_are_retried_after_a_reparse_or_new_matcher_rules(env):
+    """Tester's library: after the parser upgrade (0.5.0) South Park etc. stayed 'unmatched' because only
+    'pending' titles were tried. A scan that re-parsed files, or the first after a matcher change, retries them."""
+    from bams import jobs
+    paths, media, con = env
+    make_tree(media, ["The Simpsons/Season 1/The Simpsons - S01E01.mkv"])
+    lib_id = library.create(con, paths.root, "TV", "show", [str(media)])
+    assert jobs.should_rematch(con, lib_id, requested=False, reparsed=0)        # never matched with these rules
+    jobs.note_matched(con, lib_id)
+    assert not jobs.should_rematch(con, lib_id, requested=False, reparsed=0)
+    assert jobs.should_rematch(con, lib_id, requested=False, reparsed=3)        # parser upgrade re-read names
+    assert jobs.should_rematch(con, lib_id, requested=True, reparsed=0)
+    con.execute("UPDATE settings SET value='1' WHERE key=?", (f"matcher_version:{lib_id}",))
+    assert jobs.should_rematch(con, lib_id, requested=False, reparsed=0)        # rules changed since
+    # and match_library really does retry them when asked
+    scan_library(con, lib_id, do_probe=False)
+    con.execute("UPDATE items SET match_status='unmatched', match_score=0.5 WHERE kind='show'")
+    t = Tmdb(TOKEN, transport=fake_tmdb([]))
+    assert matcher.match_library(con, t, paths.images, lib_id).matched == 0
+    assert matcher.match_library(con, t, paths.images, lib_id, retry_unmatched=True).matched == 1
