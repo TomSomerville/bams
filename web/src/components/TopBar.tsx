@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { api, type ServerStatus } from "../api";
 import Icon from "./Icon";
 
 export default function TopBar() {
@@ -7,11 +8,21 @@ export default function TopBar() {
   const [params] = useSearchParams();
   const [q, setQ] = useState(params.get("q") ?? "");
   const [scrolled, setScrolled] = useState(false);
+  const [scan, setScan] = useState<ServerStatus["scans"]["running"]>(null);
 
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 8);
     window.addEventListener("scroll", on, { passive: true });
     return () => window.removeEventListener("scroll", on);
+  }, []);
+
+  // Show a small "Scanning…" pill while the server is scanning a library.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.get<ServerStatus>("/api/status").then((s) => alive && setScan(s.scans.running)).catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   return (
@@ -30,15 +41,16 @@ export default function TopBar() {
             setQ(e.target.value);
             if (e.target.value.trim()) nav(`/search?q=${encodeURIComponent(e.target.value.trim())}`, { replace: true });
           }}
-          placeholder="Search movies & shows"
+          placeholder="Search shows, movies & music"
           aria-label="Search"
         />
       </form>
       <div className="topbar-right">
-        <span className="server-pill" title="Prototype: no server connected yet">
-          <span className="dot" /> Prototype
-        </span>
-        <div className="avatar" title="Signed in as you">B</div>
+        {scan && (
+          <Link to="/settings" className="server-pill" title={scan.step}>
+            <span className="dot" /> Scanning…
+          </Link>
+        )}
       </div>
     </header>
   );

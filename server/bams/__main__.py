@@ -1,0 +1,147 @@
+"""BAMS command line.
+
+    bams serve                       run the server (API + scheduled scans)
+    bams library add NAME --type show --path D:\\TV [--path ...] [--interval 6]
+    bams library list | remove NAME
+    bams scan NAME [--no-match] [--rematch]
+    bams tmdb-key                    paste your own TMDB key (hidden prompt); --clear to remove
+    bams status
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import logging
+import logging.handlers
+import sys
+from pathlib import Path
+
+from .config import APP_NAME, DEFAULT_HOST, DEFAULT_PORT, VERSION, Paths, default_data_dir
+
+
+def _setup_logging(paths: Paths, verbose: bool) -> None:
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG if verbose else logging.INFO)
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+    paths.logs.mkdir(parents=True, exist_ok=True)
+    fileh = logging.handlers.RotatingFileHandler(paths.logs / "bams.log", maxBytes=5_000_000, backupCount=3,
+                                                 encoding="utf-8")
+    fileh.setFormatter(fmt)
+    root.addHandler(fileh)
+    for noisy in ("httpx", "httpcore", "rebulk"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+def _web_dir() -> Path | None:
+    here = Path(__file__).resolve().parents[2] / "web" / "dist"  # repo checkout
+    return here if here.is_dir() else None
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="bams", description=f"{APP_NAME} {VERSION} - Bad Ass Media Server")
+    p.add_argument("--data-dir", type=Path, help=f"default: {default_data_dir()} (or env BAMS_DATA_DIR)")
+    p.add_argument("-v", "--verbose", action="store_true")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("serve", help="run the server")
+    s.add_argument("--host", default=DEFAULT_HOST,
+                   help="bind address (default 127.0.0.1). There's no login yet: only use 0.0.0.0 on a trusted LAN")
+    s.add_argument("--port", type=int, default=DEFAULT_PORT)
+
+    lib = sub.add_parser("library", help="manage libraries").add_subparsers(dest="lcmd", required=True)
+    la = lib.add_parser("add")
+    la.add_argument("name")
+    la.add_argument("--type", required=True, choices=["show", "movie", "music"])
+    la.add_argument("--path", action="append", required=True, help="media folder (repeatable). Read-only to BAMS")
+    la.add_argument("--interval", type=float, default=6, help="hours between automatic scans (default 6)")
+    lib.add_parser("list")
+    lr = lib.add_parser("remove", help="forget a library (media files are never touched)")
+    lr.add_argument("name")
+
+    sc = sub.add_parser("scan", help="scan a library now (in this process)")
+    sc.add_argument("name")
+    sc.add_argument("--no-match", action="store_true", help="index files only, skip TMDB")
+    sc.add_argument("--rematch", action="store_true", help="also retry titles that failed to match before")
+
+    k = sub.add_parser("tmdb-key", help="set your own TMDB API key / Read Access Token")
+    k.add_argument("--clear", action="store_true")
+
+    sub.add_parser("status")
+    a = p.parse_args(argv)
+
+    paths = Paths(a.data_dir or default_data_dir())
+    _setup_logging(paths, a.verbose)
+
+    from . import jobs, library
+    from .app import bootstrap, create_app
+    from .db import connect, get_setting, set_setting
+    from .tmdb import InvalidKey, Tmdb, TmdbError
+
+    bootstrap(paths)
+    log = logging.getLogger("bams")
+
+    if a.cmd == "serve":
+        import uvicorn
+        if a.host not in ("127.0.0.1", "localhost", "::1"):
+            log.warning("listening on %s: BAMS has no login yet, anyone who can reach this port can browse "
+                        "and stream your libraries", a.host)
+        log.info("BAMS %s  data dir: %s  http://%s:%s  (API docs at /docs)", VERSION, paths.root, a.host, a.port)
+        uvicorn.run(create_app(paths, web_dir=_web_dir()), host=a.host, port=a.port, log_level="info")
+        return 0
+
+    con = connect(paths.db)
+    try:
+        if a.cmd == "library":
+            if a.lcmd == "add":
+                lib_id = library.create(con, paths.root, a.name, a.type, a.path, a.interval)
+                print(json.dumps(library.describe(con, library.get(con, lib_id)), indent=2))
+            elif a.lcmd == "list":
+                for r in con.execute("SELECT * FROM libraries ORDER BY name"):
+                    print(json.dumps(library.describe(con, r), indent=2))
+            elif a.lcmd == "remove":
+                library.delete(con, library.get(con, a.name)["id"])
+                print(f"removed library {a.name!r} (media files untouched)")
+        elif a.cmd == "scan":
+            lib_id = library.get(con, a.name)["id"]
+            res = jobs.run_scan(paths, lib_id, "manual", do_match=not a.no_match, retry_unmatched=a.rematch,
+                                progress=lambda m: log.info(m))
+            print(json.dumps(res, indent=2))
+            return 0 if res["status"] != "error" else 1
+        elif a.cmd == "tmdb-key":
+            if a.clear:
+                set_setting(con, "tmdb_key", None)
+                print("TMDB key removed")
+                return 0
+            key = getpass.getpass("Paste your TMDB API Read Access Token or API Key (input hidden): ").strip()
+            try:
+                t = Tmdb(key)
+                t.check()
+                t.close()
+            except InvalidKey as e:
+                print(f"Not saved: {e}", file=sys.stderr)
+                return 1
+            except TmdbError as e:
+                print(f"Couldn't verify with TMDB ({e}); saving anyway.", file=sys.stderr)
+            set_setting(con, "tmdb_key", key)
+            print(f"TMDB key saved (…{key[-4:]})")
+        elif a.cmd == "status":
+            libs = [library.describe(con, r) for r in con.execute("SELECT * FROM libraries ORDER BY name")]
+            from . import probe, readonly
+            print(json.dumps({"version": VERSION, "data_dir": str(paths.root), "ffprobe": probe.ffprobe_path(),
+                              "tmdb_configured": bool(get_setting(con, "tmdb_key")),
+                              "protected_roots": list(readonly.protected_roots()), "libraries": libs}, indent=2))
+    except library.LibraryError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    finally:
+        con.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

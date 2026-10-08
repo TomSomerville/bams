@@ -4,11 +4,17 @@ import { BrowserRouter } from "react-router-dom";
 import "@fontsource-variable/montserrat";
 import "./styles.css";
 import App from "./App";
+import { MusicProvider } from "./music";
+import { SettingsProvider } from "./settings";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <SettingsProvider>
+        <MusicProvider>
+          <App />
+        </MusicProvider>
+      </SettingsProvider>
     </BrowserRouter>
   </StrictMode>,
 );

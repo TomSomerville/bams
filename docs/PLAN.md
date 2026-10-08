@@ -39,7 +39,7 @@ metadata item (Movie | Show > Season > Episode)   ← what it IS (title, plot, p
 
 | # | Requirement | Phase | Notes |
 |---|---|---|---|
-| R1 | Movies, TV Shows, **Music** libraries from local or mounted folders | Video: 1, Music: 3 | Mounted network shares (SMB/NFS) are fine. Watchers are unreliable on them, so the scheduled scan is the safety net. |
+| R1 | Movies, TV Shows, **Music** libraries from local or mounted folders | Video: 1, Music: built (brought forward from 3) | Mounted network shares (SMB/NFS) are fine. Watchers are unreliable on them, so the scheduled scan is the safety net. |
 | R2 | Identify content correctly, with posters, backdrops and descriptions, "using IMDb and other databases like Plex" | 1 | TMDB for data and images. IMDb ID stored and shown. See §5 for why we can't pull data from IMDb directly. |
 | R3 | Understand `Show Name - Season 00 - S00E01 - Episode name` style names | 1 | Season 00 = Specials (same as Plex). Unit-test the parser against a corpus of real names. |
 | R4 | Auto refresh every X hours, plus on demand | 1 | Configurable per library; "Scan now" button and `POST /api/libraries/{id}/scan` |
@@ -116,8 +116,9 @@ TV Shows/
   Breaking Bad (2008)/Season 00/Breaking Bad - S00E01 - Special.mkv     ← specials
   Some Show/Some Show - Season 00 - S00E01-Episode name.mkv            ← your friend's style (flat folder)
   Some Show/Season 2/Some.Show.S02E03E04.720p.mkv                       ← multi-episode file
-Music/   (phase 3)
+Music/   (built: tags first, this layout as fallback)
   Artist/Album (Year)/01 - Track.mp3
+  Artist/Album (Year)/CD2/01 - Track.flac                               ← disc folders
 ```
 
 Unmatched or wrong matches are expected. Plex has the same problem. That's why the "Fix match" UI is in phase 1.
@@ -130,13 +131,13 @@ Terms checked 2026-10-07. This is not legal advice.
 
 | Source | Use in BAMS | Terms that matter |
 |---|---|---|
-| **TMDB** | **Primary**: titles, plots, posters, backdrops, cast, seasons/episodes, IMDb IDs | Free for non-commercial use. Show the TMDB logo (smaller than ours) on the About page plus the line *"This product uses the TMDB API but is not endorsed or certified by TMDB."* **Don't cache data or images longer than 6 months**, so BAMS refreshes anything older than ~5 months. ~40 req/s; back off on HTTP 429. **No AI/LLM use of TMDB data** without a commercial deal. Key handling: see "API keys" below. |
+| **TMDB** | **Primary**: titles, plots, posters, backdrops, cast, seasons/episodes, IMDb IDs | Free for non-commercial use. Show the TMDB logo (smaller than ours) on the About page plus the line *"This product uses the TMDB API but is not endorsed or certified by TMDB."* **Don't cache data or images longer than 6 months**, so BAMS refreshes anything older than ~5 months. ~40 req/s; back off on HTTP 429. **No AI/LLM use of TMDB data** without a commercial deal. Each install uses its owner's own key (see "API keys" below). |
 | **IMDb** | IMDb ID shown and linked on every item. Optional: ratings from the datasets | **No free API**: the official API is paid, via AWS Data Exchange. **Scraping imdb.com is prohibited** by its conditions of use. The non-commercial TSV datasets are OK for personal use: each BAMS install downloads its own copy (we never mirror them) and shows *"Information courtesy of IMDb (https://www.imdb.com). Used with permission."* No posters or plots in those datasets. |
 | **Wikidata** | Fallback ID cross-walk (IMDb ↔ TMDB ↔ TVDB) | CC0, no restrictions |
 | **TheTVDB** | Optional, later (TMDB's TV data is good enough to start) | Per-project key. Its licensing docs contradict each other (free under $50k revenue vs. each end user needs a $12/yr subscription), so email them before adding it |
 | **OMDb** | Skip | CC BY-NC data scraped from IMDb, posters for paid supporters only. TMDB covers this better |
 | **Fanart.tv** | Optional: logos, clear-art, banners | Project key + optional personal key. Terms page couldn't be verified |
-| **Music (phase 3)** | MusicBrainz (CC0 core data) + Cover Art Archive + tags embedded in files | |
+| **Music** (built) | Tags embedded in files (read by ffprobe) first; then MusicBrainz (CC0 core data), Cover Art Archive, Wikidata → Wikipedia summaries + Commons photos | MusicBrainz: no key, ≤ 1 request/s, descriptive User-Agent; its genres/tags are CC BY-NC-SA so BAMS doesn't use them. Wikipedia text CC BY-SA and Commons photos are shown with their credit. Cover art is cached for the owner's own library like TMDB art |
 
 **So "use IMDb like Plex does"** works out to the same thing Plex actually does: match against TMDB, store and
 display the IMDb ID, and optionally show the IMDb rating from the official datasets.
@@ -156,13 +157,24 @@ The open-source servers do one of three things:
 | **B. Run our own metadata proxy** (like Plex) | Sonarr / Radarr (their "skyhook" proxies) | No setup; we control caching; one place to fix matching | We'd host and pay for a public service, and serving data to thousands of installs likely needs a TMDB agreement |
 | **C. User pastes their own free key** | Many small projects | Clearly compliant; each user has their own rate limit | Setup friction (a 2-minute signup) |
 
-**BAMS plan: A with C as an override.** Register a "BAMS" app with TMDB (non-commercial), ship that key as the
-default, and add a Settings field where anyone can paste their own key. That's zero setup, like Plex, with an
-escape hatch if the shared key ever gets throttled. Revisit B only if BAMS gets big enough to need it.
+**BAMS: C only (decided 2026-10-08). No shared key.** Each server owner pastes their own free TMDB key in
+Settings → Metadata. Until one is set, every page shows a warning banner that links straight to the key field.
+
+- Both TMDB credentials are accepted: the **API Read Access Token** (preferred, sent as a Bearer header) and the
+  older 32-character **API Key**.
+- Saving checks the key against TMDB (`GET /3/authentication`). A key TMDB rejects (401) isn't saved. If TMDB
+  can't be reached, the key is saved anyway and marked "not verified yet".
+- The UI only ever shows the last 4 characters of a saved key.
+- **Prototype:** the key lives in the browser's localStorage. **Phase 1:** it moves to the server's config
+  (`GET/PUT /api/settings`). The server makes all TMDB calls, and the API never returns the full key to clients.
+  Until a key is configured, the scanner still indexes files but skips matching, and items show as "Unmatched".
 
 ---
 
 ## 6. Formats and playback
+
+> **Full reference:** [FORMATS.md](FORMATS.md) covers every video container, video codec, audio codec, subtitle
+> format and music format, with browser support and what BAMS does with each.
 
 Browsers play only a small set of formats natively. Everything else has to be **remuxed** (repackaged
 without re-encoding: fast, lossless, cheap) or **transcoded** (re-encoded: heavier work, done on the GPU via NVENC).
@@ -185,6 +197,26 @@ Decision flow per play request: client sends what it can play → server picks
 
 ## 7. Phases
 
+**Status (2026-10-08): server iteration 1 is done** (`server/`, see its README). It covers:
+- Libraries and their folders, enforced read-only ([READ-ONLY.md](READ-ONLY.md)).
+- The scanner: walk / diff / parse / move detection / missing and offline handling / mid-copy skip.
+- The guessit-based parser, with a test corpus that includes the friend's `Season 00` style.
+- TMDB matching with your own key, plus the image cache.
+- Interval and on-demand scans.
+- The REST API, Range streaming and downloads.
+- A CLI and a hardened systemd unit.
+
+Not yet done:
+- Filesystem watcher (periodic scans cover it for now).
+- Minor playback follow-ups (HLS for the audio-only remux, adaptive bitrate). Done: HLS for conversions, GPU
+  decoding, a quality picker, a conversion limit, Dolby Vision tone-mapping, on-the-fly audio
+  conversion (AC3/EAC3/DTS → AAC, video copied) and video transcoding to H.264 on the GPU (Xvid/MPEG-2/VC-1…, and
+  HEVC for browsers that can't decode it).
+- Watch state and users.
+- Windows service packaging.
+- CI.
+- Final UI design (the current UI is wired to real data but its layout is still the prototype one, until mockups land).
+
 **Phase 0: skeleton (≈ 1 weekend)**
 - Repo, FastAPI app, SQLite schema (libraries, metadata items, media, parts, streams), React shell with the BAMS logo
 - Config: library roots, scan interval, TMDB key
@@ -203,7 +235,8 @@ Decision flow per play request: client sends what it can play → server picks
 - Packaging: Windows service + installer, `.deb` + systemd unit (tested on Debian 12/13, Ubuntu 24.04, Mint 22), Docker image
 
 **Phase 3: beyond video**
-- Music library (MusicBrainz/Cover Art Archive, mutagen tags, album/artist views, gapless audio)
+- Music library: ✅ built 2026-10-08 (ffprobe tags instead of mutagen, which is GPL; MusicBrainz/Cover Art Archive/Wikipedia
+  identification; album/artist views; now-playing bar). Still to do: gapless audio, CUE sheets, playlists
 - ISO support, intro/credits detection (audio fingerprinting across episodes), remote access, TV/mobile clients (DLNA or a Jellyfin-compatible API so existing apps work)
 
 ---
@@ -226,5 +259,5 @@ Decision flow per play request: client sends what it can play → server picks
   keeping the copyright notice. Everything above is compatible with it.
 - **Credits page:** TMDB logo + notice, the IMDb notice (if datasets are enabled), FFmpeg, MediaInfo.
 - **Logo:** supplied by the project owner (`branding/logo/`). Do a quick trademark search on "BAMS" before going public.
-- **Prototype art:** every title in `web/src/mock/` is fictional and its art was generated locally, so the
-  prototype contains no copyrighted posters.
+- **Artwork:** the repo ships no posters. All artwork is fetched from TMDB into each install's own
+  data folder at runtime.

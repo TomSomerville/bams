@@ -1,6 +1,9 @@
 import { Route, Routes, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
+import ConfigBanner from "./components/ConfigBanner";
+import NowPlaying from "./components/NowPlaying";
+import { useMusic } from "./music";
 import Home from "./pages/Home";
 import Library from "./pages/Library";
 import Detail from "./pages/Detail";
@@ -11,12 +14,19 @@ import { useEffect } from "react";
 
 export default function App() {
   const { pathname } = useLocation();
+  const music = useMusic();
+  const watching = pathname.startsWith("/play/");
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
+  // Starting a video pauses the music.
+  const { pause } = music;
+  useEffect(() => {
+    if (watching) pause();
+  }, [watching, pause]);
 
   // The player takes the whole screen, no chrome.
-  if (pathname.startsWith("/play/")) {
+  if (watching) {
     return (
       <Routes>
         <Route path="/play/:id" element={<Player />} />
@@ -25,20 +35,21 @@ export default function App() {
   }
 
   return (
-    <div className="shell">
+    <div className={`shell ${music.current ? "has-np" : ""}`}>
       <Sidebar />
       <div className="main">
+        <ConfigBanner />
         <TopBar />
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/movies" element={<Library type="movie" />} />
-          <Route path="/tv" element={<Library type="show" />} />
+          <Route path="/library/:id" element={<Library />} />
           <Route path="/title/:id" element={<Detail />} />
           <Route path="/search" element={<Search />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<div className="page"><h1>Nothing here</h1></div>} />
         </Routes>
       </div>
+      <NowPlaying />
     </div>
   );
 }

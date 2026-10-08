@@ -1,0 +1,48 @@
+# BAMS systemd unit (Debian / Ubuntu / Linux Mint).
+#
+# The kernel enforces read-only media here, not just BAMS: with ProtectSystem=strict the whole
+# filesystem is read-only to this service except StateDirectory (/var/lib/bams), and
+# ProtectHome=read-only covers /home. Media mounted under /mnt, /media or /srv is therefore
+# read-only to BAMS even if the bams user had write permission there.
+#
+# Install:
+#   sudo useradd --system --home /var/lib/bams --shell /usr/sbin/nologin bams
+#   sudo cp bams.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now bams
+# Grant read access to the media (see docs/READ-ONLY.md), e.g.:
+#   sudo setfacl -R -m u:bams:rX /mnt/media && sudo setfacl -R -d -m u:bams:rX /mnt/media
+
+[Unit]
+Description=BAMS - Bad Ass Media Server
+Documentation=https://github.com/TomSomerville/bams
+Wants=network-online.target
+After=network-online.target remote-fs.target
+
+[Service]
+Type=simple
+User=bams
+Group=bams
+StateDirectory=bams
+Environment=BAMS_DATA_DIR=/var/lib/bams
+ExecStart=/opt/bams/venv/bin/bams serve --host 127.0.0.1 --port 8484
+Restart=on-failure
+RestartSec=5
+
+# --- read-only everything except our own state directory
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/bams
+PrivateTmp=true
+# --- general hardening
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

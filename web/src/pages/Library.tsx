@@ -1,41 +1,47 @@
 import { useMemo, useState } from "react";
-import { allGenres, movies, shows } from "../data";
+import { useParams } from "react-router-dom";
+import type { ItemSummary, ServerLibrary } from "../api";
 import { PosterCard } from "../components/Cards";
+import { useApi } from "../useApi";
+import { MusicLibrary } from "./Music";
 
-const SORTS = {
-  added: { label: "Recently added", fn: (a: { addedDaysAgo: number }, b: { addedDaysAgo: number }) => a.addedDaysAgo - b.addedDaysAgo },
-  title: { label: "Title", fn: (a: { title: string }, b: { title: string }) => a.title.localeCompare(b.title) },
-  year: { label: "Year", fn: (a: { year: number }, b: { year: number }) => b.year - a.year },
-  score: { label: "Rating", fn: (a: { score: number }, b: { score: number }) => b.score - a.score },
-} as const;
+const SORTS = { added: "Recently added", title: "Title", year: "Year", rating: "Rating" } as const;
 
-export default function Library({ type }: { type: "movie" | "show" }) {
-  const source = type === "movie" ? movies : shows;
+export default function Library() {
+  const { id } = useParams();
+  const [sort, setSort] = useState<keyof typeof SORTS>("title");
   const [genre, setGenre] = useState<string | null>(null);
-  const [sort, setSort] = useState<keyof typeof SORTS>("added");
-  const list = useMemo(
-    () => source.filter((i) => !genre || i.genres.includes(genre)).sort(SORTS[sort].fn),
-    [source, genre, sort],
-  );
+  const { data: lib, error } = useApi<ServerLibrary>(`/api/libraries/${id}`);
+  const isMusic = lib?.type === "music";
+  const { data: items } = useApi<ItemSummary[]>(lib && !isMusic ? `/api/libraries/${id}/items?sort=${sort}` : null);
 
+  const genres = useMemo(() => [...new Set((items ?? []).flatMap((i) => i.genres))].sort(), [items]);
+  const list = (items ?? []).filter((i) => !genre || i.genres.includes(genre));
+  const noun = lib?.type === "movie" ? "movies" : "shows";
+
+  if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
+  if (lib && isMusic) return <MusicLibrary key={lib.id} lib={lib} />;
   return (
     <div className="page">
       <div className="page-head">
-        <h1>{type === "movie" ? "Movies" : "TV Shows"}</h1>
-        <span className="count">{list.length} {type === "movie" ? "movies" : "shows"}</span>
+        <h1>{lib?.name ?? ""}</h1>
+        {items && <span className="count">{list.length} {noun}</span>}
         <label className="sort">
           Sort
           <select value={sort} onChange={(e) => setSort(e.target.value as keyof typeof SORTS)}>
-            {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </label>
       </div>
-      <div className="chips">
-        <button className={`chip ${!genre ? "on" : ""}`} onClick={() => setGenre(null)}>All</button>
-        {allGenres(source).map((g) => (
-          <button key={g} className={`chip ${genre === g ? "on" : ""}`} onClick={() => setGenre(g)}>{g}</button>
-        ))}
-      </div>
+      {genres.length > 1 && (
+        <div className="chips">
+          <button className={`chip ${!genre ? "on" : ""}`} onClick={() => setGenre(null)}>All</button>
+          {genres.map((g) => (
+            <button key={g} className={`chip ${genre === g ? "on" : ""}`} onClick={() => setGenre(g)}>{g}</button>
+          ))}
+        </div>
+      )}
+      {items && !items.length && <p className="muted">No {noun} found in this library yet.</p>}
       <div className="grid">
         {list.map((i) => <PosterCard key={i.id} item={i} />)}
       </div>
