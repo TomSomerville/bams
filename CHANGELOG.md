@@ -3,6 +3,29 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.5.0 (2026-10-08)
+
+Fixes from the second round of testing: 195 "unrecognized" files in one library, most of them in a nested
+Star Trek pack, and shows that BAMS knew by name but couldn't match on TMDB.
+
+### Fixed
+- **Packs holding several shows** ("Star.Trek.Megapack/Star.Trek.DS9/S03/…"): the pack was taken as the show, so
+  five series were piled into one unmatched title. The show is now the folder right above the season folder, and
+  the scene short forms DS9, TNG, TOS, VOY and ENT are spelled out the way TMDB knows them.
+- **DVD extras in a season folder** whose file name itself carries the season ("Star.Trek.DS9.S03.Extra10.avi",
+  "Season 3/Season 3 Extras/…") were "unrecognized". They're listed under that season, after the episodes.
+- **Pack folders that aren't the show's name** ("The Simpsons FIXED -jlw/The Simpsons S28/…",
+  "…Sewing Bee Series 1 - 10 - DD/The Great British Sewing Bee - Series 5 (2019)/…"): the deepest folder that names
+  the show wins, "Series N" stays out of the title, and a year after the series number no longer splits the show
+  per series.
+- **Exact titles that failed on TMDB** because a year in an episode's file name ("S07E01.2017") was taken for the
+  show's start year (South Park, Parks and Recreation). A near-exact title now matches regardless of the year.
+- **Franchise prefixes** ("Star Wars Andor" → TMDB's "Andor") match when TMDB puts that show first.
+
+### When you update
+- The next scan re-reads every video file's name once (parser v6). Shows that were wrongly merged split into the
+  right shows and are matched again; progress on those episodes starts over.
+
 ## 0.4.0 (2026-10-08)
 
 Security settings, a better music library, your own Home page, and the last playback gaps.

@@ -85,3 +85,27 @@ def test_match_merges_folders_and_fills_episodes(env):
 def test_score_prefers_exact_title_and_year():
     best, s = matcher.best_match([SIMPSONS_FAKE, SIMPSONS], "The Simpsons", 1989, "show")
     assert best["id"] == 456 and s >= matcher.ACCEPT
+
+
+def test_exact_title_beats_a_wrong_year():
+    # "Parks.and.Recreation.S07E01.2017" gave the show the air year of one episode; TMDB says 2009
+    parks = {"id": 1, "name": "Parks and Recreation", "first_air_date": "2009-04-09"}
+    best, s = matcher.best_match([parks], "Parks and Recreation", 2017, "show")
+    assert s < matcher.ACCEPT
+    best, s = matcher.choose([parks], "Parks and Recreation", 2017, "show")
+    assert best is parks and s >= matcher.ACCEPT
+    # but a different title with the wrong year still fails
+    best, s = matcher.choose([{"id": 2, "name": "Parks and Rec Unofficial", "first_air_date": "2009-01-01"}],
+                             "Parks and Recreation", 2017, "show")
+    assert s < matcher.ACCEPT
+
+
+def test_franchise_prefix_matches_tmdb_top_hit():
+    andor = {"id": 3, "name": "Andor", "first_air_date": "2022-09-21"}
+    best, s = matcher.choose([andor], "Star Wars Andor", None, "show")
+    assert best is andor and s >= matcher.ACCEPT
+    # only TMDB's first result gets that benefit, and only a real suffix
+    best, s = matcher.choose([{"id": 4, "name": "Other"}, andor], "Star Wars Andor", None, "show")
+    assert s < matcher.ACCEPT
+    best, s = matcher.choose([{"id": 5, "name": "Dor"}], "Star Wars Andor", None, "show")
+    assert s < matcher.ACCEPT

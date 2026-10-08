@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from guessit import guessit
 
 # Bump when parsing rules change: the next scan re-parses files parsed by an older version.
-PARSER_VERSION = 5
+PARSER_VERSION = 6
 
 # {tmdb-603} [tmdbid=603] {imdb-tt0133093} [imdbid-tt0133093] {tvdb-81189}
 _ID_RE = re.compile(r"[\[{](tmdb|imdb|tvdb)(?:id)?[-=]((?:tt)?\d+)[\]}]", re.I)
@@ -32,6 +32,9 @@ _RELEASE_GROUP_RE = re.compile(
     r"[(\[](?=[^)\]]*\b(?:\d{3,4}p|2160p|4k|web-?dl|webrip|bluray|blu-ray|bdrip|hdtv|dvdrip|remux|[xh]\.?26[45]|hevc|avc)\b)"
     r"[^)\]]*[)\]]", re.I)
 _GENERIC_STEMS = {"movie", "film", "video", "feature", "main", "title", "video_ts", "bdmv", "index"}
+# Scene packs abbreviate the Star Trek series ("Star.Trek.DS9"); TMDB knows the full names (TOS is just "Star Trek").
+_STAR_TREK_RE = re.compile(r"^(star[ .]?trek)[ .:_-]+(ds9|tng|tos|voy|ent)$", re.I)
+_STAR_TREK = {"ds9": "Deep Space Nine", "tng": "The Next Generation", "tos": "", "voy": "Voyager", "ent": "Enterprise"}
 
 
 @dataclass
@@ -87,8 +90,12 @@ def _title(g: dict) -> str | None:
     for us the part after the dash is part of the name (two shows, not one)."""
     title = _str(g.get("title"))
     alt = g.get("alternative_title")
-    alts = [str(a) for a in (alt if isinstance(alt, list) else [alt]) if a]
-    return " - ".join([title, *alts]) if title and alts else title
+    # "Show - Series 5" (British packs): the part after the dash is a season marker, not part of the name
+    alts = [str(a) for a in (alt if isinstance(alt, list) else [alt]) if a and not _SEASON_DIR_RE.match(str(a))]
+    title = " - ".join([title, *alts]) if title and alts else title
+    if title and (m := _STAR_TREK_RE.match(title)):
+        title = f"{m.group(1)} {_STAR_TREK[m.group(2).lower()]}".strip()
+    return title
 
 
 def _int(v) -> int | None:
@@ -151,6 +158,43 @@ def _core(s: str) -> str:
     return re.sub(r"\s{2,}", " ", _RELEASE_GROUP_RE.sub(" ", s)).strip()
 
 
+_SEASON_MARK_RE = re.compile(r"(?<![a-z0-9])(s\d{1,4}|season|series|staffel|saison|temporada)(?![a-z])", re.I)
+
+
+def _folder_year(name: str, year: int | None) -> int | None:
+    """The show's year from its folder. "Show 1989 S35 ..." names the show's year; in
+    "Show - Series 5 (2019)" the year comes after the season marker and is the season's, not the show's."""
+    if year is None:
+        return None
+    y, s = re.search(str(year), name), _SEASON_MARK_RE.search(name)
+    return None if (y and s and s.start() < y.start()) else year
+
+
+def _show_dir(dirs: list[str]) -> tuple[str | None, int | None]:
+    """Which folder names the show, and the season of the season folder the file is in (if any).
+
+    With a season folder ("S03", "Season 2", "Specials"), the show is the folder right above it: in a nested pack
+    ("Star.Trek.Megapack/Star.Trek.DS9/S03/...") that's the series, not the pack. Folders below the season folder
+    are release folders. Without one, the deepest folder that reads as a season pack ("Pack/The Simpsons S28/...")
+    names the show, else the top folder does.
+    """
+    season_at = [i for i, d in enumerate(dirs) if _season_from_dir(d) is not None]
+    if season_at:  # "Season 3/Season 3 Extras/x.avi": both are season folders; the show is above them
+        above = [d for d in dirs[:season_at[-1]] if _season_from_dir(d) is None]
+        return (above[-1] if above else None), _season_from_dir(dirs[season_at[-1]])
+    chosen: tuple[str, str] | None = None  # (folder, its title)
+    for d in reversed(dirs):
+        gd = guessit(_clean_dir(d), {"type": "episode"})
+        t = _title(gd)
+        if not t or gd.get("episode") is not None or (gd.get("season") is None and not gd.get("year")):
+            continue
+        if chosen is None:
+            chosen = (d, t)
+        elif " " not in chosen[1] and title_key(t).startswith(title_key(chosen[1])):
+            chosen = (d, t)  # "Parks and Recreation S01-07/Parks S07/...": the pack spells out the one-word inner name
+    return (chosen[0] if chosen else dirs[0] if dirs else None), None
+
+
 def parse_episode(rel: str) -> Parsed:
     parts = rel.replace("\\", "/").split("/")
     dirs, name = parts[:-1], parts[-1]
@@ -179,13 +223,14 @@ def parse_episode(rel: str) -> Parsed:
     if p.season is None and p.episodes:
         p.season = 1  # "Show/Show - 05.mkv": Plex treats a bare episode number as season 1
 
-    # Show title: the top folder under the root ("Show (Year)", or a release-pack folder),
-    # unless it's only a season folder; else whatever the filename says.
-    show_dir = next((d for d in dirs if _season_from_dir(d) is None), None)
+    # Show title: the folder that names the show (see _show_dir); else whatever the filename says.
+    show_dir, folder_season = _show_dir(dirs)
+    if folder_season is not None and not p.episodes:
+        p.season, season_dir = folder_season, True  # "S03/.../ds9.s03.extra1.avi": an extra of the folder's season
     if show_dir:
         gd = guessit(_clean_dir(show_dir), {"type": "episode"})
         p.title = _title(gd)
-        p.year = _int(gd.get("year"))
+        p.year = _folder_year(_clean_dir(show_dir), _int(gd.get("year")))
     if not p.title:
         p.title = _title(g)
     if p.year is None:
@@ -211,10 +256,14 @@ def parse_episode(rel: str) -> Parsed:
 def _loose_title(stem: str, show: str) -> str:
     """A name for an unnumbered episode: the file name without the show's name and release tags."""
     g = guessit(stem, {"type": "movie"})
-    t = _title(g) or stem
-    words, show_words = re.split(r"[\s._]+", t.strip()), re.split(r"[\s._]+", show.strip())
-    if len(words) > len(show_words) and title_key(" ".join(words[:len(show_words)])) == title_key(show):
-        t = " ".join(words[len(show_words):])
+    alt = g.get("alternative_title")
+    if alt:  # "Star.Trek.DS9.S03.Extra10": guessit reads the show as the title and the rest as an alternative
+        t = str(alt[-1] if isinstance(alt, list) else alt)
+    else:
+        t = _str(g.get("title")) or stem
+        words, show_words = re.split(r"[\s._]+", t.strip()), re.split(r"[\s._]+", show.strip())
+        if len(words) > len(show_words) and title_key(" ".join(words[:len(show_words)])) == title_key(show):
+            t = " ".join(words[len(show_words):])
     return t.strip(" -–:._") or stem
 
 
