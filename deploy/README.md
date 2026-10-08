@@ -17,7 +17,14 @@ builds on Windows too. `--version X` stamps a different package version (for tes
 1. Bump `VERSION` in `server/bams/config.py` (the installers, the `.deb` and `bams --help` all read it). Windows
    doesn't strictly need a higher version, but apt only upgrades to a higher one.
 2. If dependencies changed: `uv pip compile server/pyproject.toml --universal --generate-hashes --python-version 3.11 -o deploy/requirements.txt`, then run the tests against it.
-3. `deploy\build.py all`, test, hand out the two files. People run the new one over the old one.
+3. `deploy\build.py all`, test, then commit, tag and publish (the README's download link points at the latest
+   release):
+   ```bash
+   git tag -a v0.2.0 -m "BAMS 0.2.0" && git push origin main v0.2.0
+   cd dist && sha256sum * > SHA256SUMS.txt && cd ..
+   gh release create v0.2.0 dist/BAMS-Setup-0.2.0.exe dist/bams_0.2.0_all.deb dist/SHA256SUMS.txt --title "BAMS 0.2.0" --notes "..."
+   ```
+   People run the new installer over the old one.
 
 ## What's inside
 
