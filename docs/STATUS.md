@@ -27,7 +27,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O3 | Identify and categorise media (look it up "like Plex", via naming conventions) | ✅ guessit parser + TMDB matching; music: tags/folders + MusicBrainz |
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
 | O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests |
-| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.2.0) |
+| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.3.0) |
 | O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
 | O8 | Configure libraries (folders) in the UI | ✅ Settings, with a server-side folder picker |
@@ -104,12 +104,15 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | Files can be **identified by hand** (`files.manual`, schema v6): stored per file and used instead of the name on every scan; TMDB/IMDb links fill the fields (IMDb ids via TMDB `/find`) | Owner request; survives rescans, file changes and moves; IMDb itself is never fetched |
 | 10-08 | Watched % and "started after N s" are **admin settings** (one for everyone; defaults 90% / 30 s); saving progress and Continue Watching use the same threshold | Tester request (10 s / 95%); the old split (save at 10 s, offer at 30 s) wasn't worth two settings |
 | 10-08 | Per-user display preferences in `users.prefs` (schema v5), first one `home_hero` | Follows the person across devices, unlike browser storage |
+| 10-08 | The admin can **choose the encoder** (`settings.video_encoder`, Settings → Playback); only encoders that pass a test encode are offered; a choice that stops working falls back to automatic; `BAMS_VIDEO_ENCODER` still wins | Tester asked for a CPU/GPU switch; GPU is faster, x264 can look better per bit |
+| 10-08 | Scan progress = step + done/total + bytes, "left" counted in **files and size** (titles while matching), time left from the step's own pace | Shows/episodes aren't known until files are parsed; files and bytes are exact. Time left comes from the server's clock (`step_elapsed`) |
+| 10-08 | Libraries have an **admin-set order** (`libraries.sort_order`, schema v7), shared by everyone; sidebar drag + Settings ▲▼ | Tester request; one order for the household like Plex's pinned sources; the icon-only sidebar on small screens hides the handles, so Settings has buttons |
 | 10-08 | Logo tagline changed from "Your Personal Media Stream" to "Bad Ass Media Server"; logo set redrawn at higher res (`tools/brand_art/rework.py`) | Owner request |
 
 ## 4. Built so far
 
-### Server (`server/`, ~6,200 lines + 190 tests)
-- **Libraries:** create/rename/delete, add/remove folders, scan interval. Validation: folder must exist and be
+### Server (`server/`, ~6,350 lines + 195 tests)
+- **Libraries:** create/rename/delete, add/remove folders, scan interval, order (`PUT /api/libraries/order`). Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
   inside media roots). Verified on real data: a full scan changed 0 of 211 file attributes.
@@ -153,9 +156,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead.
 - **Audio:** track list with labels, any track via the remux, 5.1 AAC on request (`channels`/`ch`).
 - **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback.
-- **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting.
+- **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting
+  (step, done/total, bytes, seconds into the step) shown in Settings.
 - **API:** ~40 endpoints (see CODEBASE.md). **CLI:** `bams serve|library|scan|tmdb-key|status`.
-- **Installers** (`deploy/`, v0.2.0; release notes in `CHANGELOG.md`): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
+- **Installers** (`deploy/`, v0.3.0; release notes in `CHANGELOG.md`): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
   packages, FFmpeg downloaded at install with a pinned hash, WinSW service, firewall rule for private networks,
   admin-only data dir, update in place, uninstall that asks before deleting data) and `bams_<v>_all.deb` (offline wheels,
   venv, systemd unit as the desktop user, `/etc/default/bams`, ufw, update in place, remove keeps / purge deletes data).
@@ -170,7 +174,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   scan status; Unrecognized files (identify by hand: link or fields with suggestions); TMDB key card; Playback card:
   encoder in use + conversion limit; Watched and Continue Watching thresholds). Library pages have an Unrecognized
   tab for admins. Player: speed 0.1x–3x. Music queue: drag (or arrow keys) to reorder. Show-password buttons,
-  confirm-new-password, per-person "hide the Home banner".
+  confirm-new-password, per-person "hide the Home banner". Playback card: encoder choice (CPU/GPU). Library cards:
+  live scan progress (N of M, size, time left, bar) and ▲▼ order buttons. Sidebar: admins drag libraries into order.
 - Music: library page (Artists/Albums tabs, sort, genres), artist page (bio, photo credit, albums), album page
   (tracklist by disc, format note, Wikipedia/MusicBrainz links), Fix match, a now-playing bar with queue that keeps
   playing across pages (media keys via Media Session) and pauses when a video starts; music in Home and Search;
@@ -234,6 +239,38 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: CPU/GPU choice, scan progress with what's left, library order (release 0.3.0)
+- **What / why:** the three tester requests left open in 0.2.0, which the owner asked for next. **CPU/GPU:**
+  Settings → Playback → *Convert with* lists every H.264 encoder that passes a test encode (`stream.available_encoders`)
+  plus Automatic; saved as `settings.video_encoder`, applied at startup and on save (`stream.set_preferred`), used by new
+  conversions; `BAMS_VIDEO_ENCODER` still wins. **Scan progress:** each step reports `progress(step, done, total,
+  bytes_done, bytes_total)`; the Scheduler keeps it with the step's start; `/api/status` adds `step_elapsed`; the library
+  card shows "N of M files (K left) · X of Y GB · about T min left" and a filling bar. Probe results are now saved in
+  batches of 200 as they arrive (they were saved only at the end). **Library order:** `libraries.sort_order` (schema v7;
+  existing libraries numbered alphabetically), new ones last, `PUT /api/libraries/order`, `library.listed()` everywhere
+  (API, CLI). Sidebar: admins drag by a hover handle (or arrow keys); Settings: ▲▼ on each card; a `bams:libraries`
+  window event keeps the sidebar and Settings in step (the sidebar also never refreshed after add/rename/remove before).
+  The drag code moved from the music queue into a shared `useReorder` hook. Released as **0.3.0**.
+- **Files:** server `stream.py` (`_works`, `_tested`, `available_encoders`, `set_preferred`, `preferred`, `encoder_forced`),
+  `app.py` (`/api/settings/encoders`, `/api/settings/encoder`, `/api/libraries/order`, startup reads the encoder),
+  `scanner.py` (`Progress`, per-step reports, batched probe saves), `jobs.py` (structured `_progress`, `step_elapsed`),
+  `matcher.py` + `music_match.py` (done/total), `library.py` (`ORDER`, `listed`, `reorder`, new = last), `db.py` (v7),
+  `__main__.py`, `config.py` (0.3.0); tests `test_stream.py`, `test_scanner.py`, `test_api.py`, `test_auth.py`. Web: new
+  `components/useReorder.ts`; `Sidebar.tsx`, `NowPlaying.tsx` (on the hook), `TranscodeSettings.tsx` (`EncoderChoice`),
+  `Settings.tsx` (`ScanProgress`, ▲▼, event), `api.ts` (`ScanState`, `LIBRARIES_CHANGED`), `Icon.tsx`, `styles.css`.
+  Docs: CHANGELOG, server/README, CODEBASE, CLAUDE.md.
+- **Verified:** 195 tests (new: encoder choice incl. fallback, env override and the API with a restart; progress
+  reports with totals/bytes and the Scheduler's record; library order incl. ignored/omitted ids and viewer 403; v7
+  migration orders existing libraries by name). Test server on a DB copy: encoder list on the owner's PC = NVENC, x264,
+  Media Foundation; switching to x264 changed status and the automatic limit (4 → 2), and a real 480p HLS segment carried
+  x264's signature; back to automatic = NVENC. A 586-file music re-probe showed live "N of 586 files (left) · GB of
+  5.4 GB" with a filling bar. Sidebar drag (synthetic pointer events; screenshots were unavailable) and Settings ▲▼
+  reordered sidebar, Settings and server alike. `.deb` 0.2.0 → 0.3.0 in Docker (Debian 12, Ubuntu 24.04): DB v6 → v7
+  with backup, existing libraries listed alphabetically, reorder API, encoder list (x264 only, no GPU there), UI served.
+- **Left open:** scans still run one at a time; the music queue's drag (now on the shared hook) wasn't re-tried by hand
+  after the refactor; extras folders (`Featurettes`…) are still skipped. The Windows 0.3.0 upgrade of the owner's service
+  is run by the owner.
 
 ### 2026-10-08: Tester round 1 fixes + identify unrecognised files by hand (release 0.2.0)
 - **What / why:** the friend's tester sent notes on 0.1.0; the owner picked a first batch and added a request.

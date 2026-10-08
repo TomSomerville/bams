@@ -214,6 +214,14 @@ class TranscodingIn(BaseModel):
     max_transcodes: int = Field(ge=0, le=32)  # 0 = automatic
 
 
+class OrderIn(BaseModel):
+    ids: list[int] = Field(max_length=1000)
+
+
+class EncoderIn(BaseModel):
+    encoder: str | None = None  # an id from stream.ENCODERS that works here; None = automatic
+
+
 class WatchSettingsIn(BaseModel):
     watched_percent: int = Field(ge=50, le=100)   # a title counts as watched past this share of its length
     resume_after: int = Field(ge=0, le=600)       # seconds before it counts as started (saved, Continue Watching)
@@ -337,6 +345,11 @@ class SpaFiles(StaticFiles):
 def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | None = None) -> FastAPI:
     bootstrap(paths)
     scheduler = Scheduler(paths)
+    _con = connect(paths.db)
+    try:
+        stream.set_preferred(get_setting(_con, "video_encoder"))  # CPU or GPU, as the admin chose (else automatic)
+    finally:
+        _con.close()
 
     def transcode_limit() -> int:
         """Simultaneous video conversions allowed: the setting, or 4 on a GPU encoder / 2 on the CPU."""
@@ -571,6 +584,31 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         set_setting(con, "resume_after", str(body.resume_after))
         return watch.thresholds(con)
 
+    def _encoders() -> dict:
+        auto = None
+        if not stream.encoder_forced():  # what "Automatic" means here: the best working one
+            auto = next(iter(stream.available_encoders()), None)
+        return {
+            "choice": stream.preferred(), "active": stream.video_encoder(), "automatic": auto,
+            "forced": stream.encoder_forced(),
+            "options": [{"id": e, "name": stream.ENCODER_NAMES[e], "hardware": e in stream.HARDWARE}
+                        for e in stream.available_encoders()],
+        }
+
+    @app.get("/api/settings/encoders", dependencies=ADMIN)
+    def get_encoders():
+        """Which H.264 encoders work on this machine (each test-encoded once), and which one conversions use."""
+        return _encoders()
+
+    @app.put("/api/settings/encoder", dependencies=ADMIN)
+    def put_encoder(body: EncoderIn, con=Depends(db)):
+        """Convert on the CPU or a GPU (None = automatic: the best one that works). New conversions use it."""
+        if body.encoder is not None and body.encoder not in stream.available_encoders():
+            raise HTTPException(400, f"{body.encoder} doesn't work on this server.")
+        set_setting(con, "video_encoder", body.encoder)
+        stream.set_preferred(body.encoder)
+        return _encoders()
+
     @app.put("/api/settings/music-lookup", dependencies=ADMIN)
     def put_music_lookup(body: ToggleIn, con=Depends(db)):
         """Turn online music identification (MusicBrainz, Cover Art Archive, Wikipedia) on or off."""
@@ -635,7 +673,13 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     # -- libraries
     @app.get("/api/libraries")
     def list_libraries(con=Depends(db)):
-        return [library.describe(con, r) for r in con.execute("SELECT * FROM libraries ORDER BY name")]
+        return [library.describe(con, r) for r in library.listed(con)]
+
+    @app.put("/api/libraries/order", dependencies=ADMIN)
+    def order_libraries(body: OrderIn, con=Depends(db)):
+        """The order libraries are listed in (sidebar, Home, Settings): ids first to last."""
+        library.reorder(con, body.ids)
+        return [r["id"] for r in library.listed(con)]
 
     @app.post("/api/libraries", status_code=201, dependencies=ADMIN)
     def create_library(body: LibraryIn, con=Depends(db)):

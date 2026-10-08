@@ -38,7 +38,7 @@ bams/
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
 │   │   ├── db.py              SQLite schema (v1 + migration steps to v6), connect(), migrate(), Tx, settings, JSON helpers
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker + quick_hash
-│   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API
+│   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
 │   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
@@ -54,7 +54,7 @@ bams/
 │   │   ├── music_match.py     Music identification: match_album/match_artist/match_music_library (MusicBrainz & co.)
 │   │   ├── musicbrainz.py     HTTP clients: MusicBrainz (1 req/s, shared), Cover Art Archive, Wikidata/Wikipedia/Commons
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
-│   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads)
+│   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
 │   └── tests/                 pytest: 172 tests, see §7
 │
@@ -73,7 +73,8 @@ bams/
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
-│       │   ├── Sidebar.tsx    Logo, Home, one link per real library, Settings
+│       │   ├── Sidebar.tsx    Logo, Home, one link per library in the admin's order (admins drag to reorder), Settings
+│       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
 │       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out, Home banner pref) + admins' "Who can sign in" (users CRUD)
 │       │   ├── PasswordInput.tsx  Password field with a show/hide button (sign-in, setup, accounts)
@@ -86,7 +87,7 @@ bams/
 │       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
 │       │   ├── MusicFixMatch.tsx  Modal: MusicBrainz search → POST /api/items/{id}/music-match
 │       │   ├── MusicSettings.tsx  Music identification on/off card
-│       │   ├── TranscodeSettings.tsx  Playback card: encoder in use, conversion limit
+│       │   ├── TranscodeSettings.tsx  Playback card: encoder in use, CPU/GPU choice (EncoderChoice), conversion limit
 │       │   ├── Art.tsx        Poster / Backdrop with gradient fallback when there's no artwork
 │       │   ├── FolderPicker.tsx  Modal: browse server folders via /api/fs/browse
 │       │   ├── FixMatch.tsx   Modal: TMDB search → POST /api/items/{id}/match
@@ -148,12 +149,12 @@ library roots as protected. Then `create_app` starts the Scheduler in the FastAP
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v6)
+## 3. Data model (`db.py`, schema v7)
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30) |
-| `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status` |
+| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic) |
+| `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status`, `sort_order` (v7: the admin's order; `library.ORDER`) |
 | `library_roots` | its folders | `library_id`, `path` (absolute, as given) |
 | `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit…); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
 | `item_keys` | grouping aliases | (`library_id`, `kind`, `title_key`, `year`) → `item_id`; survives merges so renamed folders keep joining the same show |
@@ -185,7 +186,10 @@ MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist
    (listed by `/unrecognized` with a hint). Walking and hashing happen **outside** transactions; writes go in
    batches of 200, so other writers (logins, adding a library) never wait on the disks.
 6. Vanished files → `available=0` (never deleted). `items.cleanup_orphans`.
-7. ffprobe every unprobed available file (4 threads) → `files.probe`.
+7. ffprobe every unprobed available file (4 threads) → `files.probe`, saved in batches of 200 as results arrive.
+   Every step reports `progress(step, done, total, bytes_done, bytes_total)` ("Looking for files", "Adding new
+   files", "Reading file details", "Reading tags", then "Matching on TMDB" / "Identifying albums…"); the Scheduler
+   keeps it in `/api/status` → `scans.running` with `step_elapsed`, and Settings shows N of M, size and time left.
 8. If a TMDB key exists → `matcher.match_library`.
 
 ### 4.1b Music scan (`scanner.scan_library` with a music library)
@@ -356,7 +360,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/settings` | TMDB status (never the key) | SettingsProvider |
 | `PUT /api/settings/tmdb-key` · `DELETE` · `POST …/test` | save (verified) / remove / re-check | TmdbSettings |
 | `GET /api/fs/browse?path=` | list server folders (drives/mounts when no path) | FolderPicker |
-| `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | CRUD; PATCH with add/remove paths triggers a scan | Settings, Sidebar, Home |
+| `PUT /api/libraries/order {ids}` (admin) → ids in the new order | library order (omitted ids keep their place after, unknown ignored) | Sidebar, Settings |
+| `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | CRUD (listed in the admin's order); PATCH with add/remove paths triggers a scan | Settings, Sidebar, Home |
 | `POST /api/libraries/{id}/scan[?rematch=true]` → `{accepted, running, queued}` | queue a scan | Settings |
 | `GET /api/scans?library_id=` | current + history | — |
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
@@ -365,6 +370,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback` | Music pages, NowPlaying |
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music Fix match | MusicFixMatch |
 | `PUT /api/settings/music-lookup {enabled}` (state in `GET /api/settings` → `music_lookup`) | identification on/off | MusicSettings |
+| `GET /api/settings/encoders` · `PUT /api/settings/encoder {encoder\|null}` (admin) → `{choice, active, automatic, forced, options[{id,name,hardware}]}` | CPU/GPU choice (only encoders that pass a test encode; 400 otherwise) | TranscodeSettings |
 | `PUT /api/settings/transcoding {max_transcodes}` (state in `GET /api/settings` → `max_transcodes`, `max_transcodes_auto`) | conversion limit | TranscodeSettings |
 | `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`) + hand-identified ones (`manual`), with `library_*` | Identify.tsx |
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
@@ -395,7 +401,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Host/port | `bams serve --host --port` (default 127.0.0.1:8484; `0.0.0.0` for the LAN, login required) |
 | Accounts | web UI (Settings → Accounts), or `bams user add NAME [--admin] \| list \| passwd NAME \| remove NAME`; session length `auth.SESSION_DAYS`, `auth.MIN_PASSWORD` |
 | ffprobe / ffmpeg | `BAMS_FFPROBE` / `BAMS_FFMPEG`, then the Windows installer's `<install>fmpegin` (`probe.app_ffmpeg_dir`), PATH, winget package folder |
-| Video encoder | auto-detected (`stream.ENCODERS`); `BAMS_VIDEO_ENCODER=h264_nvenc\|h264_qsv\|h264_amf\|h264_vaapi\|libx264\|h264_mf`; VAAPI device `BAMS_VAAPI_DEVICE` (default `/dev/dri/renderD128`) |
+| Video encoder | Settings → Playback (`settings.video_encoder`, `stream.set_preferred`), else auto-detected (`stream.ENCODERS`); `BAMS_VIDEO_ENCODER=h264_nvenc\|h264_qsv\|h264_amf\|h264_vaapi\|libx264\|h264_mf`; VAAPI device `BAMS_VAAPI_DEVICE` (default `/dev/dri/renderD128`) |
 | GPU decoding | on with a GPU encoder (`stream.hwaccel_args`); `BAMS_HWACCEL=none` turns it off, or names a method (`cuda`, `d3d11va`, `vaapi`…) |
 | All-GPU filters (NVIDIA) | on for SDR NVDEC codecs (`stream.gpu_filters`); `BAMS_GPU_FILTERS=0` turns them off |
 | Conversion limit | Settings → Playback (`settings.max_transcodes`); HLS tuning constants at the top of `hls.py` |
@@ -417,10 +423,10 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_subtitles.py` | language names, sidecar matching + labels, shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track burned in (also when the run starts mid-line) |
 | `test_readonly.py` | 15 write attempts must all raise and leave the tree byte-identical; reads allowed; full scan leaves media untouched; root validation |
 | `test_parse.py` | real-world names: scene packs, Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, movies |
-| `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge) |
+| `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN |
-| `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint |
-| `test_stream.py` | audio channels, burn-in + GPU filter commands, copy-HLS command, a real remux over HLS through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
+| `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration |
+| `test_stream.py` | audio channels, burn-in + GPU filter commands, copy-HLS command, a real remux over HLS through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
 | `test_music_match.py` | identification against fake MusicBrainz/CAA/Wikimedia (`httpx.MockTransport`): matching, tag ids, unmatched/ambiguous, rescans keep data, local art wins, service down, settings toggle + Fix match API |
@@ -436,6 +442,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Add a page | `web/src/pages/*.tsx` + route in `App.tsx` (+ Sidebar link) |
 | Change playback rules or codecs | `stream.plan` / `stream.video_copyable` (+ `test_stream.py`, FORMATS.md) |
 | Tune transcode quality / size / encoders | `stream._encoder_args`, `_max_bitrate`, `_box`, `QUALITIES`, `ENCODERS`, `transcode_filters` |
+| Change how libraries are ordered | `library.ORDER` / `listed` / `reorder`; UI `Sidebar.tsx`, Settings ▲▼ |
+| Add a scan step to the progress display | call `progress(step, done, total, bytes_done, bytes_total)`; units per step in `unitOf()` (`Settings.tsx`) |
 | Tune HLS segment length | `stream.SEGMENT` (conversions; copies follow the file's keyframes) |
 | Which codecs the browser is asked about | `canDecode()` in `web/src/pages/Player.tsx` |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |

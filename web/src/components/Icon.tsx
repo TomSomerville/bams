@@ -15,6 +15,8 @@ const PATHS: Record<string, string> = {
   back: "M15 18l-6-6 6-6",
   chevronLeft: "M15 18l-6-6 6-6",
   chevronRight: "M9 18l6-6-6-6",
+  chevronUp: "M18 15l-6-6-6 6",
+  chevronDown: "M6 9l6 6 6-6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   plus: "M12 5v14M5 12h14",
   close: "M18 6L6 18M6 6l12 12",

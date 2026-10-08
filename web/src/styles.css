@@ -491,14 +491,14 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .np-queue-head h3 { font-size: 15px; }
 .np-queue ol { list-style: none; margin: 0; padding: 0; }
 .np-queue li { position: relative; display: flex; align-items: center; border-radius: 8px; }
-.np-queue li.drop-before::before, .np-queue li.drop-after::after { content: ""; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 1px; background: var(--cyan); pointer-events: none; }
-.np-queue li.drop-before::before { top: -1px; }
-.np-queue li.drop-after::after { bottom: -1px; }
-.np-queue li.lifted { opacity: 0.55; background: var(--surface-2); }
-.np-queue ol.dragging { user-select: none; }
-.np-q-handle { flex: none; display: grid; place-items: center; width: 28px; height: 40px; padding: 0; background: none; border: 0; border-radius: 6px; color: var(--muted); cursor: grab; touch-action: none; }
-.np-q-handle:hover, .np-q-handle:focus-visible { color: var(--text); }
-ol.dragging .np-q-handle { cursor: grabbing; }
+.drop-before::before, .drop-after::after { content: ""; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 1px; background: var(--cyan); pointer-events: none; }
+.drop-before::before { top: -1px; }
+.drop-after::after { bottom: -1px; }
+.lifted { opacity: 0.55; background: var(--surface-2); }
+.dragging { user-select: none; }
+.reorder-handle { flex: none; display: grid; place-items: center; width: 28px; height: 40px; padding: 0; background: none; border: 0; border-radius: 6px; color: var(--muted); cursor: grab; touch-action: none; }
+.reorder-handle:hover, .reorder-handle:focus-visible { color: var(--text); }
+.dragging .reorder-handle { cursor: grabbing; }
 .np-queue li .np-q-row { flex: 1; min-width: 0; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 10px; text-align: left; background: none; border: 0; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
 .np-queue li .np-q-row:hover { background: var(--surface-2); }
 .np-queue li .np-q-row.on .np-q-title { color: var(--cyan); }
@@ -642,3 +642,19 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
   .identify-form { grid-template-columns: 1fr; }
   .identify-form > span:empty { display: none; }
 }
+
+/* scan progress on a library card (Settings) */
+.scan-progress { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.scan-line { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; }
+.scan-progress .progress.inline { margin-top: 0; }
+.scan-progress .progress.inline > div { transition: width 0.6s ease; }
+
+/* libraries in the sidebar: admins drag them into order by a handle that shows on hover */
+.nav-libs { display: flex; flex-direction: column; gap: 2px; }
+.nav-row { position: relative; border-radius: 10px; }
+.nav-row .nav-item { padding-right: 34px; }
+.nav-handle { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); height: 32px; opacity: 0; }
+.nav-row:hover .nav-handle, .nav-handle:focus-visible, .nav-libs.dragging .nav-handle { opacity: 1; }
+.lib-order { display: inline-flex; gap: 2px; }
+.lib-order .icon-btn:disabled { opacity: 0.3; cursor: default; }
+@media (max-width: 1100px) { .nav-handle { display: none; } .nav-row .nav-item { padding-right: 12px; } }

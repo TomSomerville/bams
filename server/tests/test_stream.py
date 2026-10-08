@@ -56,9 +56,48 @@ def fake_ffmpeg(monkeypatch):
     tried: list[str] = []
     monkeypatch.setattr(stream, "ffmpeg_path", lambda: "ffmpeg")
     monkeypatch.setattr(stream, "_detected", {})
+    monkeypatch.setattr(stream, "_works", {})
+    monkeypatch.setattr(stream, "_preferred", None)
     monkeypatch.setattr(stream, "_encoder_works", lambda exe, enc: tried.append(enc) or enc in works)
     monkeypatch.delenv("BAMS_VIDEO_ENCODER", raising=False)
     return works, tried
+
+
+def test_encoder_choice_cpu_or_gpu(fake_ffmpeg, monkeypatch):
+    """Tester request: pick CPU or GPU. The choice is used if it works here; else automatic; the env var wins."""
+    works, _ = fake_ffmpeg
+    monkeypatch.setattr(stream.sys, "platform", "win32")
+    works.update({"h264_nvenc", "libx264"})
+    assert stream.available_encoders() == ["h264_nvenc", "libx264"]
+    assert stream.video_encoder() == "h264_nvenc"
+    stream.set_preferred("libx264")
+    assert stream.video_encoder() == "libx264"
+    stream.set_preferred("h264_qsv")  # doesn't work here: automatic
+    assert stream.video_encoder() == "h264_nvenc"
+    stream.set_preferred("bogus")
+    assert stream.preferred() is None
+    stream.set_preferred("libx264")
+    monkeypatch.setenv("BAMS_VIDEO_ENCODER", "h264_nvenc")
+    assert stream.encoder_forced() and stream.video_encoder() == "h264_nvenc"
+
+
+def test_encoder_choice_api(fake_ffmpeg, monkeypatch, tmp_path):
+    works, _ = fake_ffmpeg
+    monkeypatch.setattr(stream.sys, "platform", "win32")
+    works.update({"h264_nvenc", "libx264"})
+    paths = Paths(tmp_path / "data")
+    c = signed_in(create_app(paths, start_scheduler=False))
+    e = c.get("/api/settings/encoders").json()
+    assert (e["choice"], e["active"], e["automatic"]) == (None, "h264_nvenc", "h264_nvenc")
+    assert [(o["id"], o["hardware"]) for o in e["options"]] == [("h264_nvenc", True), ("libx264", False)]
+    assert c.put("/api/settings/encoder", json={"encoder": "h264_qsv"}).status_code == 400
+    e = c.put("/api/settings/encoder", json={"encoder": "libx264"}).json()
+    assert (e["choice"], e["active"]) == ("libx264", "libx264")
+    assert c.get("/api/status").json()["video_encoder"]["hardware"] is False
+    stream.set_preferred(None)
+    create_app(paths, start_scheduler=False)  # a restart reads the saved choice
+    assert stream.preferred() == "libx264"
+    assert c.put("/api/settings/encoder", json={"encoder": None}).json()["active"] == "h264_nvenc"
 
 
 def test_encoder_detection_prefers_hardware_and_caches(fake_ffmpeg, monkeypatch):

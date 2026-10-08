@@ -3,9 +3,60 @@ import { api, type ServerStatus } from "../api";
 import Icon from "./Icon";
 
 type TranscodeSettingsShape = { max_transcodes: number; max_transcodes_auto: number };
+type Encoders = {
+  choice: string | null; active: string | null; automatic: string | null; forced: boolean;
+  options: { id: string; name: string; hardware: boolean }[];
+};
+
+/** CPU or GPU: every H.264 encoder that works on the server (each is test-encoded once, so this can take a moment). */
+function EncoderChoice({ onChange }: { onChange?: () => void }) {
+  const [enc, setEnc] = useState<Encoders | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get<Encoders>("/api/settings/encoders").then(setEnc).catch((e) => setErr(e.message));
+  }, []);
+
+  const pick = async (id: string) => {
+    setErr(null);
+    setBusy(true);
+    try {
+      setEnc(await api.put<Encoders>("/api/settings/encoder", { encoder: id || null }));
+      onChange?.();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Media Foundation is Windows' own encoder: it may run on the GPU or the CPU, Windows decides
+  const label = (o: Encoders["options"][number]) => (o.id === "h264_mf" ? "Windows Media Foundation"
+    : `${o.name.replace(" (CPU)", "")} (${o.hardware ? "GPU" : "CPU"})`);
+  if (!enc) return err ? <p className="key-msg bad">{err}</p> : <p className="muted">Checking which encoders work…</p>;
+  if (!enc.options.length) return null;
+  const auto = enc.options.find((o) => o.id === enc.automatic);
+  return (
+    <>
+      <div className="key-row">
+        <label htmlFor="video-encoder">Convert with</label>
+        <select id="video-encoder" className="select" value={enc.choice ?? ""} disabled={enc.forced || busy}
+          onChange={(e) => pick(e.target.value)}>
+          <option value="">{auto ? `Automatic: ${label(auto)}` : "Automatic"}</option>
+          {enc.options.map((o) => <option key={o.id} value={o.id}>{label(o)}</option>)}
+        </select>
+      </div>
+      {enc.forced && <p className="fine-print">Set by the server's <code>BAMS_VIDEO_ENCODER</code> setting.</p>}
+      {!enc.forced && <p className="fine-print">The GPU converts faster and keeps the CPU free; the CPU (x264) can look a
+        little better at the same size. Videos already playing keep what they started with.</p>}
+      {err && <p className="key-msg bad">{err}</p>}
+    </>
+  );
+}
 
 /** Video conversion: which encoder the server found, and how many conversions may run at once. */
-export default function TranscodeSettings({ status }: { status: ServerStatus | null }) {
+export default function TranscodeSettings({ status, onChange }: { status: ServerStatus | null; onChange?: () => void }) {
   const [s, setS] = useState<TranscodeSettingsShape | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -46,6 +97,7 @@ export default function TranscodeSettings({ status }: { status: ServerStatus | n
       {status && !status.ffmpeg && (
         <p className="key-msg warn">FFmpeg wasn't found by the server, so nothing can be converted.</p>
       )}
+      {status?.ffmpeg && <EncoderChoice onChange={() => { onChange?.(); api.get<TranscodeSettingsShape>("/api/settings").then(setS).catch(() => {}); }} />}
       {s && (
         <>
           <div className="key-row">

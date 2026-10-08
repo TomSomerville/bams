@@ -3,6 +3,28 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.3.0 (2026-10-08)
+
+The rest of the first round of testing.
+
+### New
+- **Choose CPU or GPU for converting video:** Settings → Playback → *Convert with*. It lists every encoder that
+  works on your server (for example NVIDIA NVENC on the GPU, x264 on the CPU); *Automatic* picks the best one, as
+  before. Videos already playing keep what they started with.
+- **See how far a scan is, and how much is left:** each library in Settings shows what the scan is doing, "235 of
+  586 files (351 left) · 2.2 GB of 5.4 GB · about 4 min left", with a progress bar.
+- **Put your libraries in your own order:** drag them in the sidebar (admins: a handle shows when you point at
+  one; arrow keys work too), or use the ▲ ▼ buttons on each library in Settings. Everyone sees that order in the
+  sidebar, on Home and in Settings. New libraries go to the end.
+
+### Improved
+- A long scan saves what it has read as it goes, so stopping the server half-way no longer throws that work away.
+- The sidebar updates right away when a library is added, renamed, removed or moved.
+
+### When you update
+- The database is upgraded on the first start (a backup is kept). Your libraries keep alphabetical order until you
+  move them.
+
 ## 0.2.0 (2026-10-08)
 
 Fixes and requests from the first round of testing.

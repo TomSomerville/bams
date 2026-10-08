@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -257,7 +257,14 @@ def _v6(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE files ADD COLUMN manual TEXT")
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6}  # target version -> step
+def _v7(con: sqlite3.Connection) -> None:
+    """v7: libraries in the admin's order (sidebar, Home, Settings); existing ones keep their alphabetical order."""
+    con.execute("ALTER TABLE libraries ADD COLUMN sort_order INTEGER")
+    con.execute("""UPDATE libraries SET sort_order = (SELECT COUNT(*) FROM libraries l2
+                   WHERE l2.name COLLATE NOCASE < libraries.name COLLATE NOCASE)""")
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:
