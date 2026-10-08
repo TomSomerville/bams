@@ -133,6 +133,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | **Show folder = the folder right above the season folder** (not the top folder under the root); without a season folder, the deepest folder that reads as a season pack | Tester's "Star.Trek.Megapack/Star.Trek.DS9/S03/…" put five series into one fake show; "Pack/The Simpsons S28/…" was named after the pack |
 | 10-08 | **Star Trek short forms** (DS9, TNG, TOS, VOY, ENT) are spelled out in the parser | The one franchise where scene packs routinely abbreviate; TMDB only knows the full names (TOS is just "Star Trek") |
 | 10-08 | TMDB: a **near-exact title (≥ 0.95) is accepted even with a wrong year**; TMDB's first result is accepted when its name is the tail of ours ("Star Wars Andor" → "Andor") | Years in scene names are often an episode's air year or a season's; South Park and Parks and Recreation sat at 0.75 for that. Only rank 0 gets the tail rule |
+| 10-08 | A scan **retries `unmatched` titles** when it re-parsed files or when `matcher.MATCHER_VERSION` changed since that library was last matched (else only `pending`) | Parser/matcher fixes otherwise never reach titles that failed once; found on the owner's server after 0.5.0 |
 
 ## 4. Built so far
 
@@ -282,6 +283,17 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Unmatched titles retried after a re-parse or a matcher change (0.5.1)
+- **What / why:** after 0.5.0's scan on the owner's server, South Park, Parks and Recreation, Andor and the Animated
+  Series were still `unmatched`: `match_library` only tries `pending` titles unless `retry_unmatched` (API
+  `?rematch=true`, or setting the TMDB key), and nothing in the UI asks for it. `jobs.should_rematch`: retry when
+  asked, when the scan re-parsed files, or when `matcher.MATCHER_VERSION` differs from the per-library setting
+  `matcher_version:<lib>` (written by `note_matched` after a match).
+- **Files:** `server/bams/jobs.py` (`should_rematch`, `note_matched`, `run_scan`), `matcher.py` (`MATCHER_VERSION`),
+  `tests/test_matcher.py` (+1), `CHANGELOG.md` 0.5.1, `config.VERSION` 0.5.1.
+- **Verified:** 241 tests pass; the owner's server after the 0.5.1 scan (see the next entry's numbers for the rest).
+- **Left open:** no "retry unmatched" button in the UI; bump `MATCHER_VERSION` when matching rules change.
 
 ### 2026-10-08: Nested packs, extras with a season in their name, exact titles vs wrong years (parser v6)
 - **What / why:** owner: 195 files in the TV library were "unrecognized" though "they use default naming". 139 were

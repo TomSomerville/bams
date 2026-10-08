@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 
 ACCEPT = 0.80
 EXACT = 0.95   # a near-exact title is accepted even when the year from the file name is wrong
+# Bump when matching rules change: the next scan of each library retries its 'unmatched' titles once.
+MATCHER_VERSION = 2
 REFRESH_AFTER = 150 * 86400  # TMDB terms: cached data no older than 6 months; refresh at ~5
 POSTER, BACKDROP, STILL, SEASON_POSTER = "w500", "w1280", "w300", "w342"
 

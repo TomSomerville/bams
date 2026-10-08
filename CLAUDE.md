@@ -177,6 +177,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   several shows ("Megapack/Star.Trek.DS9/S03/…"). A file with a season in its name but no episode, under a season
   folder, is an unnumbered extra. Years that follow "Series N" in a folder are the season's. New layout? Add the real
   path to `test_parse.py` and dry-run the parser over a DB **copy** of the owner's library before shipping.
+- **Changing matching rules?** Bump `matcher.MATCHER_VERSION` or titles that failed once are never retried (scans only try `pending` titles otherwise). Parser bumps retry them by themselves.
 - **Two `test_stream.py` encoder tests fail on a machine with NVENC** (`test_encoder_choice_api`,
   `test_remux_over_hls_lines_up_across_runs`); they expect a CPU-only box. Not a regression.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

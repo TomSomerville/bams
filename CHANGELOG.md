@@ -3,6 +3,14 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.5.1 (2026-10-08)
+
+### Fixed
+- **Titles that failed to match once stayed unmatched** even after a parser or matcher fix: a scan only tried
+  titles it hadn't tried before. Now a scan retries them when it re-read file names (a parser upgrade) and the
+  first time after the matching rules change. After 0.5.0, South Park, Parks and Recreation, Andor and Star Trek:
+  The Animated Series sat unmatched for that reason; the next scan picks them up.
+
 ## 0.5.0 (2026-10-08)
 
 Fixes from the second round of testing: 195 "unrecognized" files in one library, most of them in a nested

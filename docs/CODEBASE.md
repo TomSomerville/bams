@@ -519,6 +519,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
 | Change how files group into shows | `items.get_or_create_title`, `parse.title_key` |
 | Tune TMDB matching | `matcher.score` (tail-of-ours rule), `matcher.best_match`, `matcher.choose` (exact title vs wrong year), `ACCEPT`, `EXACT` |
+| Make failed TMDB matches get retried | bump `matcher.MATCHER_VERSION` (per-library setting `matcher_version:<id>`, `jobs.should_rematch`); one-off: `POST /api/libraries/{id}/scan?rematch=true` |
 | Change which folder names the show | `parse._show_dir` (season folder → the folder above; else deepest season-pack folder), `parse._folder_year` |
 | Add an API field the UI needs | serialiser in `app.py` (`item_summary`/`item_detail`/`file_info`) + type in `web/src/api.ts` |
 | Add a page | `web/src/pages/*.tsx` + route in `App.tsx` (+ Sidebar link) |
