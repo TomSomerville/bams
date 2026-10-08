@@ -27,3 +27,6 @@ branding/archive/**/concepts/
 
 # Claude Code local settings
 .claude/settings.local.json
+*.tsbuildinfo
+*.egg-info/
+.pytest_cache/

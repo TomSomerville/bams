@@ -1,38 +1,33 @@
 import { useState } from "react";
-import type { Item } from "../data";
-import { backdropUrl, posterUrl } from "../data";
 
-// Placeholder gradient (in brand colors) shown while art is missing — the same fallback
-// the real app will use for unmatched items.
+// Shown when an item has no artwork (not matched on TMDB yet, or TMDB has none):
+// a brand-colour gradient with the title, picked consistently per title.
 const HUES = ["#4257cd", "#844cbd", "#c34b73", "#f78737", "#2f9fd0"];
-function fallbackBg(id: string) {
+function fallbackBg(seed: string) {
   let h = 0;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const a = HUES[h % HUES.length];
-  const b = HUES[(h >> 3) % HUES.length];
-  return `linear-gradient(150deg, ${a}, ${b} 70%, #0f1216)`;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `linear-gradient(150deg, ${HUES[h % HUES.length]}, ${HUES[(h >> 3) % HUES.length]} 70%, #0f1216)`;
 }
 
-export function Poster({ item, className = "" }: { item: Item; className?: string }) {
+type ArtProps = { src: string | null | undefined; title: string; className?: string };
+
+export function Poster({ src, title, className = "" }: ArtProps) {
   const [failed, setFailed] = useState(false);
-  return failed ? (
-    <div className={`art-fallback ${className}`} style={{ background: fallbackBg(item.id) }}>
-      <span>{item.title}</span>
-    </div>
+  return src && !failed ? (
+    <img className={className} src={src} alt={title} loading="lazy" onError={() => setFailed(true)} />
   ) : (
-    <img className={className} src={posterUrl(item)} alt={item.title} loading="lazy" onError={() => setFailed(true)} />
+    <div className={`art-fallback ${className}`} style={{ background: fallbackBg(title) }}><span>{title}</span></div>
   );
 }
 
-/** Backdrop if the item has one, otherwise its poster stretched and blurred. */
-export function Backdrop({ item, className = "" }: { item: Item; className?: string }) {
+/** Wide art: the backdrop if there is one, else the poster blurred behind a sharp copy of it. */
+export function Backdrop({ src, poster, title, className = "" }: ArtProps & { poster?: string | null }) {
   const [failed, setFailed] = useState(false);
-  const src = backdropUrl(item);
   if (src && !failed) return <img className={className} src={src} alt="" onError={() => setFailed(true)} />;
   return (
-    <div className={`${className} backdrop-blur`} style={{ background: fallbackBg(item.id) }}>
-      <div className="bb-fill"><Poster item={item} /></div>
-      <div className="bb-poster"><Poster item={item} /></div>
+    <div className={`${className} backdrop-blur`} style={{ background: fallbackBg(title) }}>
+      {poster && <div className="bb-fill"><Poster src={poster} title={title} /></div>}
+      {poster && <div className="bb-poster"><Poster src={poster} title={title} /></div>}
     </div>
   );
 }
