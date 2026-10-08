@@ -27,7 +27,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O3 | Identify and categorise media (look it up "like Plex", via naming conventions) | ✅ guessit parser + TMDB matching; music: tags/folders + MusicBrainz |
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
 | O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests |
-| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ code is portable; systemd unit done; Windows service packaging not yet |
+| O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.1.0) |
 | O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
 | O8 | Configure libraries (folders) in the UI | ✅ Settings, with a server-side folder picker |
@@ -89,11 +89,20 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | **Subtitles**: text → WebVTT through `<track>` (cached in the data dir); image (PGS/VobSub/DVB) → **burned in** to a conversion, read from a second input seeked 30 s earlier | Browsers render WebVTT natively; burn-in from the same input misses the line already on screen when a run starts mid-cue |
 | 10-08 | **5.1 AAC** only when the viewer picks Surround (per browser), stereo by default; another audio track than the first plays through the remux | Laptops/phones are stereo; browsers only play a file's first track |
 | 10-08 | HTML pages are served with `cache-control: no-cache`; unknown `/assets/` paths 404 instead of falling back to the page | A cached old page after a UI rebuild named scripts that no longer exist (blank page) |
+| 10-08 | **Installers**: Inno Setup `.exe` for Windows, a `.deb` built in Python for Debian/Ubuntu/Mint; one file, double-click; a newer one installs over the old one and keeps data, settings and choices | Owner: "ungodly easy", "double click install and done", updates without reinstalling or reconfiguring |
+| 10-08 | Windows: BAMS runs as a **Windows service under LocalSystem** (WinSW 2.12), starts at boot | Owner chose this over "run at sign-in as the user". Cost: mapped drive letters and password-protected NAS shares aren't visible; use `\\NAS\share` with guest/computer read access |
+| 10-08 | Windows bundles an **embeddable Python 3.13** + locked packages; FFmpeg (gyan.dev 9.0.2 full-shared) is **downloaded by the installer** on the user's machine from its publisher, SHA-256 pinned | Nothing to install by hand; BAMS still never redistributes FFmpeg (GPL) |
+| 10-08 | Linux: apt pulls `python3`, `python3-venv`, `ffmpeg`; the `.deb` carries wheels for Python 3.11–3.14 × x86_64/aarch64, installed offline into `/opt/bams/venv` | Works across Debian 12 / Ubuntu 24.04 / Mint 22 / Debian 13 Pythons; distro packages of FastAPI are too old |
+| 10-08 | Linux: the service runs as the **installing (desktop) user**, still `ProtectSystem=strict` + `ProtectHome=read-only` | A `bams` system user can't read 750 home folders or udisks USB mounts (Plex's #1 Linux problem); the kernel keeps media read-only either way |
+| 10-08 | `/etc/default/bams` is written once by postinst, **not a conffile** | A conffile prompt would stop a double-click upgrade |
+| 10-08 | Python dependencies locked with hashes (`deploy/requirements.txt`, `uv pip compile --universal`) | Installers ship exactly what the tests ran against |
+| 10-08 | TMDB key guide is a page inside BAMS (`/help/tmdb.html`), not a repo doc | The repo is private; the people who need the guide only have BAMS |
+| 10-08 | Saving a TMDB key queues a scan (with rematch) of every TV/movie library | Posters appear right after setup instead of at the next scheduled scan |
 | 10-08 | Logo tagline changed from "Your Personal Media Stream" to "Bad Ass Media Server"; logo set redrawn at higher res (`tools/brand_art/rework.py`) | Owner request |
 
 ## 4. Built so far
 
-### Server (`server/`, ~5,900 lines + 172 tests)
+### Server (`server/`, ~5,900 lines + 173 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval. Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -137,7 +146,12 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback.
 - **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting.
 - **API:** ~40 endpoints (see CODEBASE.md). **CLI:** `bams serve|library|scan|tmdb-key|status`.
-- **Deploy:** `deploy/linux/bams.service` (hardened systemd unit; kernel-level read-only media).
+- **Installers** (`deploy/`, v0.1.0): `build.py` makes `BAMS-Setup-<v>.exe` (Inno Setup: embeddable Python + locked
+  packages, FFmpeg downloaded at install with a pinned hash, WinSW service, firewall rule for private networks,
+  admin-only data dir, update in place, uninstall that asks before deleting data) and `bams_<v>_all.deb` (offline wheels,
+  venv, systemd unit as the desktop user, `/etc/default/bams`, ufw, update in place, remove keeps / purge deletes data).
+  User guide `docs/INSTALL.md`; build/release notes `deploy/README.md`. In-app TMDB key guide `/help/tmdb.html`.
+- **Deploy (manual):** `deploy/linux/bams.service` (hardened systemd unit; kernel-level read-only media).
 
 ### Web (`web/`, React 19 + Vite + TS, ~2,600 lines + 530 lines CSS)
 - Pages: Home (hero, Recently Added, per-library rows, Top Rated, genre rows), Library grid (sort, genre
@@ -159,7 +173,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 
 ### Docs
 README.md, CLAUDE.md, docs/PLAN.md, docs/STATUS.md, docs/CODEBASE.md, docs/FORMATS.md, docs/READ-ONLY.md,
-server/README.md.
+docs/INSTALL.md, deploy/README.md, server/README.md.
 
 ## 5. Not built yet / next
 
@@ -171,7 +185,8 @@ Roughly in priority order:
    albums pinned to the same MusicBrainz release, periodic refresh of matched music data, pick up a `cover.jpg`
    added after an album already has art, lossless (FLAC) output option for converted files.
 4. **ISO / DVD / Blu-ray folders** (phase 3).
-5. **Packaging**: Windows service + installer, `.deb`, Docker. **CI** on Windows + Ubuntu.
+5. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning), Docker image, an apt repository for
+   automatic updates, an in-app "update available" notice. **CI** on Windows + Ubuntu (build both installers too).
 6. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
@@ -207,6 +222,38 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Installers (Windows + Debian/Ubuntu/Mint), updates in place, TMDB key guide
+- **What / why:** owner asked for deployment and packaging that is "ungodly easy": double-click install, all
+  dependencies fetched first, updates installed right over the top without redoing config, DBs or libraries, and a
+  TMDB key write-up with screenshots. **Windows:** Inno Setup installer with embeddable Python 3.13.16 + hash-locked
+  packages; downloads FFmpeg 9.0.2 (gyan.dev full-shared, SHA-256 pinned) into `{app}\ffmpeg`; WinSW service `BAMS`
+  (LocalSystem, automatic, restart on failure; owner chose a boot service over run-at-sign-in); task "home network" →
+  `0.0.0.0` + firewall rule (private/domain); data `C:\ProgramData\BAMS` (SYSTEM + Administrators only); waits for the
+  server and opens it; updates skip the questions, stop the service, replace only program folders, keep FFmpeg; uninstall
+  asks before deleting data. **Linux:** `.deb` assembled in Python (builds on Windows), wheels for 3.11–3.14 ×
+  x86_64/aarch64, postinst builds `/opt/bams/venv`, runs the service as the installing user via a drop-in from
+  `/etc/default/bams`, opens ufw if active; remove keeps data, purge deletes it. **Server:** finds the installed UI
+  (`bams/web`) and the installer's FFmpeg (`probe.app_ffmpeg_dir`); folder picker offers `C:\Users` when running as
+  SYSTEM; saving a TMDB key queues video libraries for matching. **UI:** TMDB guide page with screenshots
+  (`/help/tmdb.html`), linked from the key card and the Start menu; UNC hint in the folder picker; the server-unreachable
+  banner no longer says to run Python. Version is single-sourced from `config.VERSION`.
+- **Files:** new `deploy/build.py`, `pins.json`, `requirements.txt`, `README.md`, `windows/` (`bams.iss`, `bams.cmd`,
+  `bams.ico`, `wizard-small.png`), `linux/` (`debian/control|postinst|prerm|postrm`, `bams`, `bams.desktop`, `bams.png`;
+  `bams.service` reads `/etc/default/bams`), `docs/INSTALL.md`, `web/public/help/` (`tmdb.html`, `img/`); changed
+  `server/bams/__main__.py` (`_web_dir`), `probe.py` (`app_ffmpeg_dir`), `stream.py`, `fsbrowse.py`, `app.py` (key →
+  scans), `pyproject.toml` (dynamic version), `tests/test_api.py`; web `TmdbSettings.tsx`, `FolderPicker.tsx`,
+  `ConfigBanner.tsx`; README, READ-ONLY.md, CODEBASE.md, CLAUDE.md, `.gitignore` (`/build/`, `/dist/`), `.gitattributes`.
+- **Verified:** 173 tests on Python 3.11 and 3.13 with the locked packages. `.deb` in Docker: Debian 12 and Ubuntu
+  24.04 install → setup → UI + guide → reinstall → login kept → remove keeps data → purge clean; Debian 12 under real
+  systemd: running as the desktop user, `/home` read-only to it, 0.1.0 → 0.1.1 upgrade restarted it with the account
+  kept. Windows on the owner's PC: install (FFmpeg fetched, service LocalSystem/auto, 0.0.0.0, firewall rule, data dir
+  closed), status shows the installer's FFmpeg + NVENC, same version over the top, 0.1.0 → 0.1.1 while running (no second
+  FFmpeg download, choices reused, login kept), uninstall (service, rule, program files gone; data kept). Found and fixed:
+  `icacls /inheritance:r /T` emptied the ACLs of existing files, so updates couldn't start (owner saw "Starting BAMS"
+  hang). Guide checked at desktop and phone widths. Owner signed off; released as GitHub release v0.1.0.
+- **Left open:** TMDB's signed-in API pages have no screenshots (text steps only); the `.exe` isn't code-signed; no
+  automatic update check; the test `C:\ProgramData\BAMS` on the owner's PC may still exist.
 
 ### 2026-10-08: Users + login, watch state, subtitles, audio tracks, playback follow-ups
 - **What / why:** owner asked to "oneshot" items 1-5 of §5. **Accounts:** schema v4 (`users`, `sessions`,

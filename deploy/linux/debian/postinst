@@ -1,0 +1,115 @@
+#!/bin/sh
+# BAMS postinst: runs on first install, on every update (dpkg installs over the old version) and on
+# `dpkg-reconfigure bams`. Everything here is safe to repeat. The data (/var/lib/bams) and the settings
+# (/etc/default/bams) are only ever created, never reset.
+set -e
+
+VENV=/opt/bams/venv
+DEFAULTS=/etc/default/bams
+DROPIN_DIR=/etc/systemd/system/bams.service.d
+DATA=/var/lib/bams
+
+# Who BAMS runs as. It reads your media with this account's permissions (systemd keeps it read-only).
+# Whoever installed it, else the computer's first person account (so it can see your home folder and
+# USB drives), else a system account `bams`.
+pick_user() {
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+        echo "$SUDO_USER"; return
+    fi
+    if [ -n "${PKEXEC_UID:-}" ]; then
+        n=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+        if [ -n "$n" ] && [ "$n" != root ]; then echo "$n"; return; fi
+    fi
+    n=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $6 ~ /^\/home\// && $7 !~ /(nologin|false)$/ { print $1; exit }')
+    if [ -n "$n" ]; then echo "$n"; return; fi
+    echo bams
+}
+
+write_defaults() {
+    cat > "$DEFAULTS" <<EOF
+# BAMS settings. After changing them run:  sudo dpkg-reconfigure bams
+# (updates keep this file as it is)
+
+# The account BAMS runs as. It reads your media with this account's permissions and never writes to it.
+BAMS_USER=$1
+
+# 0.0.0.0 = other devices on your network can watch (everyone signs in); 127.0.0.1 = this computer only.
+BAMS_HOST=0.0.0.0
+BAMS_PORT=8484
+EOF
+    chmod 644 "$DEFAULTS"
+}
+
+setup_venv() {
+    # rebuilt on every install/update: it matches this system's Python and this version's packages
+    rm -rf "$VENV"
+    python3 -m venv "$VENV"
+    if ! "$VENV/bin/pip" install --quiet --disable-pip-version-check --no-index --find-links /opt/bams/wheels \
+            --require-hashes -r /opt/bams/requirements.txt; then
+        echo "bams: some packages for this Python version aren't in the package; downloading them from PyPI" >&2
+        "$VENV/bin/pip" install --quiet --disable-pip-version-check --find-links /opt/bams/wheels \
+            --require-hashes -r /opt/bams/requirements.txt
+    fi
+    site=$("$VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+    echo /opt/bams/lib > "$site/bams.pth"
+    "$VENV/bin/python" -m compileall -q /opt/bams/lib >/dev/null || true
+}
+
+case "$1" in
+configure)
+    [ -f "$DEFAULTS" ] || write_defaults "$(pick_user)"
+    BAMS_USER=bams
+    BAMS_HOST=0.0.0.0
+    BAMS_PORT=8484
+    . "$DEFAULTS"
+    if ! getent passwd "$BAMS_USER" >/dev/null; then
+        [ "$BAMS_USER" = bams ] || echo "bams: account '$BAMS_USER' (from $DEFAULTS) doesn't exist; using 'bams'" >&2
+        BAMS_USER=bams
+    fi
+    if [ "$BAMS_USER" = bams ] && ! getent passwd bams >/dev/null; then
+        useradd --system --user-group --home-dir "$DATA" --no-create-home --shell /usr/sbin/nologin bams
+    fi
+    group=$(id -gn "$BAMS_USER")
+    extra=""
+    for g in video render; do  # GPU video encoding/decoding (VAAPI)
+        getent group "$g" >/dev/null && extra="$extra $g"
+    done
+
+    mkdir -p "$DROPIN_DIR"
+    cat > "$DROPIN_DIR/10-user.conf" <<EOF
+# Written by the bams package from $DEFAULTS. Edit that file, then: sudo dpkg-reconfigure bams
+[Service]
+User=$BAMS_USER
+Group=$group
+SupplementaryGroups=$extra
+EOF
+
+    mkdir -p "$DATA"
+    chown -R "$BAMS_USER:$group" "$DATA"
+    chmod 750 "$DATA"
+
+    setup_venv
+
+    case "$BAMS_HOST" in
+    127.*|localhost|::1) ;;
+    *)
+        if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+            ufw allow "$BAMS_PORT/tcp" comment BAMS >/dev/null 2>&1 || true
+        fi
+        ;;
+    esac
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl enable bams.service >/dev/null 2>&1 || true
+        systemctl restart bams.service || true
+    fi
+
+    echo
+    echo "BAMS is installed and runs as '$BAMS_USER'. Open http://localhost:$BAMS_PORT on this computer"
+    echo "to create the admin account. Settings: $DEFAULTS"
+    echo
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,27 @@
+{
+  "_comment": "Third-party downloads used by the installers, pinned by version and SHA-256. deploy/build.py checks every hash. Python and WinSW go into the Windows installer; FFmpeg is NOT bundled (licence): the Windows installer downloads it from its publisher on the user's machine and checks this hash. To update one, change url + version + sha256 together and rebuild.",
+  "python_embed": {
+    "version": "3.13.16",
+    "url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip",
+    "sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297",
+    "licence": "PSF-2.0"
+  },
+  "winsw": {
+    "version": "2.12.0",
+    "url": "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW.NET461.exe",
+    "sha256": "b5066b7bbdfba1293e5d15cda3caaea88fbeab35bd5b38c41c913d492aadfc4f",
+    "licence": "MIT"
+  },
+  "ffmpeg_windows": {
+    "version": "9.0.2",
+    "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-full_build-shared.zip",
+    "sha256": "8d31e162f1616e37aab3fa2db991b97e1b8dbeb1c8465fd81a81be16ff91b328",
+    "folder": "ffmpeg-9.0.2-full_build-shared",
+    "size_mb": 96,
+    "licence": "GPL-3.0 (downloaded by the user's installer, never redistributed by BAMS)"
+  },
+  "linux_wheels": {
+    "python": ["3.11", "3.12", "3.13", "3.14"],
+    "platforms": ["x86_64", "aarch64"]
+  }
+}

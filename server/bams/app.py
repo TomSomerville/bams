@@ -557,6 +557,9 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             t.close()
         set_setting(con, "tmdb_key", body.key.strip())
         set_setting(con, "tmdb_verified_at", verified)
+        # titles scanned before the key existed get their posters now, not at the next scheduled scan
+        for r in con.execute("SELECT id FROM libraries WHERE type IN ('show', 'movie')").fetchall():
+            scheduler.request(r["id"], "tmdb-key", retry_unmatched=True)
         return _tmdb_status(con)
 
     @app.delete("/api/settings/tmdb-key", dependencies=ADMIN)

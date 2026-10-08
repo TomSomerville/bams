@@ -1,0 +1,16 @@
+#!/bin/sh
+# BAMS command line (installed by the bams package). Runs as the account the BAMS service runs as,
+# on the same data, e.g.:  sudo bams user passwd NAME   (set a forgotten password)
+#                          sudo bams status
+set -e
+BAMS_USER=bams
+[ -r /etc/default/bams ] && . /etc/default/bams
+export BAMS_DATA_DIR="${BAMS_DATA_DIR:-/var/lib/bams}"
+PY=/opt/bams/venv/bin/python
+if [ "$(id -un)" = "$BAMS_USER" ]; then
+    exec "$PY" -m bams "$@"
+fi
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo "$0" "$@"
+fi
+exec runuser -u "$BAMS_USER" -- env BAMS_DATA_DIR="$BAMS_DATA_DIR" PYTHONDONTWRITEBYTECODE=1 "$PY" -m bams "$@"

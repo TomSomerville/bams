@@ -1,11 +1,15 @@
-# BAMS systemd unit (Debian / Ubuntu / Linux Mint).
+# BAMS systemd unit (Debian / Ubuntu / Linux Mint), installed by the bams .deb.
 #
 # The kernel enforces read-only media here, not just BAMS: with ProtectSystem=strict the whole
 # filesystem is read-only to this service except StateDirectory (/var/lib/bams), and
-# ProtectHome=read-only covers /home. Media mounted under /mnt, /media or /srv is therefore
-# read-only to BAMS even if the bams user had write permission there.
+# ProtectHome=read-only covers /home. Media anywhere (/home, /mnt, /media, /srv) is therefore
+# read-only to BAMS even if the account it runs as could write there.
 #
-# Install:
+# Settings live in /etc/default/bams (address, port, the account BAMS runs as). The package writes
+# that file once and never overwrites it; postinst turns BAMS_USER into a drop-in
+# (/etc/systemd/system/bams.service.d/10-user.conf). After editing it: sudo dpkg-reconfigure bams
+#
+# Without the package (manual install into /opt/bams/venv):
 #   sudo useradd --system --home /var/lib/bams --shell /usr/sbin/nologin bams
 #   sudo cp bams.service /etc/systemd/system/ && sudo systemctl daemon-reload
 #   sudo systemctl enable --now bams
@@ -23,8 +27,9 @@ Type=simple
 User=bams
 Group=bams
 StateDirectory=bams
-Environment=BAMS_DATA_DIR=/var/lib/bams
-ExecStart=/opt/bams/venv/bin/bams serve --host 127.0.0.1 --port 8484
+Environment=BAMS_DATA_DIR=/var/lib/bams BAMS_HOST=127.0.0.1 BAMS_PORT=8484 PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/default/bams
+ExecStart=/opt/bams/venv/bin/python -m bams serve --host ${BAMS_HOST} --port ${BAMS_PORT}
 Restart=on-failure
 RestartSec=5
 

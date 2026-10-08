@@ -35,7 +35,11 @@ FILE_OK_CONTAINERS = {"MP4", "MKV", "WebM"}       # Chromium plays these directl
 
 
 def ffmpeg_path() -> str | None:
-    if exe := os.environ.get("BAMS_FFMPEG") or shutil.which("ffmpeg"):
+    if exe := os.environ.get("BAMS_FFMPEG"):
+        return exe
+    if (d := probe.app_ffmpeg_dir()) and (d / "ffmpeg.exe").is_file():
+        return str(d / "ffmpeg.exe")
+    if exe := shutil.which("ffmpeg"):
         return exe
     fp = probe.ffprobe_path()  # usually installed side by side
     if fp:
