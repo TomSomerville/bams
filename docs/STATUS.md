@@ -228,7 +228,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   search, older).
 - Sign-in / first-admin screens (`auth.tsx`), account menu, Settings → Accounts (password, users); viewers see only
   their account. Continue Watching row, watched ticks / unwatched counts / progress bars, mark watched on movie,
-  show, season and episode, Resume / Start over. Player: resume, progress reports, up-next countdown, sound menu
+  show, season and episode, Resume / Start over; Continue Watching cards link the show and the episode's season. Player:
+  resume, progress reports, up-next countdown (at the end and 30 s before it), next-episode button, skip +30 / −10 s, sound menu
   (tracks, Surround, Dolby pass-through on/off), subtitles menu (text via `<track>`, picture incl. VobSub = burned in),
   quality Original / Auto / sizes, remux over HLS with fallback to the live remux.
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
@@ -283,6 +284,25 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-08: Tester session 2: Continue Watching links, next episode, credits countdown, 30 s skip (release 0.5.3)
+- **What / why:** tester requests. Continue Watching card: picture plays, show name opens the show, episode line opens
+  its season (`/title/<show>?season=<season id>`; `/api/continue` adds `season_id`, Detail picks the tab from it).
+  Player: a next-episode button (keeps the place, not counted watched); the up-next countdown also starts 30 s before
+  the end (`CREDITS`; not on videos under 2 min), pauses with playback, Cancel hides it for that viewing, and leaving
+  from it counts the episode as finished (`finished` ref → the leave report sends the duration); skip forward 30 s,
+  back 10 s (buttons labelled, arrow keys the same). Bug "Firefox: spot saved but starts over": the copy-HLS → live
+  remux fallback restarting from 0, already fixed in 0.5.2; confirmed with headless Firefox 157 through an injecting
+  proxy (normal HLS resumes; a forced HLS failure resumes the live remux at the saved 10:00).
+- **Files:** `web/src/components/Cards.tsx`, `web/src/pages/Detail.tsx`, `web/src/pages/Player.tsx`, `web/src/api.ts`,
+  `web/src/styles.css`, `server/bams/app.py` (`/api/continue`), `tests/test_watch.py`, `CHANGELOG.md` 0.5.3,
+  `config.VERSION` 0.5.3.
+- **Verified:** 245 tests pass. Test instance with the owner's Bob's Burgers S03+S04 (read-only): card links
+  (`/play/12`, `/title/4`, `/title/4?season=5` → Season 4 tab, not the default Season 3); skip +30.4 / −9.5 s; the
+  panel appears with 28 s left, holds at 9 while paused, the countdown → `/play/13` with 12 watched; Cancel keeps it
+  hidden; the next button at 3:22 → 14 kept at 3:22, unwatched. Screenshot of the controls at phone width.
+- **Left open:** arrow keys changed to 30/10 with the buttons (owner may prefer 10/10). Real credit lengths per show
+  aren't known: `CREDITS` is a fixed 30 s.
 
 ### 2026-10-08: AC3 → AAC playback: picture behind the sound after a skip, resume lost (release 0.5.2)
 - **What / why:** owner (laptop, Firefox, a scan running): after fast-forwarding an AC3 episode the picture ran behind

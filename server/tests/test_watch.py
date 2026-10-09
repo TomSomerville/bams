@@ -74,6 +74,8 @@ def test_continue_watching(tv):
     c.put(f"/api/items/{ep[(2, 1)]}/progress", json={"position": 400, "duration": 1300})
     [r] = c.get("/api/continue").json()
     assert r["id"] == ep[(2, 1)] and r["reason"] == "resume" and r["progress"]["position"] == 400
+    season2 = c.get(f"/api/items/{ep[(2, 1)]}").json()["ancestors"][-1]
+    assert season2["kind"] == "season" and r["season_id"] == season2["id"]  # the card's episode line opens it
     c.put(f"/api/items/{ep[(2, 1)]}/progress", json={"position": 1250, "duration": 1300})
     assert c.get("/api/continue").json() == []  # the show is finished (the special isn't offered)
     assert c.get(f"/api/items/{ep[(1, 3)]}").json()["next_id"] == ep[(2, 1)]

@@ -26,6 +26,8 @@ type Quality = "auto" | number | null;
 const QUALITIES = [2160, 1440, 1080, 720, 480, 360];
 const FULL = 99999;  // "Full size": converted (the browser can't play the original) at the largest size
 const SPEED_MIN = 0.1, SPEED_MAX = 3;
+const SKIP_FORWARD = 30, SKIP_BACK = 10;  // seconds (buttons and arrow keys)
+const CREDITS = 30;  // the up-next countdown starts this long before an episode ends (the credits)
 const clampSpeed = (r: number) => Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, r)) * 100) / 100;
 const KEYS = { quality: "bams.quality", audioLang: "bams.audioLang", subLang: "bams.subLang", surround: "bams.surround",
                passthrough: "bams.passthrough" };
@@ -145,6 +147,8 @@ function Player({ id }: { id: string }) {
   const [upNext, setUpNext] = useState<number | null>(null);   // seconds until the next episode starts
   const idleTimer = useRef<number | undefined>(undefined);
   const played = useRef(false);  // playback really got going (only then is the position worth saving)
+  const finished = useRef(false); // left for the next episode from the credits: counts as watched to the end
+  const skipCredits = useRef(false); // the viewer cancelled the credits' up-next: not again this viewing
 
   const file = item?.files.find((f) => f.available) ?? item?.files[0];
   const show = item?.ancestors.find((a) => a.kind === "show");
@@ -311,7 +315,7 @@ function Player({ id }: { id: string }) {
     return () => clearInterval(timer);
   }, [playing]);
   useEffect(() => {
-    const leave = () => reportRef.current(posRef.current, true);
+    const leave = () => reportRef.current(finished.current ? totalRef.current : posRef.current, true);
     window.addEventListener("pagehide", leave);
     return () => { window.removeEventListener("pagehide", leave); leave(); };
   }, []);
@@ -319,13 +323,17 @@ function Player({ id }: { id: string }) {
   // Up next: when an episode ends, the next one starts after a short countdown.
   useEffect(() => {
     if (upNext === null || !item?.next_id) return;
-    if (upNext <= 0) {
-      nav(`/play/${item.next_id}`, { replace: true });
-      return;
-    }
+    if (upNext <= 0) return goNext(true);
+    if (!playing && !video.current?.ended) return;  // paused during the credits: so is the countdown
     const timer = setTimeout(() => setUpNext(upNext - 1), 1000);
     return () => clearTimeout(timer);
-  }, [upNext, item?.next_id, nav]);
+  }, [upNext, item?.next_id, playing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The credits: the up-next countdown starts CREDITS seconds before the end, as if the episode were over.
+  const inCredits = !!item?.next_id && total > 4 * CREDITS && pos >= total - CREDITS;
+  useEffect(() => {
+    if (inCredits && playing && upNext === null && !skipCredits.current) setUpNext(10);
+  }, [inCredits, playing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (resumed === null) return;
@@ -406,6 +414,12 @@ function Player({ id }: { id: string }) {
     if (!!next?.image !== !!subTrack?.image || (next?.image && next.id !== subTrack?.id)) continueAt(pos); // burned in or out: a new stream
     setSub(sid);
   };
+  /** On to the next episode. `done`: from the credits / the end, so this one counts as watched. */
+  const goNext = (done: boolean) => {
+    if (!item?.next_id) return;
+    finished.current = done;  // the report on leaving says where this one ended
+    nav(`/play/${item.next_id}`, { replace: true });
+  };
   const fullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else shell.current?.requestFullscreen?.();
@@ -424,8 +438,8 @@ function Player({ id }: { id: string }) {
     const key = (e: KeyboardEvent) => {
       if (e.key === " " || e.key === "k") { e.preventDefault(); toggle(); }
       if (e.key === "Escape" && !document.fullscreenElement) nav(-1);
-      if (e.key === "ArrowRight") seekRef.current(posRef.current + 10);
-      if (e.key === "ArrowLeft") seekRef.current(posRef.current - 10);
+      if (e.key === "ArrowRight") seekRef.current(posRef.current + SKIP_FORWARD);
+      if (e.key === "ArrowLeft") seekRef.current(posRef.current - SKIP_BACK);
       if (e.key === "f") fullscreen();
       if (e.key === ">" || e.key === "<") setRate((r) => clampSpeed(r + (e.key === ">" ? 0.25 : -0.25)));
       if (e.key === "m" && video.current) { video.current.muted = !video.current.muted; setMuted(video.current.muted); }
@@ -515,9 +529,9 @@ function Player({ id }: { id: string }) {
       {nextUp && (
         <div className="up-next">
           <span className="muted">Next episode in {upNext}…</span>
-          <button className="btn primary small" onClick={() => nav(`/play/${item.next_id}`, { replace: true })}>
+          <button className="btn primary small" onClick={() => goNext(true)}>
             <Icon name="play" size={16} /> Play now</button>
-          <button className="btn ghost small" onClick={() => setUpNext(null)}>Cancel</button>
+          <button className="btn ghost small" onClick={() => { skipCredits.current = true; setUpNext(null); }}>Cancel</button>
         </div>
       )}
       {!playing && !problem && !nextUp && file && (
@@ -559,8 +573,14 @@ function Player({ id }: { id: string }) {
           <button className="icon-btn" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
             <Icon name={playing ? "pause" : "play"} size={28} />
           </button>
-          <button className="icon-btn" onClick={() => seek(pos - 10)} aria-label="Back 10 seconds"><Icon name="chevronLeft" size={24} /></button>
-          <button className="icon-btn" onClick={() => seek(pos + 10)} aria-label="Forward 10 seconds"><Icon name="chevronRight" size={24} /></button>
+          <button className="icon-btn skip-btn" onClick={() => seek(pos - SKIP_BACK)} aria-label={`Back ${SKIP_BACK} seconds`}
+            title={`Back ${SKIP_BACK} s (←)`}><Icon name="chevronLeft" size={24} /><span>{SKIP_BACK}</span></button>
+          <button className="icon-btn skip-btn" onClick={() => seek(pos + SKIP_FORWARD)} aria-label={`Forward ${SKIP_FORWARD} seconds`}
+            title={`Forward ${SKIP_FORWARD} s (→)`}><span>{SKIP_FORWARD}</span><Icon name="chevronRight" size={24} /></button>
+          {item.next_id && (
+            <button className="icon-btn" onClick={() => goNext(false)} aria-label="Next episode" title="Next episode">
+              <Icon name="skipForward" size={22} /></button>
+          )}
           <button className={`icon-btn ${muted ? "off" : ""}`} aria-label={muted ? "Unmute" : "Mute"}
             onClick={() => { if (video.current) { video.current.muted = !video.current.muted; setMuted(video.current.muted); } }}>
             <Icon name="volume" size={24} />

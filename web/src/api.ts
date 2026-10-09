@@ -145,6 +145,7 @@ export type ItemSummary = {
 export type ContinueItem = ItemSummary & {
   reason: "resume" | "next";
   show?: { id: number; title: string; poster: string | null; backdrop: string | null };
+  season_id?: number;  // episodes: their season (the card's episode line opens it)
 };
 
 export type AudioTrack = { index: number; label: string; language: string | null; codec: string | null;

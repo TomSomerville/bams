@@ -95,7 +95,8 @@ bams/
 │       │   ├── Combo.tsx      Text field with as-you-type suggestions (keyboard + mouse)
 │       │   ├── ConfigBanner.tsx  "TMDB key not configured" (admins) → /settings#tmdb; "can't reach server"
 │       │   ├── Row.tsx        Horizontal shelf with arrow buttons
-│       │   ├── Cards.tsx      PosterCard (+ WatchMarks), ContinueCard, AlbumCard, ArtistCard, ItemCard, PlayBadge
+│       │   ├── Cards.tsx      PosterCard (+ WatchMarks), ContinueCard (picture → play, name → show, episode line →
+│       │   │                  its season), AlbumCard, ArtistCard, ItemCard, PlayBadge
 │       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
 │       │   ├── MusicFixMatch.tsx  Modal: MusicBrainz search → POST /api/items/{id}/music-match
 │       │   ├── MusicSettings.tsx  Music identification on/off + converted-music format (AAC/FLAC) card
@@ -108,10 +109,11 @@ bams/
 │       └── pages/
 │           ├── Home.tsx       Hero + rows (Continue Watching, Recently Added, libraries, Top Rated, genres) in the user's order (homeRows.ts)
 │           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
-│           ├── Detail.tsx     /title/:id: show (season tabs → episodes, watched toggles) or movie (Resume, TechInfo); music → MusicDetail
+│           ├── Detail.tsx     /title/:id[?season=<season id>]: show (season tabs → episodes, watched toggles) or movie (Resume, TechInfo); music → MusicDetail
 │           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs), artist page, album page + TrackList, Fix match,
 │           │                  PlaylistPage (/playlist/:id), PlaylistCard + cover Mosaic
-│           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next,
+│           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
+│           │                  (at the end and CREDITS = 30 s before it; next-episode button), skip +30 / −10 s (SKIP_*),
 │           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
 │           └── Settings.tsx   Admins: libraries, unrecognized files, TMDB, music, playback, accounts. Viewers: their account only
@@ -332,8 +334,9 @@ the start it's about to resume from (`startAt`), so a stream that fails early (c
 per viewing; else position (< 10 s → 0). `PUT …/watched` marks a movie/episode or all episodes of a season/show.
 `watch.annotate` adds `progress` to movies/episodes and `episodes`/`unwatched` to shows/seasons in every item list
 (batched). `/api/continue` = `continue_watching()` (recent activity: resume ≥ 30 s; per show, the most recent activity
-decides: resume it, or the next unwatched episode via `next_episode`). `get_item` adds `next_id` for episodes (the
-player's up-next countdown). `items.merge_titles` moves watch state to the kept item.
+decides: resume it, or the next unwatched episode via `next_episode`; episodes carry `show` and `season_id` for the
+card's links). `get_item` adds `next_id` for episodes (the player's up-next countdown, shown at the end and from 30 s
+before it, and its next-episode button; leaving from the countdown or "Play now" reports the episode as finished). `items.merge_titles` moves watch state to the kept item.
 
 ### 4.3b Music playback (`stream.plan_audio` → `music.tsx`)
 `GET /api/items/{id}/tracks` (and `/api/playlists/{id}` → `tracks`) returns a play queue built by `app._queue`:
@@ -500,7 +503,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
-| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
+| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
 | `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB |
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
 | `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |

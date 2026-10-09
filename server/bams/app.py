@@ -1022,6 +1022,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                                       JOIN items sh ON sh.id=s.parent_id WHERE s.id=?""", (r["parent_id"],)).fetchone()
                 d["show"] = {"id": show["id"], "title": show["title"], "poster": _img(show["poster"]),
                              "backdrop": _img(show["backdrop"])}
+                d["season_id"] = r["parent_id"]  # the card's episode line opens that season
             out.append(d)
         return watch.annotate(con, me["id"], out)
 
