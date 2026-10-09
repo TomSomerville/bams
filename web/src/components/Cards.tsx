@@ -44,7 +44,8 @@ export function PosterCard({ item }: { item: ItemSummary }) {
   );
 }
 
-/** Continue Watching: a wide still with the progress bar; plays straight away. */
+/** Continue Watching: a wide still with the progress bar. The picture plays straight away; the show's name opens
+ *  the show, the episode line opens its season (the show page on that season's tab). */
 export function ContinueCard({ item }: { item: ContinueItem }) {
   const pct = progressOf(item);
   const img = item.still || item.show?.backdrop || item.backdrop || item.show?.poster || item.poster;
@@ -55,16 +56,18 @@ export function ContinueCard({ item }: { item: ContinueItem }) {
     item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number)} · ${item.title}` : null,
     item.reason === "next" ? "Next episode" : left ? `${fmtRuntime(left)} left` : null,
   ].filter(Boolean).join(" · ");
+  const page = item.show ? `/title/${item.show.id}` : `/title/${item.id}`;
+  const seasonPage = item.season_id ? `${page}?season=${item.season_id}` : page;
   return (
-    <Link to={`/play/${item.id}`} className="continue-card">
-      <div className="continue-frame">
+    <div className="continue-card">
+      <Link to={`/play/${item.id}`} className="continue-frame" aria-label={`Play ${title}${item.show ? ` ${item.title}` : ""}`}>
         {img ? <img className="continue-img" src={img} alt="" loading="lazy" /> : <Poster src={null} title={title} />}
         <div className="continue-play"><span className="round-btn"><Icon name="play" size={18} /></span></div>
         {pct !== null && <div className="progress"><div style={{ width: `${pct * 100}%` }} /></div>}
-      </div>
-      <div className="poster-title">{title}</div>
-      <div className="poster-sub">{sub}</div>
-    </Link>
+      </Link>
+      <Link to={page} className="poster-title">{title}</Link>
+      <Link to={seasonPage} className="poster-sub">{sub}</Link>
+    </div>
   );
 }
 

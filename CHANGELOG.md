@@ -3,6 +3,22 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.5.3 (2026-10-08)
+
+Requests from the second test session.
+
+### New
+- **Continue Watching:** the picture plays the episode, the show's name opens the show, and the episode line opens
+  that episode's season.
+- **Next episode button** in the player (⏭). It keeps your place in the episode you leave.
+- **"Next episode" countdown 30 seconds before the end**, as if the episode were over: Play now, or let it count down;
+  Cancel hides it. Pausing pauses the countdown. Leaving this way marks the episode watched.
+- **Skip forward is 30 seconds**, back stays 10 (buttons and the → / ← keys).
+
+### Fixed
+- Firefox starting an episode over although its spot was saved: fixed in 0.5.2 (the player had to switch streams as it
+  started). Update to this version if you're on 0.5.1 or older.
+
 ## 0.5.2 (2026-10-08)
 
 Playback fixes for videos whose sound BAMS converts (AC3/EAC3 "Dolby Digital" to AAC).

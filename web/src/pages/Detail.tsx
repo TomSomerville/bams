@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
 import { Backdrop, Poster } from "../components/Art";
 import { PlayBadge, PosterCard, progressOf } from "../components/Cards";
@@ -101,6 +101,8 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
 
 export default function Detail() {
   const { id } = useParams();
+  const [search] = useSearchParams();
+  const wantSeason = Number(search.get("season")) || null;  // ?season=<season id> (Continue Watching's episode line)
   const { data: item, error, reload } = useApi<ItemDetail>(`/api/items/${id}`);
   const [seasonIdx, setSeasonIdx] = useState<number | null>(null);
   const [fixing, setFixing] = useState(false);
@@ -108,12 +110,13 @@ export default function Detail() {
   const genre = isMusic ? undefined : item?.genres[0];
   const { data: similar } = useApi<ItemSummary[]>(genre ? `/api/items?genre=${encodeURIComponent(genre)}&limit=20` : null);
 
-  // default season: the first real season (not Specials) once the item loads
+  // the season asked for, else the first real season (not Specials), once the item loads
   useEffect(() => {
     if (!item) return;
+    const asked = wantSeason ? item.children.findIndex((s) => s.id === wantSeason) : -1;
     const first = item.children.findIndex((s) => (s.season_number ?? 0) > 0);
-    setSeasonIdx(first >= 0 ? first : 0);
-  }, [item?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- not on reloads (marking watched)
+    setSeasonIdx(asked >= 0 ? asked : first >= 0 ? first : 0);
+  }, [item?.id, wantSeason]); // eslint-disable-line react-hooks/exhaustive-deps -- not on reloads (marking watched)
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   if (!item) return <div className="page muted">Loading…</div>;
