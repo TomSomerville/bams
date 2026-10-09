@@ -25,7 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
 from . import netflow, security
 from .config import VERSION, Paths
-from .db import Tx, connect, get_setting, jload, migrate, set_setting
+from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
 from .musicbrainz import MusicBrainz, MusicLookupError
 from .parse import parse_episode, parse_movie
@@ -149,6 +149,20 @@ def file_info(r: sqlite3.Row, with_subtitles: bool = False, music_out: str = "aa
             video = Path(r["root"]) / r["rel_path"] if r["available"] else None
             d["subtitles"] = subtitles.tracks(pr, video, r["id"])
     return d
+
+
+def _probe_now(con: sqlite3.Connection, rows: list[sqlite3.Row]) -> bool:
+    """Read the details of a movie's/episode's files the scan hasn't probed yet (a scan still running, or
+    one that skipped it). Without them the player knows no duration: no HLS, no timeline, and no saved
+    position. Probed first, then one short write (never hold a write while touching the disk)."""
+    todo = [(f["id"], Path(f["root"]) / f["rel_path"]) for f in rows if f["probe"] is None and f["available"]]
+    found = [(fid, info) for fid, path in todo if (info := probe.probe(path, timeout=30))]
+    if found:
+        with Tx(con):
+            for fid, info in found:
+                con.execute("UPDATE files SET probe=?, probed_at=? WHERE id=? AND probe IS NULL",
+                            (jdump(info), time.time(), fid))
+    return bool(found)
 
 
 def unrecognized_hint(rel: str, lib_type: str) -> str:
@@ -959,9 +973,12 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             f"{ITEM_SELECT} WHERE parent_id=? ORDER BY {order}", (item_id,))]
         playable = r["kind"] in watch.PLAYABLE
         mo = music_output(con) if r["kind"] in MUSIC_KINDS else "aac"
-        d["files"] = [file_info(f, with_subtitles=playable, music_out=mo) for f in con.execute(
-            """SELECT f.*, lr.path AS root FROM files f JOIN file_items fi ON fi.file_id=f.id
-               JOIN library_roots lr ON lr.id=f.root_id WHERE fi.item_id=? ORDER BY f.rel_path""", (item_id,))]
+        files_sql = """SELECT f.*, lr.path AS root FROM files f JOIN file_items fi ON fi.file_id=f.id
+                       JOIN library_roots lr ON lr.id=f.root_id WHERE fi.item_id=? ORDER BY f.rel_path"""
+        rows = con.execute(files_sql, (item_id,)).fetchall()
+        if playable and _probe_now(con, rows):
+            rows = con.execute(files_sql, (item_id,)).fetchall()
+        d["files"] = [file_info(f, with_subtitles=playable, music_out=mo) for f in rows]
         watch.annotate(con, me["id"], [d, *d["children"], *d["ancestors"]])
         if r["kind"] == "episode":
             d["next_id"] = watch.next_episode(con, item_id)

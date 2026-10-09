@@ -154,7 +154,10 @@ def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: in
         raise RuntimeError("FFmpeg not found")
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin"]
     if start > 0:
-        cmd += ["-ss", f"{start:.3f}"]  # input seek: jumps to the keyframe at/before `start`
+        # input seek: the copied video starts at the keyframe at/before `start`. noaccurate_seek: the converted
+        # audio starts there too; by default FFmpeg trims it to `start` exactly and both begin at 0, so the
+        # picture ran behind the sound by the distance back to that keyframe (seconds)
+        cmd += ["-noaccurate_seek", "-ss", f"{start:.3f}"]
     cmd += ["-i", str(path),
             "-map", "0:v:0", "-map", f"0:a:{audio_index}?",
             "-c:v", "copy"]

@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "scan":
             lib_id = library.get(con, a.name)["id"]
             res = jobs.run_scan(paths, lib_id, "manual", do_match=not a.no_match, retry_unmatched=a.rematch,
-                                progress=lambda m: log.info(m))
+                                progress=lambda m, *_: log.info(m))
             print(json.dumps(res, indent=2))
             return 0 if res["status"] != "error" else 1
         elif a.cmd == "tmdb-key":

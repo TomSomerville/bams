@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 227 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 245 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -180,4 +180,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Changing matching rules?** Bump `matcher.MATCHER_VERSION` or titles that failed once are never retried (scans only try `pending` titles otherwise). Parser bumps retry them by themselves.
 - **Two `test_stream.py` encoder tests fail on a machine with NVENC** (`test_encoder_choice_api`,
   `test_remux_over_hls_lines_up_across_runs`); they expect a CPU-only box. Not a regression.
+- **The live remux (`stream.remux_cmd`) needs `-noaccurate_seek`:** the copied video starts at the keyframe before `-ss`,
+  but FFmpeg trims converted audio to the exact `-ss` and both start at 0, so the picture ran seconds behind the sound.
+  A tone or mostly-silent test clip doesn't show it; `test_live_remux_keeps_sound_with_picture_after_a_seek` uses noise.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

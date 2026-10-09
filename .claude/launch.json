@@ -42,6 +42,12 @@
       "runtimeExecutable": "server\\.venv\\Scripts\\python",
       "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\9879a6b5-9f27-41f7-a679-92f89f899a0e\\scratchpad\\data", "serve", "--port", "8490"],
       "port": 8490
+    },
+    {
+      "name": "bams-test-8491",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\7a84ce6f-fafb-4f28-a86e-9bf7b24fe2c4\\scratchpad\\data", "serve", "--port", "8491"],
+      "port": 8491
     }
   ]
 }

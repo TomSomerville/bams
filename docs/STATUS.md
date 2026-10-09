@@ -137,7 +137,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 
 ## 4. Built so far
 
-### Server (`server/`, ~7,000 lines + 227 tests)
+### Server (`server/`, ~7,000 lines + 245 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval, order (`PUT /api/libraries/order`). Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -284,6 +284,31 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-08: AC3 → AAC playback: picture behind the sound after a skip, resume lost (release 0.5.2)
+- **What / why:** owner (laptop, Firefox, a scan running): after fast-forwarding an AC3 episode the picture ran behind
+  the sound (a 10 s pause fixed it), and after closing, the spot showed as saved but playback started over; unprobed
+  episodes stayed "unwatched". Three causes. (1) The **live remux** (`/remux?t=`, the fallback when the copy-HLS
+  isn't used) copied video from the keyframe before `t` but FFmpeg's accurate seek trimmed the converted audio to `t`,
+  and both began at 0: picture behind by `t` − keyframe (measured 0.3–4 s on Bob's Burgers S03E09/S04E08 by
+  cross-correlating the output audio with the original). `remux_cmd` now passes `-noaccurate_seek` (error < 0.05 s).
+  Copy-HLS was already right (kept timestamps). (2) When copy-HLS failed before playback began, `toLive` carried on
+  from `posRef` = 0, not the resume point: `pos` now falls back to `startAt` until something played. (3) A file the
+  scan hadn't probed yet had no duration: no HLS, a `0:00` timeline, and `report()` skipped every save.
+  `get_item` now probes a movie's/episode's unprobed files on the spot (`app._probe_now`, probe first, then one
+  short write), and the player saves the position without a duration too. Also: `bams scan` crashed on the
+  5-argument progress callback (`__main__`).
+- **Files:** `server/bams/stream.py` (`remux_cmd`), `server/bams/app.py` (`_probe_now`, `get_item`),
+  `server/bams/__main__.py`, `web/src/pages/Player.tsx` (`pos`, `report`, `onEnded`), `tests/test_stream.py`
+  (+2: live remux audio matches the original at the keyframe, by correlation; unprobed file probed when opened),
+  `CHANGELOG.md` 0.5.2, `config.VERSION` 0.5.2.
+- **Verified:** 245 tests pass on Windows (with 0.5.1); the new sync test fails with the old command. Test instance (:8491, own
+  data dir) with the owner's real episodes (read-only): copy-HLS skips/jumps stay within 0.03 s (rVFC frame time vs
+  clock), the HLS POST forced to fail on a resumed episode → live remux from the saved 19:06, an episode with its probe
+  cleared → probed on open, HLS, 21:22, position saved.
+- **Left open:** why copy-HLS falls back in the owner's Firefox (couldn't drive Firefox here; asked the owner to check
+  which requests it makes). The rVFC check showed a ~1.9 s picture lag for a few seconds right after switching to 2x
+  in Chromium, then caught up (browser behaviour, not addressed).
+
 ### 2026-10-08: Unmatched titles retried after a re-parse or a matcher change (0.5.1)
 - **What / why:** after 0.5.0's scan on the owner's server, South Park, Parks and Recreation, Andor and the Animated
   Series were still `unmatched`: `match_library` only tries `pending` titles unless `retry_unmatched` (API
@@ -317,9 +342,9 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   **copy**: unrecognized 195 → 56 (54 Korean + the two above), the fake pack show gone, DS9/TNG/TOS/Voyager/Enterprise
   separate, Sewing Bee one show, no new oddities. Not yet run against the owner's live server (needs the release).
 - **Left open:** "Star Trel Emterprise" is a typo in the owner's folder name (rename or hand-identify). Files with a
-  year in the name still create a second "(year)" title until TMDB matching merges them (pre-existing). The Windows
-  installer for 0.5.0 must be built on the Windows desktop (Inno Setup); this release was cut from Linux with the
-  `.deb` only.
+  year in the name still create a second "(year)" title until TMDB matching merges them (pre-existing). The release
+  was cut from Linux with the `.deb` only; `BAMS-Setup-0.5.0.exe` was then built on the Windows desktop (242 tests
+  pass there) and attached to the v0.5.0 release with an updated `SHA256SUMS.txt`.
 
 ### 2026-10-08: Playback leftovers (DV profile 5, all-GPU on QSV/AMF/VAAPI, VobSub sidecars, Dolby pass-through)
 - **What / why:** the four "Playback leftovers" in §5, owner asked for all of them, with a free, licence-checked test
