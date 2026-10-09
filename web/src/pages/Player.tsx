@@ -172,7 +172,9 @@ function Player({ id }: { id: string }) {
   const useHls = hlsOk && (mode === "transcode" || (mode === "remux" && !copyFailed));
   const live = !useHls && (mode === "remux" || mode === "transcode"); // a stream FFmpeg makes from ?t=
   const total = live ? (pb?.duration ?? file?.probe?.duration ?? 0) : (fileDur || file?.probe?.duration || 0);
-  const pos = live ? offset + t : t;
+  // before anything played, an HLS stream is still at 0: where it's about to start is what counts (a stream
+  // that fails then, e.g. the copy falling back to the live remux, must carry on from the resume point)
+  const pos = live ? offset + t : t || (played.current ? 0 : startAt.current);
   const hlsKey = `${mode}|${auto}|${height}|${audio}|${channels}|${burn}|${passthrough}`;
   const liveParams = new URLSearchParams({ t: String(reqT) });
   if (audio) liveParams.set("audio", String(audio));
@@ -294,10 +296,11 @@ function Player({ id }: { id: string }) {
   posRef.current = pos;
   totalRef.current = total;
   const report = (position: number, keepalive = false) => {
-    if (!watchable || !played.current || !totalRef.current) return;
+    if (!watchable || !played.current) return;
     fetch(`/api/items/${id}/progress`, {
       method: "PUT", keepalive, headers: { "content-type": "application/json" },
-      body: JSON.stringify({ position: Math.max(0, position), duration: totalRef.current }),
+      // no duration yet (a file the scan hasn't probed): the position is still worth keeping
+      body: JSON.stringify({ position: Math.max(0, position), duration: totalRef.current || null }),
     }).catch(() => {});
   };
   const reportRef = useRef(report);
@@ -476,7 +479,7 @@ function Player({ id }: { id: string }) {
           }}
           onDurationChange={(e) => !live && setFileDur(e.currentTarget.duration)}
           onEnded={() => {
-            report(totalRef.current);  // the end counts as watched
+            report(totalRef.current || posRef.current);  // the end counts as watched
             if (item.next_id) setUpNext(10);
           }}
           onLoadedMetadata={(e) => {

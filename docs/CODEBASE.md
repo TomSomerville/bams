@@ -65,7 +65,7 @@ bams/
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 227 tests, see §7
+│   └── tests/                 pytest: 245 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
@@ -237,11 +237,13 @@ changed since the last look; same for `artist.jpg`, which drops a Commons credit
 6. Later scans refresh only what's pending or older than `REFRESH_AFTER` (150 days, under TMDB's 6-month limit).
 
 ### 4.3 Playback (`stream.plan` → `Player.tsx`)
-`file_info()` embeds `playback = {method, mode, url, transcode_url, video_codec, audio_codec, duration}`:
+`file_info()` embeds `playback = {method, mode, url, transcode_url, video_codec, audio_codec, duration}`. A movie's/episode's
+files that no scan has probed yet are probed when `GET /api/items/{id}` is asked (`app._probe_now`), so playback never
+runs on the file-name guess with no duration (no HLS, no timeline, no saved position):
 - `mode:"file"` → `<video src=/api/files/{id}/stream>`: the original bytes; the browser seeks with Range.
 - `mode:"remux"` (browser-OK video, but AC3/EAC3/DTS/TrueHD/PCM… audio, or a container the browser can't open; the
   player also uses it for another audio track than the first) → **HLS with the video copied** (4.3c, `remux:true`),
-  else (no MSE/native HLS, or keyframes unreadable → 409) the live stream `<video src=/api/files/{id}/remux?t=X>`. FFmpeg runs `-ss X -c:v copy -c:a aac -ac 2` (or `-c:a copy`
+  else (no MSE/native HLS, or keyframes unreadable → 409) the live stream `<video src=/api/files/{id}/remux?t=X>`. FFmpeg runs `-noaccurate_seek -ss X -c:v copy -c:a aac -ac 2` (`-noaccurate_seek`: the audio starts at the same keyframe as the copied video, not exactly at X, or the picture runs behind) (or `-c:a copy`
   with `passthrough`, + `delay_moov`, see Dolby below) → fragmented MP4 on
   stdout, streamed by an async generator. The process is killed when the client disconnects. To seek, the
   player asks `/seek?t=X` for the real start (an FFmpeg dry run reports the first keyframe it lands on), sets
@@ -325,7 +327,8 @@ stream number, or `(sidecar .idx, k)`. The overlay reads `[1:s:n]` from a second
 
 ### 4.3e Watch state (`watch.py`)
 The player PUTs `/api/items/{id}/progress {position, duration}` every 10 s, on pause, on leaving (keepalive) and at
-the end; only after playback really started. `record_progress`: ≥ 90% → watched, position 0, `play_count` +1 once
+the end; only after playback really started (`duration` null if unknown). Until something played, the player's position is
+the start it's about to resume from (`startAt`), so a stream that fails early (copy-HLS → live remux) keeps the resume point. `record_progress`: ≥ 90% → watched, position 0, `play_count` +1 once
 per viewing; else position (< 10 s → 0). `PUT …/watched` marks a movie/episode or all episodes of a season/show.
 `watch.annotate` adds `progress` to movies/episodes and `episodes`/`unwatched` to shows/seasons in every item list
 (batched). `/api/continue` = `continue_watching()` (recent activity: resume ≥ 30 s; per show, the most recent activity
@@ -441,7 +444,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/scans?library_id=` | current + history | — |
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
-| `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |
+| `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback; a movie's/episode's unprobed files are probed now) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |
 | `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback`, `start`/`end` (CUE) | Music pages, NowPlaying |
 | `GET /api/libraries/{id}/playlists` · `GET /api/playlists/{id}` | imported playlists (`track_count`, `duration`, `missing`, `covers`) · one with its `tracks` (queue) | MusicLibrary, PlaylistPage |
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music Fix match | MusicFixMatch |
@@ -506,7 +509,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration |
-| `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
+| `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file, the live remux's audio starting at the keyframe (correlation with the original), an unprobed file probed when its episode is opened, and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
 | `test_music_extras.py` | cue parsing, CUE image split / sheet edited or removed, queue `start`/`end`, real FLAC with an embedded sheet; playlist parsing, import, follow-the-file; a cover/artist image added later vs CAA/Commons; album merge + rescan + best file, unsure matches not merged; refresh; FLAC command + API |

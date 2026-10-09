@@ -255,6 +255,66 @@ def test_remux_outputs_aac_and_copies_video(tmp_path):
         readonly.set_protected_roots([])
 
 
+@pytest.mark.skipif(not stream.ffmpeg_path(), reason="FFmpeg not installed")
+def test_live_remux_keeps_sound_with_picture_after_a_seek(tmp_path):
+    """The copied video starts at the keyframe before the seek; the converted audio must start there too.
+    (FFmpeg trimmed it to the seek point and both began at 0: the picture ran seconds behind the sound.)"""
+    import array
+    ff = stream.ffmpeg_path()
+    src = tmp_path / "clip.mkv"
+    # keyframes every 4 s, 5.1 noise (a tone or mostly-silent audio didn't show the trim)
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=40",
+                    "-f", "lavfi", "-i", "anoisesrc=d=40:c=pink:r=48000", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-g", "100", "-keyint_min", "100", "-sc_threshold", "0", "-c:a", "ac3", "-ac", "6", str(src)],
+                   check=True)
+    start = stream.remux_start(src, 30)  # the player's offset: the clock shows start + currentTime
+    assert abs(start - 28.0) < 0.05
+    out = tmp_path / "out.mp4"
+    out.write_bytes(subprocess.run(stream.remux_cmd(src, 30, "H.264"), capture_output=True, check=True).stdout)
+
+    def pcm(f, at, length):
+        return array.array("h", subprocess.run([ff, "-v", "error", "-ss", f"{at:.3f}", "-i", str(f), "-t", str(length),
+                                                "-vn", "-ac", "1", "-ar", "2000", "-f", "s16le", "-"],
+                                               capture_output=True, check=True).stdout)
+
+    def match(a, b):  # best normalized correlation of a anywhere in b
+        na = sum(x * x for x in a) ** .5
+        return max(sum(x * y for x, y in zip(a, b[s:])) / (na * sum(y * y for y in b[s:s + len(a)]) ** .5 + 1e-9)
+                   for s in range(len(b) - len(a)))
+
+    head = pcm(out, 0, 0.25)  # the output's first sound must be the original's at `start`, not at 30 s
+    assert match(head, pcm(src, start - 0.1, 0.45)) > 0.8
+
+
+@pytest.mark.skipif(not stream.ffmpeg_path(), reason="FFmpeg not installed")
+def test_unprobed_file_is_probed_when_opened(tmp_path):
+    """A file the scan hasn't read yet (still scanning): opening the episode reads it, so the player gets a
+    duration (HLS, the timeline, saved positions) instead of the file-name guess."""
+    from bams import scanner
+    from bams.db import connect
+    media = tmp_path / "media" / "Show" / "Season 01"
+    media.mkdir(parents=True)
+    src = media / "Show - S01E01.mkv"
+    subprocess.run([stream.ffmpeg_path(), "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=4",
+                    "-f", "lavfi", "-i", "sine=duration=4", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "ac3", str(src)], check=True)
+    paths = Paths(tmp_path / "data")
+    c = signed_in(create_app(paths, start_scheduler=False))
+    try:
+        lib = c.post("/api/libraries", json={"name": "TV", "type": "show", "paths": [str(tmp_path / "media")]}).json()
+        con = connect(paths.db)
+        scanner.scan_library(con, lib["id"], do_probe=False)
+        ep = con.execute("SELECT id FROM items WHERE kind='episode'").fetchone()["id"]
+        assert con.execute("SELECT probe FROM files").fetchone()["probe"] is None
+        f = c.get(f"/api/items/{ep}").json()["files"][0]
+        assert f["probe"]["duration"] == pytest.approx(4, abs=0.2)
+        assert f["playback"]["source"] == "ffprobe" and f["playback"]["duration"]
+        assert con.execute("SELECT probe FROM files").fetchone()["probe"] is not None  # kept: not probed twice
+        con.close()
+    finally:
+        readonly.set_protected_roots([])
+
+
 @pytest.mark.skipif(not stream.ffmpeg_path() or not stream.video_encoder(), reason="FFmpeg/H.264 encoder not installed")
 def test_transcode_outputs_h264_from_the_exact_start(tmp_path):
     media = tmp_path / "media" / "Old Film (1999)"
