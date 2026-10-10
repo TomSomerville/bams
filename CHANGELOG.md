@@ -3,6 +3,24 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.9.2 (2026-10-10)
+
+### Fixed
+- **Videos that need converting didn't play on Debian/Ubuntu servers** (for example HEVC episodes with AC3 sound):
+  after a long wait the player said "The converted stream stopped". Two causes:
+  - Converting only the sound failed with the FFmpeg that Ubuntu 24.04 and Debian ship (6.1 and older): it wrote
+    one of its files to a folder that doesn't exist.
+  - On Intel graphics with Ubuntu's standard driver, converting the picture on the GPU failed every time: that
+    driver encodes at a constant quality only and refused BAMS's bitrate settings. BAMS now tests the encoder with
+    the settings it really uses and switches to constant quality when that's all the driver offers.
+
+### Changed
+- **Files can't be downloaded from BAMS any more.** The Download buttons are gone (title page, player, the player's
+  error message), and so is the download link in the server's API. Files are only streamed for playing.
+
+Update the server with the new installer. The Samsung TV app is unchanged: `BAMS-SamsungTV-0.8.0.wgt` from the 0.8.0
+release is still current.
+
 ## 0.9.1 (2026-10-10)
 
 ### New

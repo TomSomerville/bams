@@ -39,7 +39,7 @@ function TechInfo({ f }: { f: FileInfo }) {
         {f.playback.method === "transcode" && f.playback.mode === "transcode" &&
           `Browsers can't decode ${f.playback.video_codec ?? "this"} video, so the server converts it to H.264 while streaming.`}
         {f.playback.method === "transcode" && f.playback.mode === "file" &&
-          `Browsers can't decode ${f.playback.video_codec ?? "this"} video, and the server has no FFmpeg to convert it. Download it instead.`}
+          `Browsers can't decode ${f.playback.video_codec ?? "this"} video, and the server has no FFmpeg to convert it.`}
         {f.playback.method !== "transcode" && f.playback.transcode_url && ["HEVC", "AV1", "VP9"].includes(f.playback.video_codec ?? "") &&
           ` Browsers that can't decode ${f.playback.video_codec} get a version converted to H.264.`}
       </p>
@@ -165,9 +165,6 @@ export default function Detail() {
             {resumeAt > 0 && <Link to={to(`/play/${item.id}?start=0`)} className="btn ghost"><Icon name="refresh" /> Start over</Link>}
             {item.kind === "movie" && <WatchedButton item={item} watched={!!item.progress?.watched} done={reload} />}
             {item.kind === "show" && !!item.episodes && <WatchedButton item={item} watched={item.unwatched === 0} done={reload} />}
-            {item.kind === "movie" && file && (
-              <a className="btn ghost" href={file.download_url} download><Icon name="download" /> Download</a>
-            )}
             {(!remote || remote.is_admin) && (  // another server's titles: only its admins can fix them
               <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>)}
             {item.ids.imdb && (

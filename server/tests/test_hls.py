@@ -59,10 +59,11 @@ def tc(tmp_path, monkeypatch):
         return p
 
     starts = {}  # copy variants: where FFmpeg's seek really lands, by requested time
+    cwds = []  # the folder each run was started in
 
-    t = hls.Transcodes(tmp_path / "transcode", lambda: limit[0], spawn=lambda c: c, cmd=cmd,
-                       copy_start=lambda path, at, zero=False: starts.get(round(at, 3), at))
-    t.gpu_runs, t.starts = gpu, starts
+    t = hls.Transcodes(tmp_path / "transcode", lambda: limit[0], spawn=lambda c, cwd=None: cwds.append(cwd) or c,
+                       cmd=cmd, copy_start=lambda path, at, zero=False: starts.get(round(at, 3), at))
+    t.gpu_runs, t.starts, t.cwds = gpu, starts, cwds
     yield t, runs, how, limit
     t.shutdown()
 
@@ -190,6 +191,7 @@ def test_copy_variant_numbers_segments_where_ffmpeg_really_starts(tc):
     v = s.variants[0]
     assert v.copy and v.segments == 9 and v.ext == "m4s"
     assert t.init(s, 0).name == "init_0.mp4"  # the header comes from the first run
+    assert t.cwds[-1] == v.dir  # FFmpeg runs in the variant's folder: the init file name is a bare one
     t.starts[60.001] = 40.0  # the file's index only lets FFmpeg start a keyframe earlier
     assert t.segment(s, 0, 7).name == "7.m4s"
     assert [k for k, _ in runs] == [0, 6]

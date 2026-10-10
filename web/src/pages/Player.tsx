@@ -273,7 +273,7 @@ function Player({ id }: { id: string }) {
             const code = d.response?.code;
             setProblem(code === 503
               ? "The server is converting as many videos as it's allowed to at once (Settings). Try again in a moment."
-              : "The converted stream stopped (the server log has the FFmpeg error). You can download the file instead.");
+              : "The converted stream stopped (the server log has the FFmpeg error).");
           });
           hls.loadSource(s.playlist);
           hls.attachMedia(v);
@@ -552,6 +552,7 @@ function Player({ id }: { id: string }) {
           src={src}
           autoPlay
           playsInline
+          onContextMenu={(e) => e.preventDefault()}  // no "Save video as…": BAMS offers no downloads
           onClick={toggle}
           onPlay={() => { setPlaying(true); setUpNext(null); }}
           onPause={() => { setPlaying(false); reportRef.current(posRef.current); }}
@@ -570,15 +571,15 @@ function Player({ id }: { id: string }) {
             v.playbackRate = rate;
             v.muted = muted;  // a new stream's element keeps the viewer's mute (or the browser's refusal)
             if (v.videoWidth === 0)
-              toTranscode(`This browser can play the sound but not the ${pb?.video_codec ?? ""} video of this file, and the server can't convert it (no FFmpeg). You can download it.`);
+              toTranscode(`This browser can play the sound but not the ${pb?.video_codec ?? ""} video of this file, and the server can't convert it (no FFmpeg).`);
             else if (mode === "file" && startAt.current) {  // resuming, or back to the original file mid-way
               v.currentTime = startAt.current;
               startAt.current = 0;
             }
           }}
           onError={() => passthrough ? (continueAt(pos), setPassFailed(true)) : !useHls && toTranscode(mode === "transcode"
-            ? "The server couldn't convert this file (its log has the FFmpeg error). You can download it instead."
-            : `This browser can't play this file (${pb?.video_codec ?? "unknown codec"}), and the server can't convert it (no FFmpeg). You can download it.`)}
+            ? "The server couldn't convert this file (its log has the FFmpeg error)."
+            : `This browser can't play this file (${pb?.video_codec ?? "unknown codec"}), and the server can't convert it (no FFmpeg).`)}
         >
           {subTrack?.url && (
             <track key={`${subTrack.id}-${live ? offset : 0}`} ref={setTrackEl} kind="subtitles" default label={subTrack.label}
@@ -593,7 +594,6 @@ function Player({ id }: { id: string }) {
       {problem && file && (
         <div className="player-msg">
           <p>{problem}</p>
-          <a className="btn ghost" href={file.download_url} download><Icon name="download" /> Download</a>
         </div>
       )}
       {nextUp && (
@@ -735,7 +735,6 @@ function Player({ id }: { id: string }) {
               ))}
             </Menu>
           )}
-          {file && <a className="icon-btn" href={file.download_url} download title="Download"><Icon name="download" size={22} /></a>}
           <button className="icon-btn" title="Fullscreen (f)" onClick={fullscreen}><Icon name="fullscreen" size={24} /></button>
         </div>
       </div>

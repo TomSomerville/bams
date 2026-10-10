@@ -143,7 +143,7 @@ def file_info(r: sqlite3.Row, with_subtitles: bool = False, music_out: str = "aa
         "id": r["id"], "path": r["rel_path"], "root": r["root"], "size": r["size"],
         "available": bool(r["available"]), "probe": pr,
         "release": (pa or {}).get("release"), "playback": pb,
-        "stream_url": f"/api/files/{r['id']}/stream", "download_url": f"/api/files/{r['id']}/download",
+        "stream_url": f"/api/files/{r['id']}/stream",
     }
     if (pa or {}).get("kind") != "track":
         d["audio_tracks"] = audio_tracks(pr)
@@ -1401,7 +1401,6 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 "duration": t["duration"] or span or pb["duration"], "file_id": t["file_id"],
                 "start": t["cue_start"], "end": t["cue_end"],
                 "available": bool(t["available"]), "playback": pb,
-                "download_url": f"/api/files/{t['file_id']}/download",
             })
         return out
 
@@ -1655,10 +1654,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     @app.get("/api/files/{file_id}/stream")
     def stream_file(file_id: int, con=Depends(db)):
-        """Original file with HTTP Range support (seeking). Opened read-only."""
+        """Original file with HTTP Range support (seeking), for playing. Opened read-only. No file name is sent:
+        BAMS offers no downloads (owner's decision), so nothing suggests saving it."""
         p, name = _file_path(con, file_id)
-        return FileResponse(p, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
-                            content_disposition_type="inline", filename=name)
+        return FileResponse(p, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream")
 
     @app.get("/api/files/{file_id}/seek")
     def seek_point(file_id: int, t: float = Query(0, ge=0), con=Depends(db)):
@@ -1894,11 +1893,6 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 proc.wait()
 
         return StreamingResponse(body(), media_type=media_type, headers={"cache-control": "no-store"})
-
-    @app.get("/api/files/{file_id}/download")
-    def download_file(file_id: int, con=Depends(db)):
-        p, name = _file_path(con, file_id)
-        return FileResponse(p, media_type="application/octet-stream", filename=name)
 
     @app.get("/api/images/{rel:path}")
     def image(rel: str):
