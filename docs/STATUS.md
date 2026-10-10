@@ -254,6 +254,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   name/password, Home (hero of the focused title, Continue Watching, Recently added, per-library rows), library grids
   (sorts), detail (seasons/episodes, resume/start over/mark watched), search, settings (server, sign out, always
   convert, "TV plays DTS"). Remote: spatial navigation (`nav.ts`), Back, media and colour keys registered.
+  Tests (0.7.1): `cd tv && npm test` runs `tv/test/*.test.ts` in headless Chrome/Edge at 1920×1080 (`scripts/test.mjs`).
 - Player (`screens/Player.tsx`, `engine.ts`): AVPlay on the TV (`<video>` + hls.js in a browser); copy-HLS in TS for
   what the TV decodes (`plan.ts`), full conversion otherwise or after a failure; resume, ±skip, progress every 10 s,
   sound/subtitle menus (text subtitles drawn by the app from the server's WebVTT, with a timing control; picture
@@ -322,6 +323,29 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-10: TV remote navigation fixes, play bar timing, TV tests (release 0.7.1)
+- **What / why:** owner: "Navigation on the tv app is poor. Sometimes I cannot move the focus from nav to the main
+  screen, or up or down. Run a full unit test around navigation, identify bugs and resolve"; "reduce the time it takes
+  for the play bar to disappear to 5 seconds". New browser tests showed 13 of 23 cases failing. Fixed in `nav.ts`:
+  Right from the rail only went to things level with it (Home beside the banner, Settings beside a short page: stuck),
+  now returns to the last element focused outside the rail (`focusin` listener), else the nearest on the page; Home
+  focused nothing (shelves load after `ready`), so the first arrow went to the rail: `settleFocus` retries until the
+  content is there (and the remembered `fid`), without taking the focus back from the user; Up/Down entered and left
+  the rail, now only Left enters it (`[data-side]`) and Up/Down stay in it; a lost focus restarted in the rail, now on
+  the page; long rail scrolls (`data-scroll`); music bar (`[data-cover]`): Left/Right stay in it, `reveal` keeps things
+  above it; the rail lights the stack's root (`nav.root`) so Left from a title lands on its library. Player: the
+  controls' hide was a one-off check at 5 s and stayed up for good if the stream was still starting/restarting then;
+  now it looks again every second, and menu keys count as activity (`OSD_HIDE` was already 5000 ms).
+- **Files:** `tv/src/nav.ts`, `App.tsx` (`useFocusOnReady` → `settleFocus`, `Nav.root`), `Rail.tsx`,
+  `screens/Music.tsx` (`data-cover`), `screens/Player.tsx`; new `tv/test/` (`nav.test.ts`, `harness.ts`, `run.ts`,
+  `index.html`), `tv/scripts/test.mjs` (`npm test`), `tsconfig.json` includes `test`; CHANGELOG, VERSION 0.7.1.
+- **Verified:** `cd tv && npm test`: 25 pass (13 failed before the fix). TV app in a browser at 1920×1080 against a
+  DB copy (:8495): Home focused a shelf on arrival, rail Left/Down/Right returned to the same poster, page scrolled,
+  Library → title → Left landed on that library, Right back on Play; controls hid at 5 s after the start. 271 server
+  tests pass. Installed on the owner's Frame.
+- **Left open:** the TV tests cover `nav.ts` with fixture markup (not the React screens themselves); the player's key
+  handling has no automated test.
 
 ### 2026-10-10: Several BAMS servers per client, server names, combined Home/Search, music on the TV (release 0.7.0)
 - **What / why:** owner: "I should be able to connect to and have more than 1 BAMS server", then "the webapp and tv

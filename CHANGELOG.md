@@ -3,6 +3,26 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.7.1 (2026-10-10)
+
+Getting around the Samsung TV app with the remote.
+
+### Fixed
+- **The cursor could get stuck in the menu on the left.** Right from the menu now goes back to where you were on the
+  page (before, from Home next to the big banner, or from Settings beside a short page, it went nowhere).
+- **Home starts with a poster selected.** Before, nothing was selected until the rows had loaded, and the first
+  arrow press dropped you into the menu. Coming back to a screen puts the cursor back where it was.
+- **Up/Down no longer jump between the page and the menu**: only Left goes into the menu, and Up/Down stay in it.
+- An arrow press after the selected item disappeared (a list reloading) picks up on the page, not in the menu.
+- A long menu (many libraries) scrolls to show the selected item.
+- Left/Right on the music bar stay on the bar; posters behind the bar scroll up above it when selected.
+- A title opened from a library keeps that library lit in the menu, and Left lands on it.
+- **The play bar hides 5 seconds after your last button press** once the video plays. Before, if the video was
+  still starting (or restarting after a skip) at that moment, the bar stayed up until you pressed something.
+
+Update the TV app with the new `BAMS-SamsungTV-0.7.1.wgt` as in the README. The server is unchanged apart from the
+version number.
+
 ## 0.7.0 (2026-10-10)
 
 More than one BAMS server at a time, server names, and music on the TV.

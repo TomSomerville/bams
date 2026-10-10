@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { addExtra, api, checkExtras, extras, getServer, getToken, hello, refreshTicket, savedUser, setSession, SIGNED_OUT, type Extra, type User } from "./api";
 import type { ServerLibrary } from "../../web/src/api";
 import { keyHandler } from "./keys";
-import { currentFid, focusFirst, focusId, move, type Dir } from "./nav";
+import { currentFid, move, settleFocus, type Dir } from "./nav";
 import { exitApp, isBack, KEY, registerKeys } from "./tizen";
 import Connect from "./screens/Connect";
 import Link from "./screens/Link";
@@ -29,6 +29,8 @@ type Entry = { route: Route; fid: string | null; key: number };
 
 type Nav = {
   route: Route;
+  /** the screen at the bottom of the stack: the rail section this screen was reached from */
+  root: Route;
   push: (r: Route) => void;
   replace: (r: Route) => void;
   /** the rail: start over from this screen */
@@ -59,10 +61,8 @@ export function useFocusOnReady(ready: boolean) {
   useEffect(() => {
     if (!ready || done.current) return;
     done.current = true;
-    setTimeout(() => {
-      const main = document.querySelector("main") ?? document;
-      if (!focusId(fid)) focusFirst(main);
-    });
+    // keeps trying while the content arrives (Home's shelves load after the page is "ready")
+    return settleFocus(fid, () => document.querySelector("main"));
   }, [ready, fid]);
 }
 
@@ -144,6 +144,7 @@ export default function App() {
     const remember = (s: Entry[]) => s.map((e, i) => (i === s.length - 1 ? { ...e, fid: currentFid() } : e));
     return {
       route: stack[stack.length - 1].route,
+      root: stack[0].route,
       push: (r) => setStack((s) => [...remember(s), { route: r, fid: null, key: ++keyCounter }]),
       replace: (r) => setStack((s) => [...s.slice(0, -1), { route: r, fid: null, key: ++keyCounter }]),
       reset: (r) => setStack([{ route: r, fid: null, key: ++keyCounter }]),

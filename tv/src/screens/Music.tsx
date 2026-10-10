@@ -207,7 +207,7 @@ export function NowPlaying() {
   const media = mediaFor(t.rid);
   const pct = m.duration ? Math.min(100, (m.time / m.duration) * 100) : 0;
   return (
-    <div className="now-playing" data-group>
+    <div className="now-playing" data-group data-cover>
       {t.poster ? <img className="np-cover" src={media(t.poster) ?? undefined} alt="" /> : <div className="np-cover no-art" />}
       <div className="np-text">
         <div className="np-title">{t.title}</div>

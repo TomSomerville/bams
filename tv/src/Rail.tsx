@@ -8,7 +8,7 @@ type Item = { id: string; label: string; icon: IconName; active: boolean; go: ()
  *  Search, Settings. Slim until it has the focus. */
 export default function Rail() {
   const nav = useNav();
-  const r = nav.route;
+  const r = nav.root;  // a title opened from a library still has that library lit (and Left lands on it)
   const libItem = (rid: number | undefined, l: { id: number; name: string; type: string }): Item => ({
     id: rid === undefined ? `lib${l.id}` : `r${rid}-lib${l.id}`, label: l.name, icon: (l.type === "show" ? "tv" : l.type === "music" ? "music" : "film") as IconName,
     active: r.name === "library" && r.id === l.id && r.rid === rid,
@@ -33,7 +33,7 @@ export default function Rail() {
     </button>
   );
   return (
-    <nav className="rail" data-group>
+    <nav className="rail" data-group data-side data-scroll>
       <img className="rail-logo" src="bams-icon.png" alt="" />
       {top.map(button)}
       {remote.map(({ s, items }) => (
