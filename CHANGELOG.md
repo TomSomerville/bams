@@ -3,6 +3,23 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.9.1 (2026-10-10)
+
+### New
+- **Best guess** button in the identify form (next to "Fill in"): fills the fields from the file's folders and name.
+  It also works on files Auto fill leaves alone, like a movie in its own folder in a TV library. Nothing is saved
+  until you press Save.
+
+### Changed
+- **Movies and specials of a show** stored in the show's folder go to that show's **Specials (Season 00)**, also
+  when the film has its own subfolder: `Daria Complete Series/Daria Is It College Yet 2002 …/…avi` is now a Daria
+  special instead of unrecognised. "Complete Series", "Complete Collection" and "Box Set" are dropped from guessed
+  show names, so these join the show you already have.
+- Guessed episode titles are tidier: leading tags like "(En_Jp)" are dropped and " _ " reads as " - ".
+
+Update the server with the new installer; the first scan re-guesses files that couldn't be placed. The Samsung TV
+app is unchanged (0.8.0).
+
 ## 0.9.0 (2026-10-10)
 
 Auto fill: files BAMS couldn't identify from their names are now placed by a best guess.
