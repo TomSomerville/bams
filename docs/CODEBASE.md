@@ -447,7 +447,10 @@ suggestions (`Combo.tsx`). A pasted link → `POST /api/identify/lookup` → `id
 pending). `DELETE` clears it and re-parses from the name. `PUT /api/files/{id}/skip` stores `{skip: true}` (never placed).
 
 **Auto fill** (`parse.guess`): files the rules can't place are placed by a best guess and listed with `guessed: true`
-(review: Keep = PUT /identify with the guess, Change = the form, Don't place = /skip). `PUT /api/settings/autofill`
+(review: Keep = PUT /identify with the guess, Change = the form, Don't place = /skip). A film (title + year) under a
+show's folder → that show's Specials, even inside its own folder (`_names_film`); "Complete Series" etc. dropped from
+guessed show names (`_decollect`). The form's "Best guess" button → `GET /api/files/{id}/guess` → `guess(force=True)`
+(also guesses what auto fill leaves alone; saves nothing). `PUT /api/settings/autofill`
 → `identify.replace_unplaced` re-places every unplaced or guessed, non-manual file at once (+ a scan per TV/Movies library
 when turned on, for TMDB matching). `library.describe` → `files.guessed` (to review), `files.unrecognized` (skips excluded).
 
@@ -504,6 +507,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/settings/encoders` · `PUT /api/settings/encoder {encoder\|null}` (admin) → `{choice, active, automatic, forced, options[{id,name,hardware}]}` | CPU/GPU choice (only encoders that pass a test encode; 400 otherwise) | TranscodeSettings |
 | `PUT /api/settings/transcoding {max_transcodes}` (state in `GET /api/settings` → `max_transcodes`, `max_transcodes_auto`) | conversion limit | TranscodeSettings |
 | `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`), files placed by Auto fill (`guessed: true`) + hand-identified/skipped ones (`manual`), with `library_*` | Identify.tsx |
+| `GET /api/files/{id}/guess` (admin) | the form's "Best guess": forced guess → `{title, year, season, episodes, episode_title}` / `{title, year, edition}`; 422 nothing to go on | Identify.tsx |
 | `PUT /api/files/{id}/skip` (admin) | don't place this file (`files.manual = {skip: true}`; `DELETE …/identify` undoes) | Identify.tsx |
 | `PUT /api/settings/autofill {enabled}` (admin; state in `GET /api/settings` → `autofill`) | Auto fill on/off; re-places unplaced/guessed files at once | Identify.tsx `AutofillSettings` |
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
@@ -574,7 +578,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | I want to… | Go to |
 |---|---|
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
-| Change Auto fill's best guesses | `parse.guess` (`_loose_number`, `_LOOSE_EP_RE`, `_LOOSE_SEASON_DIR_RE`, `_DISC_DIR_RE`, `_bare`) + a case in `test_parse.py`, bump `PARSER_VERSION` |
+| Change Auto fill's best guesses | `parse.guess` (`_folder_show`, `_names_film`, `_decollect`, `_tidy`, `_loose_number`, `_LOOSE_EP_RE`, `_LOOSE_SEASON_DIR_RE`, `_DISC_DIR_RE`, `_bare`) + a case in `test_parse.py`, bump `PARSER_VERSION` |
 | Change how files group into shows | `items.get_or_create_title`, `parse.title_key` |
 | Tune TMDB matching | `matcher.score` (tail-of-ours rule), `matcher.best_match`, `matcher.choose` (exact title vs wrong year), `ACCEPT`, `EXACT` |
 | Make failed TMDB matches get retried | bump `matcher.MATCHER_VERSION` (per-library setting `matcher_version:<id>`, `jobs.should_rematch`); one-off: `POST /api/libraries/{id}/scan?rematch=true` |

@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-10** (release 0.9.0).
+Last updated: **2026-10-10** (release 0.9.1).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -330,6 +330,27 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-10: Best guess button, a show's films go to its Specials (release 0.9.1, parser v8)
+- **What / why:** owner, after 0.9.0 on the real library: no way to run the guess on one file by hand; "feature length
+  movies or specials of a tv show" in the TV folder should be Season 00 specials of that show. Their case:
+  `Daria Complete Series/Daria Is It College Yet 2002 DVDRip XviD AC3 JUGGALOTUS/…avi` was unrecognised because
+  `_show_dir` took the film's own folder (it has a year) as the show, and the 0.9.0 guard refused films named like
+  their folder. Now `parse.guess`: a file that reads as a film (title + year, no number) goes to Specials of the show
+  named by the nearest folder that **isn't the film's own** (`_names_film`); with no such folder (Happy Gilmore 2 at the
+  top) it's still left alone. `_decollect` drops "Complete Series/Collection", "Box Set", "All Seasons" from guessed
+  show names so they join the existing show ("Daria"). `_tidy`: leading tag groups ("(En_Jp)") dropped, " _ " read as
+  " - " in guessed episode titles. `guess(force=True)` also guesses what auto fill leaves alone (a movie in its own
+  folder → Specials of a show named after it; a loose top-level file → its own show, an extra) and returns the rules'
+  result for files they place: `GET /api/files/{id}/guess` (admin, fills the form, saves nothing; 422 when there's
+  no name at all). Web: "Best guess" button next to "Fill in" in the identify form.
+- **Files:** `server/bams/parse.py` (`guess`, `_folder_show`, `_names_film`, `_decollect`, `_tidy`, v8), `app.py`
+  (`/api/files/{id}/guess`), tests `test_parse.py` (+4 guess cases, `test_forced_guess`), `test_identify.py` (guess
+  route, 404, viewer 403); `web/src/components/Identify.tsx` (`bestGuess`); CHANGELOG, VERSION 0.9.1.
+- **Verified:** 298 server tests; `web` tsc + build. Test server :8496: the Daria film joined an existing "Daria" show as
+  a Season 0 extra next to Season 1; Best guess on the Happy Gilmore file filled Show/Season 0/title in the form.
+- **Left open:** guessed episode titles of long YouTube-style names are still long (the real name can't be told apart
+  from series words); unnumbered Specials don't get TMDB episode data.
 
 ### 2026-10-10: Auto fill: unrecognised files placed by a best guess (release 0.9.0, parser v7)
 - **What / why:** owner: "an Auto fill parser… when a file cannot be identified… a best guess based on the file name and

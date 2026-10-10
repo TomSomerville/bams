@@ -133,7 +133,14 @@ def test_autofill_places_by_guess_and_can_be_reviewed(tmp_path):
         assert {"unrecognized": 2, "guessed": 0}.items() <= c.get(f"/api/libraries/{lib_id}").json()["files"].items()
         assert c.put("/api/settings/autofill", json={"enabled": True}).json() == {"autofill": True}
         assert len(placed()) == 4
+        # "Best guess" in the form: forced, also for a file auto fill leaves alone; nothing is saved
+        rnd = listed["random stuff.mkv"]
+        assert c.get(f"/api/files/{rnd['id']}/guess").json() == {
+            "title": "random stuff", "year": None, "season": 1, "episodes": [], "episode_title": "random stuff"}
+        assert c.get(f"/api/libraries/{lib_id}").json()["files"]["unrecognized"] == 1
+        assert c.get("/api/files/99999/guess").status_code == 404
         kid = signed_in(app, "Kid", admin=False)
+        assert kid.get(f"/api/files/{rnd['id']}/guess").status_code == 403
         assert kid.put("/api/settings/autofill", json={"enabled": False}).status_code == 403
         assert kid.put(f"/api/files/{hello['id']}/skip").status_code == 403
     finally:

@@ -149,6 +149,15 @@ def test_unnumbered_needs_a_season_folder():
     ("Random Show (2011)/Random Show Part 3 - The End.mkv", "show", ("Random Show", 2011, 1, [3], "The End")),
     ("Megapack/The.Simpsons.S01.DVDRip.x264-GRP.mkv", "show", ("Megapack", None, 1, [], "The Simpsons")),
     ("Show/Pilot.mkv", "show", ("Show", None, 1, [], "Pilot")),
+    # a film of a show in its own folder under the show's folder: the show's Specials ("Complete Series" dropped)
+    ("Daria Complete Series/Daria Is It College Yet 2002 DVDRip XviD AC3 JUGGALOTUS/"
+     "Daria Is It College Yet 2002 DVDRip XviD JUGGALOTUS.avi", "show", ("Daria", None, 0, [], "Daria Is It College Yet")),
+    ("Daria Complete Series/Daria Is It Fall Yet (2000).avi", "show", ("Daria", None, 0, [], "Daria Is It Fall Yet")),
+    ("Futurama Complete Collection/Futurama Benders Big Score (2007).mkv", "show",
+     ("Futurama", None, 0, [], "Futurama Benders Big Score")),
+    # leading tag groups dropped, " _ " (a ":" or "|" Windows can't store) read as " - "
+    ("Korean Short Stories (Beginner_ A1-A2)/(En_Jp) UPPER BEGINNER Korean Short Story _ Wish me luck_ A2.mp4", "show",
+     ("Korean Short Stories", None, 1, [], "UPPER BEGINNER Korean Short Story - Wish me luck - A2")),
     # movies: the nearest folder with a name ("CD1", "1080p" aren't names), its year
     ("Home Videos/CD1/(2019).mkv", "movie", ("Home Videos", 2019, None, [], None)),
     ("Family/1080p/x264.mkv", "movie", ("Family", None, None, [], None)),
@@ -169,3 +178,14 @@ def test_guess_fills_in_what_the_rules_cannot(rel, kind, want):
 ])
 def test_guess_gives_up_or_is_not_needed(rel, kind):
     assert guess(rel, kind) is None
+
+
+@pytest.mark.parametrize("rel,kind,want", [
+    # the identify form's "Best guess" button guesses where auto fill holds back
+    ("Happy Gilmore 2/Happy.Gilmore.2.2025.1080p.WEB.h264-ETHEL.mkv", "show", ("Happy Gilmore 2", None, 0, [], "Happy Gilmore 2")),
+    ("Loose video.mkv", "show", ("Loose video", None, 1, [], "Loose video")),
+    ("Show/Season 01/Show - S01E02.mkv", "show", ("Show", None, 1, [2], None)),  # what the rules say
+])
+def test_forced_guess(rel, kind, want):
+    g = guess(rel, kind, force=True)
+    assert g and g.guessed and (g.title, g.year, g.season, g.episodes, g.episode_title) == want

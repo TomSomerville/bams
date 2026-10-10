@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "BAMS"
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 DEFAULT_HOST = "127.0.0.1"  # this computer only; `serve --host 0.0.0.0` opens it to the network (login required)
 DEFAULT_PORT = 8484
 

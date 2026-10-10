@@ -53,7 +53,7 @@ function IdentifyForm({ file, onDone, onCancel }: { file: UnrecognizedFile; onDo
   const [epTitle, setEpTitle] = useState(start.episode_title ?? "");
   const [edition, setEdition] = useState(start.edition ?? "");
   const [tmdbId, setTmdbId] = useState<number | null>(start.tmdb_id ?? null);
-  const [busy, setBusy] = useState<"link" | "save" | null>(null);
+  const [busy, setBusy] = useState<"link" | "guess" | "save" | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => { loadNames(file.library_id).then(setNames); }, [file.library_id]);
@@ -75,6 +75,29 @@ function IdentifyForm({ file, onDone, onCancel }: { file: UnrecognizedFile; onDo
   const episodeOptions: ComboOption[] = numbered.map((e) => ({ value: String(e.n), label: `${e.n} · ${e.title}`, note: "in library" }));
   const epTitleOptions: ComboOption[] = (knownSeason?.episodes ?? []).map((e) => ({
     value: e.title, note: e.n !== null ? `E${String(e.n).padStart(2, "0")}` : "extra" }));
+
+  // "Best guess": Auto fill's guess for this file, from its folders and name (fills the fields; nothing is saved)
+  const bestGuess = async () => {
+    setBusy("guess");
+    setErr(null);
+    try {
+      const g = await api.get<Identification>(`/api/files/${file.id}/guess`);
+      setTitle(g.title ?? "");
+      setYear(g.year ? String(g.year) : "");
+      setTmdbId(null);
+      if (isShow) {
+        setSeason(g.season != null ? String(g.season) : "");
+        setEpisodes((g.episodes ?? []).join(", "));
+        setEpTitle(g.episode_title ?? "");
+      } else {
+        setEdition(g.edition ?? "");
+      }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const fill = async (text: string) => {
     if (!text.trim()) return;
@@ -134,6 +157,10 @@ function IdentifyForm({ file, onDone, onCancel }: { file: UnrecognizedFile; onDo
           onPaste={(e: ClipboardEvent<HTMLInputElement>) => { const t = e.clipboardData.getData("text"); setTimeout(() => fill(t)); }} />
         <button type="button" className="btn ghost small" disabled={!link.trim() || busy !== null} onClick={() => fill(link)}>
           {busy === "link" ? "Looking up…" : "Fill in"}
+        </button>
+        <button type="button" className="btn ghost small" disabled={busy !== null} onClick={bestGuess}
+          title="Fill the fields in from the file's folders and name (Auto fill's guess)">
+          {busy === "guess" ? "Guessing…" : "Best guess"}
         </button>
       </span>
 

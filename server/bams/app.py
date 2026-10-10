@@ -30,7 +30,7 @@ from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
 from .musicbrainz import MusicBrainz, MusicLookupError
-from .parse import parse_episode, parse_movie
+from .parse import guess, parse_episode, parse_movie
 from .tmdb import InvalidKey, Tmdb, TmdbError, key_kind
 
 log = logging.getLogger(__name__)
@@ -1447,12 +1447,12 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         out = []
         for r in rows:
             manual = jload(r["manual"])
-            guess = jload(r["parse"]) or {}
-            guessed = not manual and bool(guess.get("guessed"))
+            parsed = jload(r["parse"]) or {}
+            guessed = not manual and bool(parsed.get("guessed"))
             out.append({**file_info(r), "library_id": r["library_id"], "library_name": r["library_name"],
                         "library_type": r["library_type"], "manual": manual, "guessed": guessed,
                         "hint": None if manual or guessed else unrecognized_hint(r["rel_path"], r["library_type"]),
-                        "guess": {k: guess.get(k) for k in ("title", "year", "season", "episodes", "episode_title")}})
+                        "guess": {k: parsed.get(k) for k in ("title", "year", "season", "episodes", "episode_title")}})
         return out
 
     @app.get("/api/libraries/{lib_id}/unrecognized", dependencies=ADMIN)
@@ -1521,6 +1521,26 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         target = con.execute("SELECT item_id FROM file_items WHERE file_id=? ORDER BY item_id LIMIT 1",
                              (file_id,)).fetchone()["item_id"]
         return {"item_id": target, "title_id": identify.title_of(con, target), "note": note}
+
+    @app.get("/api/files/{file_id}/guess", dependencies=ADMIN)
+    def guess_file(file_id: int, con=Depends(db)):
+        """The identify form's "Best guess" button: Auto fill's guess for one file, forced (also where auto fill holds
+        back, e.g. a movie in its own folder in a TV library). Only fills the form; nothing is saved."""
+        f = con.execute("SELECT f.rel_path, l.type FROM files f JOIN libraries l ON l.id=f.library_id WHERE f.id=?",
+                        (file_id,)).fetchone()
+        if not f:
+            raise HTTPException(404, "no such file")
+        if f["type"] == "music":
+            raise HTTPException(400, "Music is identified from its tags.")
+        g = guess(f["rel_path"], f["type"], force=True)
+        if not g:
+            raise HTTPException(422, "Nothing in this file's name or folders to guess from.")
+        out = {"title": g.title, "year": g.year}
+        if f["type"] == "show":
+            out |= {"season": g.season, "episodes": g.episodes, "episode_title": g.episode_title}
+        else:
+            out["edition"] = g.edition
+        return out
 
     @app.put("/api/files/{file_id}/skip", dependencies=ADMIN)
     def skip_file(file_id: int, con=Depends(db)):
