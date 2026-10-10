@@ -3,6 +3,24 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.9.0 (2026-10-10)
+
+Auto fill: files BAMS couldn't identify from their names are now placed by a best guess.
+
+### New
+- **Auto fill** (Settings → Unrecognized files, on by default). When a file's name doesn't follow the naming rules,
+  BAMS guesses from its folders and name and puts it in the library anyway: the show from the folder, the season
+  from "Season", "Volume" or "Level" folders, the episode number from names like "Part 3", "Lesson 12" or
+  "01 - Name", and files with no number become extras of the show. A film sitting in its show's folder goes to
+  Specials. A movie in its own folder in a TV library is still flagged instead (it belongs in a Movies library).
+- **Review the guesses** in the Unrecognized list (Settings, or a library's Unrecognized tab): each guessed file shows
+  what BAMS made of it, with **Keep** (lock it in), **Change** (fix it by hand) and **Don't place** (leave it out of
+  the library). Library cards say how many files were placed by a guess.
+- Turning Auto fill off takes every guess out at once; what you kept or identified by hand stays.
+
+Update the server with the new installer. Files that were unrecognised are guessed on the first scan after the update.
+The Samsung TV app is unchanged (0.8.0 still works).
+
 ## 0.8.0 (2026-10-10)
 
 Safer accounts: people pick their own passwords, and two-step sign-in with an authenticator app.

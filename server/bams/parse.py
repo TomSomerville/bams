@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from guessit import guessit
 
 # Bump when parsing rules change: the next scan re-parses files parsed by an older version.
-PARSER_VERSION = 6
+PARSER_VERSION = 7
 
 # {tmdb-603} [tmdbid=603] {imdb-tt0133093} [imdbid-tt0133093] {tvdb-81189}
 _ID_RE = re.compile(r"[\[{](tmdb|imdb|tvdb)(?:id)?[-=]((?:tt)?\d+)[\]}]", re.I)
@@ -50,6 +50,7 @@ class Parsed:
     edition: str | None = None
     ids: dict[str, str] = field(default_factory=dict)   # tmdb / imdb / tvdb hints from the path
     release: dict[str, str] = field(default_factory=dict)  # resolution, codecs etc. from the name
+    guessed: bool = False              # placed by guess() (auto fill), not by the naming rules
 
     @property
     def recognized(self) -> bool:
@@ -291,3 +292,116 @@ def parse_movie(rel: str) -> Parsed:
 
 def parse(rel: str, library_type: str) -> Parsed:
     return parse_episode(rel) if library_type == "show" else parse_movie(rel)
+
+
+# ------------------------------------------------------------------ auto fill: a best guess for what parse() can't place
+
+# Words that number an episode in names without SxxEyy: "Part 3", "Lesson 12", "Ep. 4", "#5", "No. 2"
+_LOOSE_EP_RE = re.compile(
+    r"(?<![a-z0-9])(ep(?:isode)?|e|part|pt|lesson|lecture|class|session|chapter|ch|day|week|unit|module|no|#)"
+    r"[ ._#-]*(\d{1,3})(?![0-9])", re.I)
+_GENERIC_EP_WORDS = {"ep", "episode", "e", "part", "pt", "no", "#"}  # say nothing about the series ("Lesson" does)
+_LEAD_NUM_RE = re.compile(r"^(\d{1,3})(?=[ ._)\]-]|$)")                # "01 - Intro", "3. Hello"
+_TAIL_NUM_RE = re.compile(r"(?<=[ ._(\[-])(\d{1,3})$")                  # "Hello - 05"
+# Folders that group a series without saying "season": "Volume 2", "Vol.3", "Book 1", "Level 2", "Part 4"
+_LOOSE_SEASON_DIR_RE = re.compile(r"^(?:vol(?:ume)?|book|level|part|year|disc|disk|dvd)[ ._-]*(\d{1,3})$", re.I)
+_DISC_DIR_RE = re.compile(r"^(?:cd|dvd|dis[ck]|part|pt|vol(?:ume)?)[ ._-]*\d{1,3}$", re.I)  # "CD1": not a movie's name
+_TAGS_RE = re.compile(r"(?<![a-z0-9])(?:\d{3,4}[pi]|[xh]\.?26[45]|hevc|avc|xvid|divx|aac|ac3|dts|mp3|\d\.\d|"
+                      r"web-?dl|webrip|bluray|bdrip|dvdrip|hdtv|hdrip|remux|10bit|8bit)(?![a-z0-9])", re.I)
+
+
+def _words(s: str) -> str:
+    """"Some.Name_here-" -> "Some Name here": dots and underscores as spaces, separators trimmed."""
+    s = re.sub(r"[._]+", " ", s)
+    return re.sub(r"\s{2,}", " ", s).strip(" -–:#()[]")
+
+
+def _bare(stem: str) -> str:
+    """The file name without id tags, quote marks, release-tag groups and loose release tags."""
+    s = _core(stem) or stem
+    if _TAGS_RE.search(s):
+        s = re.sub(r"(?<=[a-z0-9])-[a-z0-9]{2,12}$", "", s, flags=re.I)  # "...x264-GRP": the release group
+    s = _TAGS_RE.sub(" ", s)
+    s = re.sub(r"(?<![a-z0-9])s\d{1,2}(?![a-z0-9])", " ", s, flags=re.I)  # a season with no episode: "Show S01 ..."
+    return re.sub(r"[(\[]\s*[)\]]", " ", s)
+
+
+def _loose_number(stem: str) -> tuple[int, str, str] | None:
+    """An episode number in a name with no SxxEyy: (number, text before it, text after it)."""
+    s = re.sub(r"[._]+", " ", _bare(stem)).strip()
+    for rx in (_LOOSE_EP_RE, _LEAD_NUM_RE, _TAIL_NUM_RE):
+        if (m := rx.search(s)) and (n := int(m.group(m.lastindex))) > 0:
+            before = s[:m.start()]
+            if rx is _LOOSE_EP_RE and m.group(1).casefold() not in _GENERIC_EP_WORDS:
+                before = s[:m.start(2)]  # "Korean Lesson 12": the word belongs to the series' name
+            return n, _words(before), _words(s[m.end():])
+    return None
+
+
+def _strip_show(text: str, show: str) -> str:
+    """"Korean Lessons - Hello" -> "Hello" when the show is "Korean Lessons"."""
+    words, show_words = text.split(), show.split()
+    if len(words) > len(show_words) and title_key(" ".join(words[:len(show_words)])) == title_key(show):
+        return _words(" ".join(words[len(show_words):]))
+    return text
+
+
+def guess(rel: str, library_type: str) -> Parsed | None:
+    """Auto fill: a best guess from the folders and the file name, for a file parse() couldn't place.
+
+    Looser than the naming rules: an episode number from "Part 3" / "Lesson 12" / "01 - Name", a season from
+    "Volume 2" / "Level 2" folders, a file with no number becomes an extra of the show its folder names, a movie
+    is named after its folder or its bare file name. None when there's nothing to go on (a loose file at the top of
+    a TV library with no number). The result has guessed=True; the scanner only uses it when auto fill is on.
+    """
+    p = parse(rel, library_type)
+    if p.recognized:
+        return None
+    parts = rel.replace("\\", "/").split("/")
+    dirs, stem = parts[:-1], _clean_stem(parts[-1])
+    p.guessed = True
+    if library_type != "show":
+        named = [t for d in reversed(dirs) if (t := _words(_bare(_clean_dir(d)))) and not _DISC_DIR_RE.match(t)]
+        own = _words(_bare(stem))
+        p.title = next((t for t in [*named, own] if re.search(r"[^\W\d_]", t)), None)  # a name with a letter in it
+        if p.title is None:
+            return None
+        if p.year is None and dirs:
+            p.year = _int(guessit(_clean_dir(dirs[-1]), {"type": "movie"}).get("year"))
+        return p
+
+    # TV: the show (from the folders, as parse() read them), a season, an episode number or none (an extra)
+    show_dir, _ = _show_dir(dirs)
+    show_dirs = [d for d in dirs if _season_from_dir(d) is None and not _LOOSE_SEASON_DIR_RE.match(_unquote(d))]
+    if not p.title or not show_dir:
+        p.title = next((t for d in reversed(show_dirs) if (t := _words(_clean_dir(d)))), None)
+    hit = _loose_number(stem)
+    if p.season is None:
+        p.season = next((int(m.group(1)) for d in reversed(dirs) if (m := _LOOSE_SEASON_DIR_RE.match(_unquote(d)))), None)
+    movie = parse_movie(parts[-1])
+    if hit and not p.episodes:
+        n, before, after = hit
+        p.episodes = [n]
+        if not p.title:  # "Korean Lesson 12.mp4" at the top of the library: the name before the number
+            p.title = before or None
+        if not p.episode_title and p.title:
+            p.episode_title = _strip_show(after, p.title) or None
+    elif not p.episodes:
+        if not show_dirs or not p.title:
+            return None  # a loose file with no number and no show folder: nothing to place it by
+        p.unnumbered = True
+        if movie.title and movie.year:  # "The Simpsons/The Simpsons Movie (2007).mkv": a film of the show
+            if title_key(movie.title) in {title_key(p.title), *(title_key(_words(_clean_dir(d))) for d in show_dirs)}:
+                return None  # "Happy Gilmore 2/Happy.Gilmore.2.2025.mkv": a movie in its own folder, not a show
+            p.episode_title = movie.title
+            if p.season is None:
+                p.season = 0  # -> Specials
+        else:
+            p.episode_title = _strip_show(_words(_bare(stem)), p.title or "") or stem
+    if p.season is None:
+        p.season = 1
+    if not p.title:
+        return None
+    if p.year is not None and movie.year == p.year and not any(str(p.year) in d for d in dirs):
+        p.year = None  # the film's year, not the show's
+    return p if p.recognized else None

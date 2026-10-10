@@ -21,6 +21,7 @@ def tv(tmp_path):
     paths = Paths(tmp_path / "data")
     app = create_app(paths, start_scheduler=False)
     c = signed_in(app, "Tom")
+    assert c.put("/api/settings/autofill", json={"enabled": False}).status_code == 200  # hand identification only
     lib = c.post("/api/libraries", json={"name": "TV", "type": "show", "paths": [str(media)]}).json()
     jobs.run_scan(paths, lib["id"], do_match=False)
     yield app, c, lib["id"], paths
@@ -80,6 +81,63 @@ def test_identify_rules(tv):
     kid = signed_in(app, "Kid", admin=False)
     assert kid.get("/api/unrecognized").status_code == 403
     assert kid.put(f"/api/files/{clip['id']}/identify", json={"title": "Show", "season": 1}).status_code == 403
+
+
+def test_autofill_places_by_guess_and_can_be_reviewed(tmp_path):
+    media = tmp_path / "media"
+    make_tree(media, ["Korean Lessons/Lesson 05 - Food.mp4",                # the naming rules place this one
+                      "Korean Lessons/Hello and goodbye.mp4",       # no number: an extra of season 1
+                      "Random Show/Random.Show.Part.3.720p.x264.mkv",
+                      "Show/Season 01/Show - S01E01.mkv",           # the naming rules place this one
+                      "random stuff.mkv"])                          # nothing to go on: stays unrecognised
+    paths = Paths(tmp_path / "data")
+    app = create_app(paths, start_scheduler=False)
+    c = signed_in(app, "Tom")
+    assert c.get("/api/settings").json()["autofill"] is True  # on by default
+    lib_id = c.post("/api/libraries", json={"name": "TV", "type": "show", "paths": [str(media)]}).json()["id"]
+    jobs.run_scan(paths, lib_id, do_match=False)
+    try:
+        def placed():
+            return {(s["title"], x["season"], e["n"], e["title"]) for s in c.get(f"/api/libraries/{lib_id}/names").json()
+                    for x in s["seasons"] for e in x["episodes"]}
+        assert placed() == {("Korean Lessons", 1, 5, "Food"), ("Korean Lessons", 1, None, "Hello and goodbye"),
+                            ("Random Show", 1, 3, "Episode 3"), ("Show", 1, 1, "Episode 1")}
+        assert {"unrecognized": 1, "guessed": 2}.items() <= c.get(f"/api/libraries/{lib_id}").json()["files"].items()
+        listed = {f["path"].rsplit("/", 1)[-1]: f for f in c.get("/api/unrecognized").json()}
+        assert set(listed) == {"Hello and goodbye.mp4", "Random.Show.Part.3.720p.x264.mkv", "random stuff.mkv"}
+        hello = listed["Hello and goodbye.mp4"]
+        assert hello["guessed"] and hello["hint"] is None and hello["guess"]["title"] == "Korean Lessons"
+        assert not listed["random stuff.mkv"]["guessed"] and listed["random stuff.mkv"]["hint"]
+
+        # keep a guess (saved as a hand identification), skip another; a rescan that re-reads every file keeps both
+        part3 = listed["Random.Show.Part.3.720p.x264.mkv"]
+        assert part3["guess"] == {"title": "Random Show", "year": None, "season": 1, "episodes": [3], "episode_title": None}
+        assert c.put(f"/api/files/{part3['id']}/identify", json=part3["guess"]).status_code == 200
+        assert c.put(f"/api/files/{hello['id']}/skip").json() == {"recognized": False}
+        con = connect(paths.db)
+        con.execute("UPDATE files SET parse=json_set(parse, '$.v', 0)")
+        con.close()
+        jobs.run_scan(paths, lib_id, do_match=False)
+        assert ("Korean Lessons", 1, None, "Hello and goodbye") not in placed()
+        listed = {f["path"].rsplit("/", 1)[-1]: f for f in c.get("/api/unrecognized").json()}
+        assert listed["Hello and goodbye.mp4"]["manual"] == {"skip": True}
+        assert c.get(f"/api/libraries/{lib_id}").json()["files"]["unrecognized"] == 1  # a skipped file isn't "to do"
+        assert listed["Random.Show.Part.3.720p.x264.mkv"]["manual"]["episodes"] == [3]
+        assert c.get(f"/api/libraries/{lib_id}").json()["files"]["guessed"] == 0
+        # undoing the skip places it by guess again
+        assert c.delete(f"/api/files/{hello['id']}/identify").json() == {"recognized": True}
+
+        # off: guesses are taken out at once (hand identifications stay); on: back
+        assert c.put("/api/settings/autofill", json={"enabled": False}).json() == {"autofill": False}
+        assert placed() == {("Korean Lessons", 1, 5, "Food"), ("Random Show", 1, 3, "Episode 3"), ("Show", 1, 1, "Episode 1")}
+        assert {"unrecognized": 2, "guessed": 0}.items() <= c.get(f"/api/libraries/{lib_id}").json()["files"].items()
+        assert c.put("/api/settings/autofill", json={"enabled": True}).json() == {"autofill": True}
+        assert len(placed()) == 4
+        kid = signed_in(app, "Kid", admin=False)
+        assert kid.put("/api/settings/autofill", json={"enabled": False}).status_code == 403
+        assert kid.put(f"/api/files/{hello['id']}/skip").status_code == 403
+    finally:
+        readonly.set_protected_roots([])
 
 
 def fake_tmdb() -> httpx.MockTransport:

@@ -60,7 +60,7 @@ export type ServerLibrary = {
   last_scan_status: string | null;
   roots: RootStatus[];
   counts: Record<string, number>;
-  files: { total: number; available: number; bytes: number; unrecognized: number };
+  files: { total: number; available: number; bytes: number; unrecognized: number; guessed?: number };
 };
 
 export type ScanState = {
@@ -245,10 +245,12 @@ export type ItemDetail = ItemSummary & {
 export type Identification = {
   title: string; year?: number | null; season?: number | null; episodes?: number[]; episode_title?: string | null;
   edition?: string | null; tmdb_id?: number | null;
+  skip?: boolean;  // {skip: true}: the admin said not to place the file (no other fields then)
 };
-/** A file the scanner couldn't place (hint says why), or one identified by hand (manual). */
+/** A file the scanner couldn't place (hint says why), one placed by a best guess (guessed: auto fill, to review),
+ *  or one identified by hand (manual). */
 export type UnrecognizedFile = FileInfo & {
-  hint: string | null; manual: Identification | null;
+  hint: string | null; manual: Identification | null; guessed?: boolean;
   library_id: number; library_name: string; library_type: "movie" | "show" | "music";
   guess: { title?: string | null; year?: number | null; season?: number | null; episodes?: number[] | null; episode_title?: string | null };
 };

@@ -12,8 +12,8 @@ import re
 import sqlite3
 
 from . import items
-from .db import jdump, jload
-from .parse import Parsed, parse
+from .db import get_setting, jdump, jload
+from .parse import Parsed, guess, parse
 from .tmdb import Tmdb
 
 # themoviedb.org/movie/603-the-matrix · /tv/1399-game-of-thrones · /tv/1399/season/1/episode/2
@@ -26,8 +26,23 @@ class LinkError(ValueError):
     """The link isn't one we can read, or doesn't fit this library."""
 
 
+def autofill_enabled(con: sqlite3.Connection) -> bool:
+    """Auto fill (place files the naming rules can't by a best guess) is on unless the owner turned it off."""
+    return get_setting(con, "autofill", "1") == "1"
+
+
+def from_name(rel: str, lib_type: str, autofill: bool) -> Parsed:
+    """What the path says: the naming rules, else (with auto fill) parse.guess's best guess."""
+    p = parse(rel, lib_type)
+    if not p.recognized and autofill:
+        return guess(rel, lib_type) or p
+    return p
+
+
 def manual_parsed(m: dict, lib_type: str) -> Parsed:
-    """The Parsed a hand identification stands for."""
+    """The Parsed a hand identification stands for. {"skip": true}: the admin said not to place the file."""
+    if m.get("skip"):
+        return Parsed(kind="episode" if lib_type == "show" else "movie")
     ids = {"tmdb": str(m["tmdb_id"])} if m.get("tmdb_id") else {}
     if lib_type == "show":
         eps = sorted(set(m.get("episodes") or []))
@@ -40,7 +55,7 @@ def parsed_for(con: sqlite3.Connection, file_id: int, rel: str, lib_type: str) -
     """What a file is: the admin's identification if there is one, else what its path says."""
     row = con.execute("SELECT manual FROM files WHERE id=?", (file_id,)).fetchone()
     m = jload(row["manual"]) if row else None
-    return manual_parsed(m, lib_type) if m else parse(rel, lib_type)
+    return manual_parsed(m, lib_type) if m else from_name(rel, lib_type, autofill_enabled(con))
 
 
 def store(con: sqlite3.Connection, file_id: int, manual: dict | None) -> list[int]:
@@ -49,11 +64,27 @@ def store(con: sqlite3.Connection, file_id: int, manual: dict | None) -> list[in
     f = con.execute("""SELECT f.id, f.rel_path, f.library_id, l.type FROM files f JOIN libraries l ON l.id=f.library_id
                        WHERE f.id=?""", (file_id,)).fetchone()
     con.execute("UPDATE files SET manual=? WHERE id=?", (jdump(manual) if manual else None, file_id))
-    p = manual_parsed(manual, f["type"]) if manual else parse(f["rel_path"], f["type"])
+    p = manual_parsed(manual, f["type"]) if manual else from_name(f["rel_path"], f["type"], autofill_enabled(con))
     con.execute("UPDATE files SET parse=? WHERE id=?", (jdump({**p.to_dict(), "manual": bool(manual)}), file_id))
     targets = items.link_file(con, f["library_id"], file_id, p)
     items.cleanup_orphans(con, f["library_id"])
     return targets
+
+
+def replace_unplaced(con: sqlite3.Connection) -> int:
+    """After auto fill is switched on or off: re-place every file the naming rules couldn't place (and that
+    wasn't identified by hand) in the TV and Movies libraries. String work only. Returns how many are placed now."""
+    autofill, placed, libs = autofill_enabled(con), 0, set()
+    for f in con.execute("""SELECT f.id, f.rel_path, f.library_id, l.type FROM files f JOIN libraries l ON l.id=f.library_id
+                            WHERE l.type IN ('show','movie') AND f.manual IS NULL AND (json_extract(f.parse, '$.guessed')
+                            OR f.id NOT IN (SELECT file_id FROM file_items))""").fetchall():
+        p = from_name(f["rel_path"], f["type"], autofill)
+        con.execute("UPDATE files SET parse=? WHERE id=?", (jdump(p.to_dict()), f["id"]))
+        placed += bool(items.link_file(con, f["library_id"], f["id"], p))
+        libs.add(f["library_id"])
+    for lib_id in libs:
+        items.cleanup_orphans(con, lib_id)
+    return placed
 
 
 def title_of(con: sqlite3.Connection, item_id: int) -> int:

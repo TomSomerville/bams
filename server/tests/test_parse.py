@@ -1,6 +1,6 @@
 import pytest
 
-from bams.parse import parse, title_key
+from bams.parse import guess, parse, title_key
 
 # (relative path, expected subset of fields)
 EPISODES = [
@@ -134,3 +134,38 @@ def test_unnumbered_needs_a_season_folder():
     # loose in a show folder (often a movie in the TV library) or at the root: still unrecognised
     assert not parse("Show (2010)/Show - Bonus Episode.mkv", "show").recognized
     assert not parse("Loose video.mkv", "show").recognized
+
+
+@pytest.mark.parametrize("rel,kind,want", [
+    # no number: an extra of the show its folder names (season from a "Level"/"Volume" folder, else 1)
+    ("Korean Lessons/Hello and goodbye.mp4", "show", ("Korean Lessons", None, 1, [], "Hello and goodbye")),
+    ("Korean Lessons/Level 2/Hello and goodbye.mp4", "show", ("Korean Lessons", None, 2, [], "Hello and goodbye")),
+    ("Korean Lessons/Volume 3/Korean Lessons - Food.mp4", "show", ("Korean Lessons", None, 3, [], "Food")),
+    ("Show (2010)/Show - Bonus Episode.mkv", "show", ("Show", 2010, 1, [], "Bonus Episode")),
+    # a film in its show's folder: Specials, named after the film (its year isn't the show's)
+    ("The Simpsons/The Simpsons Movie (2007).mkv", "show", ("The Simpsons", None, 0, [], "The Simpsons Movie")),
+    # "Part 3" numbers an episode; release tags and groups stay out of titles
+    ("Random Show/Random.Show.Part.3.720p.x264.mkv", "show", ("Random Show", None, 1, [3], None)),
+    ("Random Show (2011)/Random Show Part 3 - The End.mkv", "show", ("Random Show", 2011, 1, [3], "The End")),
+    ("Megapack/The.Simpsons.S01.DVDRip.x264-GRP.mkv", "show", ("Megapack", None, 1, [], "The Simpsons")),
+    ("Show/Pilot.mkv", "show", ("Show", None, 1, [], "Pilot")),
+    # movies: the nearest folder with a name ("CD1", "1080p" aren't names), its year
+    ("Home Videos/CD1/(2019).mkv", "movie", ("Home Videos", 2019, None, [], None)),
+    ("Family/1080p/x264.mkv", "movie", ("Family", None, None, [], None)),
+])
+def test_guess_fills_in_what_the_rules_cannot(rel, kind, want):
+    assert not parse(rel, kind).recognized
+    g = guess(rel, kind)
+    assert g and g.recognized and g.guessed
+    assert (g.title, g.year, g.season, g.episodes, g.episode_title) == want
+
+
+@pytest.mark.parametrize("rel,kind", [
+    ("Loose video.mkv", "show"),            # no folder, no number: nothing to place it by
+    ("[1080p].mkv", "movie"),               # no name at all
+    ("Some Film (2001).mkv", "show"),       # a movie at the top of a TV library
+    ("Happy Gilmore 2/Happy.Gilmore.2.2025.1080p.WEB.h264-ETHEL.mkv", "show"),  # a movie in its own folder
+    ("Show/Season 01/Show - S01E01.mkv", "show"),  # the naming rules place it: no guess
+])
+def test_guess_gives_up_or_is_not_needed(rel, kind):
+    assert guess(rel, kind) is None

@@ -1,6 +1,7 @@
 import shutil
 
 from bams import library
+from bams.db import set_setting
 from bams.scanner import scan_library
 from conftest import make_tree
 
@@ -36,6 +37,7 @@ def setup(env, files=FILES):
 
 def test_groups_shows_seasons_episodes(env):
     paths, media, con, lib_id = setup(env)
+    set_setting(con, "autofill", "0")  # the naming rules alone (auto fill would make 'Junk' a show)
     st = scan_library(con, lib_id, do_probe=False)
     assert st.added == 7 and st.unrecognized == 1  # the Sample folder is skipped; 'holiday video' unrecognised
     assert tree(con, lib_id) == {
@@ -150,13 +152,15 @@ def test_unnumbered_extras_in_season_folders_are_shown(env):
         "Show (2010)/Season 00/Show - S00E01 - Pilot.mkv",
         "Show (2010)/Season 00/Behind the Scenes.mkv",
         "Show (2010)/Season 00/Show - Bloopers.mkv",
-        "Show (2010)/Show - Bonus.mkv",  # not in a season folder: stays unrecognised
+        "Show (2010)/Show - Bonus.mkv",  # not in a season folder: the rules can't place it, auto fill guesses
     ])
     st = scan_library(con, lib_id, do_probe=False)
-    assert st.unrecognized == 1
+    assert st.unrecognized == 0
     eps = [(e["season_number"], e["episode_number"], e["title"]) for e in con.execute(
         "SELECT * FROM items WHERE kind='episode' ORDER BY season_number, episode_number IS NULL, episode_number, title")]
-    assert eps == [(0, 1, "Pilot"), (0, None, "Behind the Scenes"), (0, None, "Bloopers"), (1, 1, "Episode 1")]
+    assert eps == [(0, 1, "Pilot"), (0, None, "Behind the Scenes"), (0, None, "Bloopers"), (1, 1, "Episode 1"),
+                   (1, None, "Bonus")]
+    assert con.execute("SELECT COUNT(*) FROM files WHERE json_extract(parse, '$.guessed')").fetchone()[0] == 1
     n = con.execute("SELECT COUNT(*) FROM items").fetchone()[0]
     con.execute("UPDATE files SET parse=json_set(parse, '$.v', 0)")  # re-parse everything: no duplicates
     assert scan_library(con, lib_id, do_probe=False).reparsed == 5

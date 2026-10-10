@@ -45,9 +45,9 @@ bams/
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
-│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; `_show_dir` picks the folder that names the show
+│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; `_show_dir` picks the folder that names the show; `guess()` = Auto fill's best guess when the rules can't place a file
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
-│   │   ├── identify.py        Files identified by hand (files.manual): parsed_for() (scanner), store(), TMDB/IMDb link lookup, names for suggestions
+│   │   ├── identify.py        Files identified by hand (files.manual, {skip} = don't place): parsed_for() (scanner), from_name() (rules, then Auto fill guess), store(), replace_unplaced(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
 │   │   ├── tmdb.py            TMDB HTTP client (Bearer or api_key), throttle/retry, image cache download
 │   │   ├── probe.py           ffprobe discovery + JSON → compact summary (codecs, resolution, HDR + DV profile, sar +
@@ -231,7 +231,8 @@ MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist
 3. Diff against `files`: unchanged → touch `last_seen` (and re-parse if `PARSER_VERSION` is newer). Changed →
    reset probe and re-parse. New → `quick_hash`. If it can't be opened, it's counted as "busy" and retried next scan.
 4. New file whose hash and size match a vanished file → **moved**: the row is updated in place.
-5. Each parse → `identify.parsed_for` (the file's `manual` identification, else `parse.parse(rel, lib_type)`) →
+5. Each parse → `identify.parsed_for` (the file's `manual` identification, else `parse.parse(rel, lib_type)`, else with
+   Auto fill on (`settings.autofill`, default on) `parse.guess` → `Parsed.guessed`, stored in `files.parse`) →
    `items.link_file` (get-or-create show/season/episode or movie through `item_keys`; an unnumbered file in a season
    folder becomes an episode with no number, found again by title). Unrecognised files stay indexed, unlinked
    (listed by `/unrecognized` with a hint). Walking and hashing happen **outside** transactions; writes go in
@@ -443,7 +444,12 @@ suggestions (`Combo.tsx`). A pasted link → `POST /api/identify/lookup` → `id
 (+ season/episode), IMDb ids go through TMDB `/find` (episode → show + numbers); wrong library type refused.
 `PUT /api/files/{id}/identify` → `identify.store` (in one transaction: `files.manual`, `parse` rewritten from it incl.
 `ids.tmdb`, relink, orphan cleanup) → `matcher.match_title` with the TMDB id (or a search if the title is still
-pending). `DELETE` clears it and re-parses from the name.
+pending). `DELETE` clears it and re-parses from the name. `PUT /api/files/{id}/skip` stores `{skip: true}` (never placed).
+
+**Auto fill** (`parse.guess`): files the rules can't place are placed by a best guess and listed with `guessed: true`
+(review: Keep = PUT /identify with the guess, Change = the form, Don't place = /skip). `PUT /api/settings/autofill`
+→ `identify.replace_unplaced` re-places every unplaced or guessed, non-manual file at once (+ a scan per TV/Movies library
+when turned on, for TMDB matching). `library.describe` → `files.guessed` (to review), `files.unrecognized` (skips excluded).
 
 ### 4.5 TMDB key
 UI `TmdbSettings` → `PUT /api/settings/tmdb-key` (server verifies with `/3/authentication`; a 401 → 400 and it isn't
@@ -497,7 +503,9 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/settings/music-output {output: aac\|flac}` (admin; state in `GET /api/settings` → `music_output`) | what unplayable music is converted to | MusicSettings |
 | `GET /api/settings/encoders` · `PUT /api/settings/encoder {encoder\|null}` (admin) → `{choice, active, automatic, forced, options[{id,name,hardware}]}` | CPU/GPU choice (only encoders that pass a test encode; 400 otherwise) | TranscodeSettings |
 | `PUT /api/settings/transcoding {max_transcodes}` (state in `GET /api/settings` → `max_transcodes`, `max_transcodes_auto`) | conversion limit | TranscodeSettings |
-| `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`) + hand-identified ones (`manual`), with `library_*` | Identify.tsx |
+| `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`), files placed by Auto fill (`guessed: true`) + hand-identified/skipped ones (`manual`), with `library_*` | Identify.tsx |
+| `PUT /api/files/{id}/skip` (admin) | don't place this file (`files.manual = {skip: true}`; `DELETE …/identify` undoes) | Identify.tsx |
+| `PUT /api/settings/autofill {enabled}` (admin; state in `GET /api/settings` → `autofill`) | Auto fill on/off; re-places unplaced/guessed files at once | Identify.tsx `AutofillSettings` |
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
 | `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` (admin) | TMDB/IMDb link → fields (409 without a key, 400 wrong type/unreadable) · names in a library for suggestions | Identify.tsx |
 | `PUT /api/me/prefs {home_hero?, home_rows?: [{id, show}]}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`); only sent fields change | auth.tsx, HomeSettings |
@@ -547,11 +555,11 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
 | `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
-| `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB |
+| `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB; Auto fill: guesses placed + listed, keep, skip, rescan keeps both, setting off/on |
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
 | `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |
 | `test_readonly.py` | 15 write attempts must all raise and leave the tree byte-identical; reads allowed; full scan leaves media untouched; root validation |
-| `test_parse.py` | real-world names: scene packs, nested packs (megapack/show/S03/release/…), Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, extras with the season in their name, Series-N folders, movies |
+| `test_parse.py` | real-world names: scene packs, nested packs (megapack/show/S03/release/…), Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, extras with the season in their name, Series-N folders, movies; `guess()` cases (and where it gives up) |
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration |
@@ -566,6 +574,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | I want to… | Go to |
 |---|---|
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
+| Change Auto fill's best guesses | `parse.guess` (`_loose_number`, `_LOOSE_EP_RE`, `_LOOSE_SEASON_DIR_RE`, `_DISC_DIR_RE`, `_bare`) + a case in `test_parse.py`, bump `PARSER_VERSION` |
 | Change how files group into shows | `items.get_or_create_title`, `parse.title_key` |
 | Tune TMDB matching | `matcher.score` (tail-of-ours rule), `matcher.best_match`, `matcher.choose` (exact title vs wrong year), `ACCEPT`, `EXACT` |
 | Make failed TMDB matches get retried | bump `matcher.MATCHER_VERSION` (per-library setting `matcher_version:<id>`, `jobs.should_rematch`); one-off: `POST /api/libraries/{id}/scan?rematch=true` |
