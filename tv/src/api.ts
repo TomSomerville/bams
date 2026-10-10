@@ -9,7 +9,8 @@ import type { User } from "../../web/src/api";
 import type { Source } from "../../web/src/everywhere";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** `data`: the server's whole answer ({detail, code_required…}) */
+  constructor(public status: number, message: string, public data?: Record<string, unknown> | null) {
     super(message);
   }
 }
@@ -113,7 +114,7 @@ async function call<T>(method: string, path: string, body?: unknown, opts: { aut
   if (!r.ok) {
     const d = data?.detail;
     const msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((x: { msg: string }) => x.msg).join("; ") : `HTTP ${r.status}`;
-    throw new ApiError(r.status, msg);
+    throw new ApiError(r.status, msg, data);
   }
   return data as T;
 }
@@ -330,7 +331,7 @@ export async function publicPostTo<T>(base: string, path: string, body: unknown)
   const data = await r.json().catch(() => null);
   if (!r.ok) {
     const d = data?.detail;
-    throw new ApiError(r.status, typeof d === "string" ? d : `HTTP ${r.status}`);
+    throw new ApiError(r.status, typeof d === "string" ? d : `HTTP ${r.status}`, data);
   }
   return data as T;
 }

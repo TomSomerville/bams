@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
-import type { RemoteLibrary, RemoteServer } from "../api";
+import { ApiError, type RemoteLibrary, type RemoteServer } from "../api";
 import { LIB_TYPES } from "../format";
 import { connectServer, removeServer, setLibrary, useRemotes } from "../servers";
 import Icon from "./Icon";
@@ -17,18 +17,25 @@ export function ConnectServer({ again, onDone, onCancel }: {
   const [address, setAddress] = useState(again?.url ?? "");
   const [name, setName] = useState(again?.account ?? "");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [askCode, setAskCode] = useState(false);  // that account has two-step sign-in
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const digits = code.replace(/\s/g, "");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
     try {
-      await connectServer(again?.url ?? address, name, password);
+      await connectServer(again?.url ?? address, name, password, askCode ? digits : undefined);
       onDone();
     } catch (er) {
-      setErr((er as Error).message);
+      if (er instanceof ApiError && er.data?.code_required) {
+        setErr(askCode ? (er as Error).message : null);
+        setAskCode(true);
+        setCode("");
+      } else setErr((er as Error).message);
     } finally {
       setBusy(false);
     }
@@ -57,12 +64,21 @@ export function ConnectServer({ again, onDone, onCancel }: {
             account. Your password isn't kept: this browser signs in once and keeps the sign-in, like the TV app.
             Each browser and TV has its own list of servers.</p>
         </div>
+        {askCode && <>
+          <label htmlFor="rs-code">Code</label>
+          <div>
+            <input id="rs-code" className="text-input code-input" value={code} onChange={(e) => setCode(e.target.value)}
+              inputMode="numeric" autoComplete="one-time-code" maxLength={7} placeholder="123456" autoFocus />
+            <p className="fine-print">That account uses two-step sign-in: the 6-digit code your authenticator app shows
+              for it.</p>
+          </div>
+        </>}
       </div>
       {err && <p className="key-msg bad">{err}</p>}
       <div className="lib-foot">
         <span className="spacer" />
         <button type="button" className="btn ghost small" onClick={onCancel}>Cancel</button>
-        <button className="btn primary small" disabled={busy || !address.trim() || !name.trim() || !password}>
+        <button className="btn primary small" disabled={busy || !address.trim() || !name.trim() || !password || (askCode && digits.length !== 6)}>
           {busy ? "Connecting…" : again ? "Sign in" : "Connect"}
         </button>
       </div>

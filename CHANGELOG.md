@@ -3,6 +3,26 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.8.0 (2026-10-10)
+
+Safer accounts: people pick their own passwords, and two-step sign-in with an authenticator app.
+
+### New
+- **"Must change password at next sign-in"** for each account (Settings → Accounts, admins). It's ticked by default
+  when you add an account or set a new password for someone, so you can hand out a temporary password and they pick
+  their own when they first sign in. Until they do, BAMS shows them only that. Ticking it later signs them out.
+  The TV can't ask for a new password: it tells them to sign in in a web browser first.
+- **Two-step sign-in** (Settings → Your account → Two-step sign-in): scan the QR code with Google Authenticator (or
+  any authenticator app), and from then on signing in asks for the app's 6-digit code after your password. Works on
+  the web, on the TV's name-and-password sign-in and when connecting from another BAMS server. A wrong code counts
+  like a wrong password (waits, lockout); each code works once.
+- **Lost phone?** An admin can turn someone's two-step sign-in off in Settings → Accounts; on the server,
+  `bams user 2fa-off NAME` does it too. New: `bams user add|passwd NAME --must-change`.
+- The sign-in log shows two-step sign-in being turned on or off, and wrong codes.
+
+Update the server with the new installer; the database gets three new account columns when it starts (a backup is
+taken first). Update the TV app with `BAMS-SamsungTV-0.8.0.wgt` for the code box on its sign-in screen.
+
 ## 0.7.1 (2026-10-10)
 
 Getting around the Samsung TV app with the remote.

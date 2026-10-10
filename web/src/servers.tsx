@@ -210,7 +210,7 @@ function deviceName(): string {
 }
 
 /** Connect this browser to a server (or sign in to one already in the list again: its names and choices stay). */
-export async function connectServer(address: string, name: string, password: string): Promise<void> {
+export async function connectServer(address: string, name: string, password: string, code?: string): Promise<void> {
   let base: string | null = null;
   let hi: { name: string } | null = null;
   for (const c of candidates(address)) {
@@ -224,14 +224,16 @@ export async function connectServer(address: string, name: string, password: str
   try {
     r = await fetch(`${base}/api/auth/token`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), password, device: deviceName() }),
+      body: JSON.stringify({ name: name.trim(), password, device: deviceName(), ...(code ? { code } : {}) }),
     });
   } catch {
     throw new ApiError(0, `Couldn't reach ${hi.name} to sign in. Try again.`);
   }
   const data = await r.json().catch(() => null);
   if (r.status === 404) throw new ApiError(400, `${hi.name} runs an older BAMS that can't be connected to. Update it first.`);
-  if (!r.ok) throw new ApiError(r.status, `${hi.name} said: ${typeof data?.detail === "string" ? data.detail : `HTTP ${r.status}`}`);
+  if (!r.ok) {
+    throw new ApiError(r.status, `${hi.name} said: ${typeof data?.detail === "string" ? data.detail : `HTTP ${r.status}`}`, data);
+  }
   const list = load();
   const old = list.find((s) => s.url === base);
   const entry: Stored = {

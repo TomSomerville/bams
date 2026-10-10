@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -300,7 +300,14 @@ def _v8(con: sqlite3.Connection) -> None:
         con.execute(stmt)
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8}  # target version -> step
+def _v9(con: sqlite3.Connection) -> None:
+    """v9: "must change password at next sign-in" (set by an admin) and two-step sign-in codes (TOTP, see auth.py)."""
+    con.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
+    con.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")   # base32; NULL = two-step sign-in off
+    con.execute("ALTER TABLE users ADD COLUMN totp_last INTEGER")  # time step of the last code used (no replays)
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS login_state (
 CREATE TABLE IF NOT EXISTS auth_log (
     id         INTEGER PRIMARY KEY,
     at         REAL NOT NULL,
-    event      TEXT NOT NULL,      -- 'sign-in' | 'lock' | 'unlock'
+    event      TEXT NOT NULL,      -- 'sign-in' | 'lock' | 'unlock' | '2fa' (two-step sign-in on/off)
     result     TEXT NOT NULL,      -- 'ok' | 'failed' | 'admin'
     name       TEXT,               -- as typed (sign-in) or the account's name
     user_id    INTEGER,

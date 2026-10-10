@@ -143,6 +143,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-10 | **Home and Search combine every server, identically on web and TV** (`web/src/everywhere.ts`, imported by the TV): Continue Watching by `last_watched_at` (new field; older servers interleaved), Recently Added by `added_at`, Top Rated and genres interleaved, genres merged by name; a library's own row stays that library's (first server's libraries only, from its `home_rows`) | Owner: "Home and search should show a combined ALL servers content… TV and Web app should have a uniform view. Nothing different." One shared module so they can't drift |
 | 10-10 | A **ticket path accepts POST/DELETE with the session's own cookie/bearer** (a ticket alone still only reads media) | The web keeps another server's media links as ticket URLs; `hls_url` (POST) and closing a session (DELETE) are such links |
 | 10-10 | **Server name** = admin setting `server_name`, default "<oldest admin>'s BAM Server" (owner's wording), returned by `/api/hello` | Owner request; the hostname said nothing to people choosing a server |
+| 10-10 | **"Must change password at next sign-in"** per account (`users.must_change_password`): such a session opens only `PUT /api/auth/password` and logout (403 `must_change_password` elsewhere); setting it signs them out; on by default in the add/reset forms; `/api/auth/token` refuses (apps have no new-password screen) | Owner request: "force password change upon next authentication to allow a user to set their own password" |
+| 10-10 | **Two-step sign-in = TOTP** (RFC 6238, SHA-1/6 digits/30 s) in stdlib, secret in `users.totp_secret` (plain, like the rest of `bams.db`), ±1 step, each step once (`totp_last`); no recovery codes: an admin or `bams user 2fa-off` turns it off | Owner asked for Google Authenticator. No new server dependency. A wrong code counts toward the same waits/lockout; the right password alone neither counts nor resets them (else codes could be tried forever) |
 | 10-10 | **Music on the TV** with one HTML `<audio>` (not AVPlay), no gapless | AVPlay is the video player and owns the screen; `<audio>` plays MP3/AAC/FLAC and falls back to the server's conversion on an error |
 
 ## 4. Built so far
@@ -194,7 +196,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   on demand, native seeking, quality (max height) per session, bounded CPU/disk, idle sessions closed. A limit on
   simultaneous conversions (Settings).
 - **Accounts:** `auth.py` (scrypt hashes, sessions, throttle), admin/viewer roles, first-admin setup from the server
-  itself, login middleware on `/api/`, `bams user add|list|passwd|remove|unlock`.
+  itself, login middleware on `/api/`, `bams user add|list|passwd|remove|unlock|2fa-off`. "Must change password at
+  next sign-in" per account; two-step sign-in with an authenticator app (TOTP) (0.8.0).
 - **Security** (`security.py`, `netflow.py`): sign-in log (`security.db`), per-account wait after wrong passwords
   (1 s doubling) and lockout (default 5), admin lock/unlock, IP allow/block lists (`security.Gate`, outermost
   middleware), traffic log of every request (10 GB cap, folder/size settable), `bams security allow-all`.
@@ -240,8 +243,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - Settings → Security (`SecuritySettings.tsx`, admins): wrong-password threshold, account locks (lock/unlock), who can
   connect (mode + allow/block lists, "Allow my address"), sign-in log (filter, older), traffic log (folder, size, usage,
   search, older).
-- Sign-in / first-admin screens (`auth.tsx`), account menu, Settings → Accounts (password, users); viewers see only
-  their account. Continue Watching row, watched ticks / unwatched counts / progress bars, mark watched on movie,
+- Sign-in / first-admin screens (`auth.tsx`; code box for two-step accounts; "Pick your own password" screen),
+  account menu, Settings → Accounts (password, two-step sign-in with QR code, users with "must change password" and
+  "Turn off two-step"); viewers see only their account. Continue Watching row, watched ticks / unwatched counts / progress bars, mark watched on movie,
   show, season and episode, Resume / Start over; Continue Watching cards link the show and the episode's season. Player:
   resume, progress reports, up-next countdown (at the end and 30 s before it), next-episode button, skip +30 / −10 s, sound menu
   (tracks, Surround, Dolby pass-through on/off), subtitles menu (text via `<track>`, picture incl. VobSub = burned in),
@@ -323,6 +327,27 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-10: Must change password at next sign-in, two-step sign-in (release 0.8.0)
+- **What / why:** owner: a "Must Change Password on next login" checkbox per account "to allow a user to set their own
+  password", and "2fa so they can use Google Authenticator". Schema v9 (`users.must_change_password`, `totp_secret`,
+  `totp_last`). Flagged sessions get 403 except `MUST_CHANGE_API` (`LoginRequired`); the web shows `NewPassword` in
+  `auth.tsx`. TOTP in `auth.py` (stdlib); `_sign_in` asks for the code after a right password (`CodeNeeded` → 401
+  `code_required`), wrong codes go through `sec.failed`. Routes `/api/auth/2fa/setup`, `/api/auth/2fa`,
+  `/api/auth/2fa/off`, admin `DELETE /api/users/{id}/2fa`; `auth_log` event `2fa`. Web: code box on sign-in and on
+  "Connect to a server", `TwoFactor` card (QR via `qrcode-generator`, loaded on demand), admin checkboxes. TV: code box
+  on name+password sign-in.
+- **Files:** `server/bams/auth.py`, `app.py`, `db.py` (v9), `__main__.py`, `security.py` (comment),
+  `tests/test_auth.py`; `web/src/auth.tsx`, `api.ts`, `servers.tsx`, `components/AccountSettings.tsx`,
+  `RemoteSettings.tsx`, `SecuritySettings.tsx`, `styles.css`, `package.json` (`qrcode-generator`, MIT); `tv/src/api.ts`,
+  `screens/Link.tsx`; CHANGELOG, VERSION 0.8.0.
+- **Verified:** 274 server tests (new: RFC 6238 vectors, must-change flow incl. token refusal and admin reset, two-step
+  sign-in incl. wrong code wait, reuse, token sign-in, admin/self turn-off); TV `npm test` 25 pass. Browser on a DB copy
+  (:8495, v8 → v9 migration): flagged viewer got the new-password screen, then the app; two-step set up from the
+  QR/key, sign-in asked for the code, a wrong code was refused with a wait, the right one signed in; admin list showed
+  the checkbox and "Two-step", ticking/turning off worked; sign-in log showed "Two-step" and "wrong two-step code".
+- **Left open:** not tried with a real phone (codes computed from the key) nor on the TV; no recovery codes; TOTP
+  secrets are stored unencrypted in `bams.db`.
 
 ### 2026-10-10: TV remote navigation fixes, play bar timing, TV tests (release 0.7.1)
 - **What / why:** owner: "Navigation on the tv app is poor. Sometimes I cannot move the focus from nav to the main

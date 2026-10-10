@@ -6,7 +6,7 @@
     bams scan NAME [--no-match] [--rematch]
     bams tmdb-key                    paste your own TMDB key (hidden prompt); --clear to remove
     bams user add NAME [--admin]     create an account (password prompt)
-    bams user list | passwd NAME | remove NAME | unlock NAME
+    bams user list | passwd NAME | remove NAME | unlock NAME | 2fa-off NAME   (add/passwd: --must-change)
     bams security allow-all          let every address in again (if the IP lists shut you out)
     bams status
 """
@@ -89,13 +89,17 @@ def main(argv: list[str] | None = None) -> int:
     ua = us.add_parser("add", help="create an account (asks for its password)")
     ua.add_argument("name")
     ua.add_argument("--admin", action="store_true", help="can manage libraries, settings and accounts")
+    ua.add_argument("--must-change", action="store_true", help="they set their own password at their first sign-in")
     us.add_parser("list")
     up = us.add_parser("passwd", help="set a new password (signs the user out everywhere)")
     up.add_argument("name")
+    up.add_argument("--must-change", action="store_true", help="they set their own password at their next sign-in")
     ur = us.add_parser("remove")
     ur.add_argument("name")
     ul = us.add_parser("unlock", help="unlock an account locked after wrong passwords (or by an admin)")
     ul.add_argument("name")
+    u2 = us.add_parser("2fa-off", help="turn off an account's two-step sign-in (a lost phone)")
+    u2.add_argument("name")
 
     se = sub.add_parser("security", help="security settings").add_subparsers(dest="scmd", required=True)
     se.add_parser("allow-all", help="switch the IP lists to 'allow everyone except the block list'")
@@ -171,12 +175,12 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 if a.ucmd == "add":
                     pw = _new_password()
-                    auth.create_user(con, a.name, pw, a.admin)
+                    auth.create_user(con, a.name, pw, a.admin, a.must_change)
                     print(f"created {'admin ' if a.admin else ''}account {a.name!r}")
                 elif a.ucmd == "list":
                     for u in con.execute("SELECT * FROM users ORDER BY name COLLATE NOCASE"):
                         print(f"{u['name']}{'  (admin)' if u['is_admin'] else ''}")
-                elif a.ucmd in ("passwd", "remove", "unlock"):
+                elif a.ucmd in ("passwd", "remove", "unlock", "2fa-off"):
                     u = auth.get_user(con, a.name)
                     if not u:
                         print(f"error: no account called {a.name!r}", file=sys.stderr)
@@ -188,8 +192,12 @@ def main(argv: list[str] | None = None) -> int:
                         sec.log("unlock", "admin", name=u["name"], user_id=u["id"], reason="by the command line")
                         print(f"unlocked {u['name']!r}")
                     elif a.ucmd == "passwd":
-                        auth.update_user(con, u["id"], password=_new_password())
-                        print(f"password changed for {u['name']!r}")
+                        auth.update_user(con, u["id"], password=_new_password(), must_change_password=a.must_change)
+                        print(f"password changed for {u['name']!r}"
+                              + (" (they set their own at their next sign-in)" if a.must_change else ""))
+                    elif a.ucmd == "2fa-off":
+                        auth.disable_two_factor(con, u["id"])
+                        print(f"two-step sign-in turned off for {u['name']!r}")
                     else:
                         auth.delete_user(con, u["id"])
                         print(f"removed account {u['name']!r} (and its watch history)")

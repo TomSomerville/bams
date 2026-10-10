@@ -32,7 +32,7 @@ bams/
 │   ├── bams/
 │   │   ├── __main__.py        CLI entry (`python -m bams …` / `bams …`): serve, library, scan, tmdb-key, user, status
 │   │   ├── app.py             FastAPI app: bootstrap, serialisers, LoginRequired middleware, ALL HTTP routes, SPA hosting
-│   │   ├── auth.py            Accounts: scrypt hashes, users CRUD (last-admin rules), sessions (hashed tokens), Throttle
+│   │   ├── auth.py            Accounts: scrypt hashes, users CRUD (last-admin rules), must-change-password, TOTP two-step codes, sessions (hashed tokens), Throttle
 │   │   ├── devices.py         Apps on other devices (the TV): LinkCodes (code + secret, approve, poll), Tickets (signed
 │   │   │                      media-path tickets), split_ticket_path, TV_AGENT
 │   │   ├── security.py        Sign-in waits/lockout + sign-in log (security.db), IP allow/block policy, Gate middleware (IP check + traffic record)
@@ -190,13 +190,14 @@ thread) when it finishes.
 the cookie/bearer as usual, so a client keeping media links as ticket URLs can POST/DELETE them;
 the path is rewritten to the real one, so routes and the traffic log never see the ticket) → `lookup_digest()`
 (cached a minute per token, cleared on sign-out / password / user changes) → `auth.session_user` → the user dict in
-`request.state.user` (+ `state.session` = the session's digest), else 401. Non-GET cookie requests whose Origin isn't this
+`request.state.user` (+ `state.session` = the session's digest), else 401. An account with `must_change_password`
+gets 403 `{must_change_password: true}` on everything but `MUST_CHANGE_API` (`/api/auth/password`, `/api/auth/logout`). Non-GET cookie requests whose Origin isn't this
 host get 403 (bearer requests can't be forged by another site). `CORSMiddleware` (`*`, no credentials) sits between
 `LoginRequired` and `Gate`. Routes take
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v8)
+## 3. Data model (`db.py`, schema v9)
 
 | Table | Holds | Key columns |
 |---|---|---|
@@ -210,7 +211,7 @@ web UI, `/docs`.
 | `playlists` | imported playlists (v8) | `library_id`, `root_id` + `rel_path` of the playlist file, `name`, `size`/`mtime_ns` (re-read when they change), `entries` JSON as written ({path, title, duration}), `missing` |
 | `playlist_items` | playlist → tracks (v8) | (`playlist_id`, `position`) → `item_id`; rebuilt by `playlists.resolve` after every scan |
 | `scans` | scan history | `trigger`, `status` ok\|partial\|error, `stats` JSON |
-| `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`) |
+| `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`), v9: `must_change_password` (0/1), `totp_secret` (base32, NULL = two-step off), `totp_last` (time step of the last code used) |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
 
@@ -413,6 +414,12 @@ the id MusicBrainz answers with.
 `authenticate` (constant-ish time for unknown names) → `new_session` → cookie `bams_session` (HttpOnly, Lax,
 30 days, Secure on https). `Throttle`: 10 failures / 10 min per address → 429. Password changes and resets delete the
 user's sessions. Last admin can't be demoted/removed; nobody removes themselves.
+**Must change password:** `create_user/update_user(must_change_password=)`; turning it on (or a reset without it)
+deletes their sessions; `change_own_password` clears it (new ≠ current). `/api/auth/token` refuses flagged accounts.
+**Two-step (TOTP):** `new_totp_secret` → `totp_uri` (QR, issuer = server name) → `enable_two_factor` checks a code;
+`_sign_in` after a right password: no `code` → `CodeNeeded` (401 `{detail, code_required: true}`, nothing counted),
+wrong → `sec.failed` (waits/lockout) + 401 `code_required`; `check_code` accepts ±1 step, only steps after `totp_last`.
+Turned off by the user (`/api/auth/2fa/off`, password), an admin (`DELETE /api/users/{id}/2fa`) or `bams user 2fa-off`.
 
 ### 4.4e Security (`security.py`, `netflow.py`)
 Outside `bams.db`: `security.db` (data dir) has `login_state` (`key` = `u<id>` or `n:<casefolded name>`,
@@ -459,12 +466,13 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 
 | Route | Purpose | Used by (web) |
 |---|---|---|
-| `GET /api/auth/state` · `POST /api/auth/login {name,password}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
+| `POST /api/auth/2fa/setup` → `{secret, uri}` · `POST /api/auth/2fa {secret, code, password}` · `POST /api/auth/2fa/off {password}` · `DELETE /api/users/{id}/2fa` (admin) | two-step sign-in on/off | AccountSettings |
+| `GET /api/auth/state` · `POST /api/auth/login {name,password,code?}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
 | `GET /api/hello` (public) → `{app, version, name}` · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx |
 | `PUT /api/settings/server-name {name}` (admin; `""` = default) → `{name, default, custom}` (also in `GET /api/settings` → `server_name`) | what the server is called in apps' lists; default "<oldest admin>'s BAM Server" (`app.default_server_name`) | ServerNameSettings |
 | `POST /api/devices/link {name}` (public) → `{code, secret, expires_in}` · `POST /api/devices/link/poll {secret}` (public) → `{status}` or `{status: linked, token, user}` · `POST /api/devices/approve {code}` · `GET /api/devices` · `DELETE /api/devices/{id}` | TV link codes; your linked TVs, sign one out | tv, TvSettings, LinkTv |
 | `GET /api/media-ticket` → `{prefix, expires_in}` | `/api/t/<ticket>`: media URLs for players and `<img>` that can't send headers | tv |
-| `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin) | accounts | AccountSettings |
+| `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin; `must_change_password` on add/patch) | accounts | AccountSettings |
 | `GET /api/security` (admin) → `{lockout_threshold, ip{mode,allow,block}, your_ip, netflow{folder,default_folder,custom,max_bytes,bytes,files,oldest,dropped}}` | security settings + traffic-log usage | SecuritySettings |
 | `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
 | `GET /api/security/accounts` · `PUT /api/security/accounts/{id}/lock {locked}` (admin) | lock state per account / lock (signs out) or unlock | SecuritySettings |

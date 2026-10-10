@@ -250,7 +250,8 @@ function AuthLog() {
               <tr key={e.id}>
                 <td>{when(e.at)}</td>
                 <td><span className={`root-badge ${e.result === "ok" ? "ok" : e.result === "failed" ? "bad" : "warn"}`}>
-                  {e.event === "sign-in" ? (e.result === "ok" ? "Signed in" : "Failed") : e.event === "lock" ? "Locked" : "Unlocked"}
+                  {e.event === "sign-in" ? (e.result === "ok" ? "Signed in" : "Failed") : e.event === "lock" ? "Locked"
+                    : e.event === "2fa" ? "Two-step" : "Unlocked"}
                 </span></td>
                 <td>{e.name ?? "—"}</td>
                 <td><code>{e.ip ?? "—"}</code></td>
