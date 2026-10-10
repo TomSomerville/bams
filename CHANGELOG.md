@@ -3,6 +3,32 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.6.1 (2026-10-09)
+
+A Samsung TV app, and updates from inside BAMS.
+
+### New
+- **BAMS on Samsung TVs**: an app for Samsung smart TVs, used with the TV remote. It finds BAMS on your network, signs
+  in with a code you enter on your phone or computer (or by scanning its QR code), and shows Continue Watching, your
+  libraries, search, seasons and episodes. Videos play with the TV's own player: MKV, HEVC/HDR and Dolby Digital
+  (AC3/EAC3) sound go to the TV untouched; only DTS/TrueHD sound and video the TV can't decode are converted. Resume,
+  skipping, sound tracks, subtitles (with a timing control) and the next-episode countdown work like on the web.
+  It's a separate download on the release page (`BAMS-SamsungTV-<version>.wgt`) and installs through the TV's
+  Developer Mode: step-by-step instructions (written on a 2022 The Frame) at the bottom of the
+  [README](README.md#samsung-tv-app-the-frame).
+- **Settings → Your TVs** (every account): link a TV with its code, see your linked TVs, sign one out. The TV's QR code
+  opens the new page **/link**.
+- **Settings → About:** shows the version you run and the newest release; downloads it (checked against its SHA-256)
+  and installs it. Windows runs the installer by itself; on Linux it shows the one `sudo apt install` command.
+- **Home:** each library's row shows its newest titles, and a show with new episodes counts as new again; Top Rated and
+  the genre rows are a fresh random pick each time.
+- **Web player:** subtitle timing buttons (and the G / H keys), remembered per file; when a browser refuses sound
+  until you tap, the video plays muted and says so.
+
+### Fixed
+- **Continue Watching** no longer drops a show you're half-way through because you opened the next episode for a
+  few seconds (or a play failed).
+
 ## 0.5.3 (2026-10-08)
 
 Requests from the second test session.

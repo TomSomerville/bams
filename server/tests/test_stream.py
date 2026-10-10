@@ -558,3 +558,13 @@ def test_remux_over_hls_lines_up_across_runs(tmp_path):
         assert src.read_bytes() == before
     finally:
         readonly.set_protected_roots([])
+
+
+def test_hls_copy_cmd_in_mpeg_ts(monkeypatch, tmp_path):
+    monkeypatch.setattr(stream, "ffmpeg_path", lambda: "ffmpeg")
+    out = tmp_path / "s" / "0"
+    cmd = stream.hls_copy_cmd(Path("a.mkv"), 40, 120.5, "HEVC", out, 0, 6, copy_audio=True, ts=True)
+    assert cmd[cmd.index("-hls_segment_type") + 1] == "mpegts" and "-tag:v" not in cmd  # hvc1 is an MP4 tag
+    assert cmd[cmd.index("-hls_segment_filename") + 1] == str(out / "%d.ts") and "-hls_fmp4_init_filename" not in cmd
+    assert cmd[cmd.index("-start_number") + 1] == "40" and cmd[cmd.index("-c:a") + 1] == "copy"
+    assert "-copyts" in cmd and cmd[cmd.index("-output_ts_offset") + 1] == "10"  # runs line up as with fMP4

@@ -33,6 +33,8 @@ bams/
 │   │   ├── __main__.py        CLI entry (`python -m bams …` / `bams …`): serve, library, scan, tmdb-key, user, status
 │   │   ├── app.py             FastAPI app: bootstrap, serialisers, LoginRequired middleware, ALL HTTP routes, SPA hosting
 │   │   ├── auth.py            Accounts: scrypt hashes, users CRUD (last-admin rules), sessions (hashed tokens), Throttle
+│   │   ├── devices.py         Apps on other devices (the TV): LinkCodes (code + secret, approve, poll), Tickets (signed
+│   │   │                      media-path tickets), split_ticket_path, TV_AGENT
 │   │   ├── security.py        Sign-in waits/lockout + sign-in log (security.db), IP allow/block policy, Gate middleware (IP check + traffic record)
 │   │   ├── netflow.py         Traffic log: background writer of JSON-lines files under a size cap, backwards reader/search, folder check
 │   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, thresholds (admin settings)
@@ -65,7 +67,7 @@ bams/
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 245 tests, see §7
+│   └── tests/                 pytest: 268 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
@@ -118,6 +120,20 @@ bams/
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
 │           └── Settings.tsx   Admins: libraries, unrecognized files, TMDB, music, playback, accounts. Viewers: their account only
 │
+├── tv/                       ── Samsung TV app (Tizen web app, React + Vite + TS; tv/README.md) ─────────
+│   ├── tizen/config.xml       Manifest (app id BAMSmedia1.BAMS, privileges, pointing-device-support off) + icon.png
+│   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
+│   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
+│   └── src/
+│       ├── App.tsx            Phases (connect → link → main), screen stack + focus restore, the one keydown handler
+│       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting
+│       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap])
+│       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo)
+│       ├── engine.ts          AvplayEngine (webapis.avplay) / VideoEngine (<video> + hls.js) behind one interface
+│       ├── plan.ts            What the TV decodes (TV caps vs BROWSER caps) → direct / remux / convert; pickFile, pickAudio
+│       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
+│       ├── Rail.tsx · Cards.tsx · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
+│       └── screens/           Connect, Link (code + QR / password), Home, Library, Detail, Search, Settings, Player
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
 │   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
@@ -162,9 +178,13 @@ library roots as protected. Then `create_app` starts the Scheduler in the FastAP
 and every request, allowed or blocked, goes to the traffic log (`netflow.Netflow.record`, written by a background
 thread) when it finishes.
 
-**Every request to `/api/`** passes `LoginRequired` (plain ASGI middleware): the `bams_session` cookie → `lookup()`
+**Every request to `/api/`** passes `LoginRequired` (plain ASGI middleware): the `bams_session` cookie, else an
+`Authorization: Bearer` token (the TV app), else a media ticket path `/api/t/<ticket>/files|hls|images/…` (GET only;
+the path is rewritten to the real one, so routes and the traffic log never see the ticket) → `lookup_digest()`
 (cached a minute per token, cleared on sign-out / password / user changes) → `auth.session_user` → the user dict in
-`request.state.user`, else 401. Non-GET requests whose Origin isn't this host get 403. Routes take
+`request.state.user` (+ `state.session` = the session's digest), else 401. Non-GET cookie requests whose Origin isn't this
+host get 403 (bearer requests can't be forged by another site). `CORSMiddleware` (`*`, no credentials) sits between
+`LoginRequired` and `Gate`. Routes take
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
@@ -294,7 +314,8 @@ a `Session` (`data/transcode/<sid>/`) of one or more **variants** (`Variant`, fo
 FFmpeg, `bounds` (segment start times), `wanted`, `job_start`:
 - a fixed size → one conversion variant; `auto` → `hls.ladder()`: full size + 1080/720/480 below it (hls.js ABR,
   `capLevelToPlayerSize`); `burn` (track id or embedded stream number → `app._burn`) → `stream._transcode_parts(burn=)`;
-- `remux` → one **copy** variant: bounds = every keyframe (`Keyframes.get` → `stream.keyframes`, cached as
+- `remux` → one **copy** variant (`ts`: MPEG-TS segments `{k}.ts`, no `init.mp4`; the TV app asks for it, Samsung's AVPlay
+  plays no fMP4 HLS): bounds = every keyframe (`Keyframes.get` → `stream.keyframes`, cached as
   `data/cache/keyframes/{file}-{size}-{mtime}.json`), segments `{k}.m4s` + `init.mp4`, made by `hls_copy_cmd`. Before
   each run `_restart` dry-runs the seek (`remux_start(zero=True)`) and numbers from where it lands. Copy sessions don't
   count against the limit. `passthrough` (AC3/EAC3 track) → `Session.copy_audio`: audio copied too.
@@ -431,6 +452,9 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | Route | Purpose | Used by (web) |
 |---|---|---|
 | `GET /api/auth/state` · `POST /api/auth/login {name,password}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
+| `GET /api/hello` (public) · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server; sign an app in (bearer token, no cookie) | tv |
+| `POST /api/devices/link {name}` (public) → `{code, secret, expires_in}` · `POST /api/devices/link/poll {secret}` (public) → `{status}` or `{status: linked, token, user}` · `POST /api/devices/approve {code}` · `GET /api/devices` · `DELETE /api/devices/{id}` | TV link codes; your linked TVs, sign one out | tv, TvSettings, LinkTv |
+| `GET /api/media-ticket` → `{prefix, expires_in}` | `/api/t/<ticket>`: media URLs for players and `<img>` that can't send headers | tv |
 | `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin) | accounts | AccountSettings |
 | `GET /api/security` (admin) → `{lockout_threshold, ip{mode,allow,block}, your_ip, netflow{folder,default_folder,custom,max_bytes,bytes,files,oldest,dropped}}` | security settings + traffic-log usage | SecuritySettings |
 | `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
@@ -501,6 +525,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | File | Covers |
 |---|---|
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
+| `test_devices.py` | /api/hello, link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session), traffic log shows the real path |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
 | `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
@@ -537,6 +562,10 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Which codecs the browser is asked about | `canDecode()` in `web/src/pages/Player.tsx` |
 | Which audio may pass through untouched | `stream.PASSTHROUGH_AUDIO` + `PASS_TYPES` in `Player.tsx` (must go into MP4 cleanly) |
 | All-GPU path for an encoder | `stream._GPU_DECODER`, `_GPU_SCALER`, `gpu_filters`, `_gpu_filter_chain` (+ `test_all_gpu_filters_…`) |
+| How the TV app signs in / opens media | `devices.py` (`LinkCodes`, `Tickets`, `MEDIA_PREFIXES`), `LoginRequired` in `app.py`; TV side `tv/src/api.ts` |
+| What the TV plays as-is / how | `tv/src/plan.ts` (`TV` caps), `tv/src/screens/Player.tsx` `begin` (copy-HLS in TS on the TV) |
+| TV remote navigation | `tv/src/nav.ts` (`move`, `reveal`), key handling in `tv/src/App.tsx`, player keys in `Player.tsx` |
+| Build / sign / install the TV app | `tv/README.md`, `tv/scripts/wgt.mjs`, `tv/tizen/config.xml` |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |
 | Password / session rules | `auth.py` (`MIN_PASSWORD`, `SESSION_DAYS`, `_SCRYPT`, `Throttle`) |
 | Wrong-password waits / lockout / sign-in log | `security.py` (`wait_after`, `MAX_WAIT`, `DEFAULT_THRESHOLD`, `AUTH_LOG_KEEP`), login flow `app.auth_login` |

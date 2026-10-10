@@ -28,6 +28,7 @@ const FULL = 99999;  // "Full size": converted (the browser can't play the origi
 const SPEED_MIN = 0.1, SPEED_MAX = 3;
 const SKIP_FORWARD = 30, SKIP_BACK = 10;  // seconds (buttons and arrow keys)
 const CREDITS = 30;  // the up-next countdown starts this long before an episode ends (the credits)
+const SUB_STEP = 100;  // ms: one press of the subtitle timing buttons (and the g / h keys)
 const clampSpeed = (r: number) => Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, r)) * 100) / 100;
 const KEYS = { quality: "bams.quality", audioLang: "bams.audioLang", subLang: "bams.subLang", surround: "bams.surround",
                passthrough: "bams.passthrough" };
@@ -149,6 +150,14 @@ function Player({ id }: { id: string }) {
   const played = useRef(false);  // playback really got going (only then is the position worth saving)
   const finished = useRef(false); // left for the next episode from the credits: counts as watched to the end
   const skipCredits = useRef(false); // the viewer cancelled the credits' up-next: not again this viewing
+  // Play on by ourselves (a new episode, a new stream) unless the viewer paused. The autoplay attribute alone isn't
+  // enough: some browsers (Safari, iOS, strict Firefox settings) refuse sound without a fresh tap on this element.
+  const wantPlay = useRef(true);
+  const [soundBlocked, setSoundBlocked] = useState(false); // playing muted because the browser refused sound
+  const [subDelay, setSubDelay] = useState(0);  // ms the text subtitles are moved by (+ later, - earlier)
+  const [trackEl, setTrackEl] = useState<HTMLTrackElement | null>(null);
+  const [cuesLoaded, setCuesLoaded] = useState(0);
+  const cueTimes = useRef(new WeakMap<TextTrackCue, [number, number]>()); // each cue's own times, before the delay
 
   const file = item?.files.find((f) => f.available) ?? item?.files[0];
   const show = item?.ancestors.find((a) => a.kind === "show");
@@ -294,6 +303,37 @@ function Player({ id }: { id: string }) {
     return () => v.textTracks.removeEventListener("addtrack", apply);
   }, [subTrack, src, useHls, offset]);
 
+  // Subtitle timing: per file and track, remembered on this device (a badly timed subtitle file stays so).
+  // The browser's cues are moved in place, so it needs no new stream and works in every mode.
+  const delayKey = file && subTrack && !subTrack.image ? `bams.subDelay.${file.id}.${subTrack.id}` : null;
+  useEffect(() => { setSubDelay(Number(delayKey && pref(delayKey)) || 0); }, [delayKey]);
+  const changeDelay = (ms: number) => {
+    if (!delayKey) return;
+    ms = Math.round(ms / SUB_STEP) * SUB_STEP;
+    setSubDelay(ms);
+    setPref(delayKey, ms ? String(ms) : null);
+  };
+  const delayRef = useRef({ changeDelay, subDelay });
+  delayRef.current = { changeDelay, subDelay };
+  useEffect(() => {  // a <track> element loads its cues by itself: count each load to re-apply the delay
+    if (!trackEl) return;
+    const loaded = () => setCuesLoaded((n) => n + 1);
+    if (trackEl.readyState === 2) loaded();
+    trackEl.addEventListener("load", loaded);
+    return () => trackEl.removeEventListener("load", loaded);
+  }, [trackEl]);
+  useEffect(() => {
+    const cues = trackEl?.track.cues;
+    if (!cues) return;
+    const d = subDelay / 1000;
+    for (const c of Array.from(cues)) {
+      let own = cueTimes.current.get(c);
+      if (!own) cueTimes.current.set(c, own = [c.startTime, c.endTime]);
+      c.startTime = Math.max(0, own[0] + d);
+      c.endTime = Math.max(c.startTime, own[1] + d);
+    }
+  }, [subDelay, cuesLoaded, trackEl]);
+
   // Watch state: the position goes to the server every 10 s while playing, on pause, and on leaving.
   const posRef = useRef(0);
   const totalRef = useRef(0);
@@ -349,8 +389,27 @@ function Player({ id }: { id: string }) {
   const toggle = () => {
     const v = video.current;
     if (!v) return;
+    wantPlay.current = v.paused;
     if (v.paused) v.play().catch(() => {});
     else v.pause();
+  };
+  /** The stream can play and should: start it, muted if the browser won't allow sound without a tap. */
+  const autoStart = (v: HTMLVideoElement) => {
+    if (!v.paused || v.ended || !wantPlay.current) return;
+    v.play().catch((e) => {
+      if (e?.name !== "NotAllowedError" || v.muted) return;
+      v.muted = true;
+      setMuted(true);
+      setSoundBlocked(true);
+      v.play().catch(() => {});
+    });
+  };
+  const unmute = () => {
+    const v = video.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+    setSoundBlocked(false);
   };
   const seek = (s: number) => {
     const target = Math.max(0, Math.min(total || Infinity, s));
@@ -428,6 +487,8 @@ function Player({ id }: { id: string }) {
   // Key handler is registered once; read the latest position/seek through refs.
   const seekRef = useRef(seek);
   seekRef.current = seek;
+  const unmuteRef = useRef(unmute);
+  unmuteRef.current = unmute;
 
   useEffect(() => {
     const wake = () => {
@@ -441,8 +502,12 @@ function Player({ id }: { id: string }) {
       if (e.key === "ArrowRight") seekRef.current(posRef.current + SKIP_FORWARD);
       if (e.key === "ArrowLeft") seekRef.current(posRef.current - SKIP_BACK);
       if (e.key === "f") fullscreen();
+      if (e.key === "g" || e.key === "h") {
+        const d = delayRef.current;
+        d.changeDelay(d.subDelay + (e.key === "h" ? SUB_STEP : -SUB_STEP));
+      }
       if (e.key === ">" || e.key === "<") setRate((r) => clampSpeed(r + (e.key === ">" ? 0.25 : -0.25)));
-      if (e.key === "m" && video.current) { video.current.muted = !video.current.muted; setMuted(video.current.muted); }
+      if (e.key === "m") unmuteRef.current();
       wake();
     };
     wake();
@@ -491,6 +556,7 @@ function Player({ id }: { id: string }) {
             setT(e.currentTarget.currentTime);
             if (!e.currentTarget.paused) played.current = true;
           }}
+          onCanPlay={(e) => autoStart(e.currentTarget)}
           onDurationChange={(e) => !live && setFileDur(e.currentTarget.duration)}
           onEnded={() => {
             report(totalRef.current || posRef.current);  // the end counts as watched
@@ -499,6 +565,7 @@ function Player({ id }: { id: string }) {
           onLoadedMetadata={(e) => {
             const v = e.currentTarget;
             v.playbackRate = rate;
+            v.muted = muted;  // a new stream's element keeps the viewer's mute (or the browser's refusal)
             if (v.videoWidth === 0)
               toTranscode(`This browser can play the sound but not the ${pb?.video_codec ?? ""} video of this file, and the server can't convert it (no FFmpeg). You can download it.`);
             else if (mode === "file" && startAt.current) {  // resuming, or back to the original file mid-way
@@ -511,7 +578,7 @@ function Player({ id }: { id: string }) {
             : `This browser can't play this file (${pb?.video_codec ?? "unknown codec"}), and the server can't convert it (no FFmpeg). You can download it.`)}
         >
           {subTrack?.url && (
-            <track key={`${subTrack.id}-${live ? offset : 0}`} kind="subtitles" default label={subTrack.label}
+            <track key={`${subTrack.id}-${live ? offset : 0}`} ref={setTrackEl} kind="subtitles" default label={subTrack.label}
               srcLang={subTrack.language ?? undefined}
               src={live ? `${subTrack.url}?shift=${offset.toFixed(3)}` : subTrack.url} />
           )}
@@ -546,6 +613,10 @@ function Player({ id }: { id: string }) {
           <div className="player-title">{title}</div>
           {subtitle && <div className="muted">{subtitle}</div>}
         </div>
+        {soundBlocked && muted && (
+          <div className="resumed">Playing without sound: this browser wants a tap first
+            <button className="link-btn" onClick={unmute}>Turn sound on</button></div>
+        )}
         {resumed !== null && (
           <div className="resumed">Resumed from {fmt(resumed)}
             <button className="link-btn" onClick={() => { setResumed(null); seek(0); }}>Start over</button></div>
@@ -581,8 +652,7 @@ function Player({ id }: { id: string }) {
             <button className="icon-btn" onClick={() => goNext(false)} aria-label="Next episode" title="Next episode">
               <Icon name="skipForward" size={22} /></button>
           )}
-          <button className={`icon-btn ${muted ? "off" : ""}`} aria-label={muted ? "Unmute" : "Mute"}
-            onClick={() => { if (video.current) { video.current.muted = !video.current.muted; setMuted(video.current.muted); } }}>
+          <button className={`icon-btn ${muted ? "off" : ""}`} aria-label={muted ? "Unmute" : "Mute"} onClick={unmute}>
             <Icon name="volume" size={24} />
           </button>
           <span className="time">{fmt(scrub ?? pos)} / {fmt(total)}</span>
@@ -591,6 +661,21 @@ function Player({ id }: { id: string }) {
           {subTracks.length > 0 && (
             <Menu label={<Icon name="subtitles" size={20} />} title="Subtitles" open={menu === "subs"}
               setOpen={(o) => setMenu(o ? "subs" : null)}>
+              {delayKey && <>
+                <div className="menu-title">Timing</div>
+                <div className="sub-delay">
+                  <button onClick={() => changeDelay(subDelay - SUB_STEP)} title="Earlier (g)"
+                    aria-label={`Subtitles ${SUB_STEP} ms earlier`}>−{SUB_STEP}</button>
+                  <span className={subDelay ? "" : "muted"}>{subDelay > 0 ? "+" : subDelay < 0 ? "−" : ""}
+                    {(Math.abs(subDelay) / 1000).toFixed(1)} s</span>
+                  <button onClick={() => changeDelay(subDelay + SUB_STEP)} title="Later (h)"
+                    aria-label={`Subtitles ${SUB_STEP} ms later`}>+{SUB_STEP}</button>
+                </div>
+                <button disabled={!subDelay} onClick={() => changeDelay(0)}>Reset timing</button>
+                <p className="speed-note">0.1 s a press: + shows them later, − earlier. Kept for this file on
+                  this device. Keys: g / h</p>
+                <div className="menu-title">Track</div>
+              </>}
               <Choice on={!subTrack} onClick={() => pickSub(null)}>Off</Choice>
               {subTracks.map((s) => (
                 <Choice key={s.id} on={s.id === sub} onClick={() => pickSub(s.id)}

@@ -64,6 +64,7 @@ class Variant:
     duration: float
     dir: Path
     copy: bool = False           # video copied (audio-only remux) instead of converted
+    ts: bool = False             # copy: MPEG-TS segments instead of fMP4 (Samsung TVs play no fMP4 HLS)
     height: int | None = None    # conversion: largest height (None = as large as the encoder allows)
     bandwidth: int = 0           # bits/s, for the master playlist
     resolution: tuple[int, int] | None = None
@@ -77,7 +78,7 @@ class Variant:
 
     @property
     def ext(self) -> str:
-        return "m4s" if self.copy else "ts"
+        return "m4s" if self.copy and not self.ts else "ts"
 
     @property
     def segments(self) -> int:
@@ -106,10 +107,11 @@ class Variant:
     def playlist(self) -> str:
         n = self.segments
         lengths = [self.time(k + 1) - self.bounds[k] for k in range(n)]
-        lines = ["#EXTM3U", f"#EXT-X-VERSION:{7 if self.copy else 3}",
+        fmp4 = self.copy and not self.ts
+        lines = ["#EXTM3U", f"#EXT-X-VERSION:{7 if fmp4 else 3}",
                  f"#EXT-X-TARGETDURATION:{math.ceil(max(lengths, default=1)) + (0 if self.copy else 1)}",
                  "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:VOD"]
-        if self.copy:
+        if fmp4:
             lines.append('#EXT-X-MAP:URI="init.mp4"')
         for k, d in enumerate(lengths):
             lines += [f"#EXTINF:{max(d, 0.001):.3f},", f"{k}.{self.ext}"]
@@ -200,7 +202,8 @@ class Keyframes:
 
 def _default_cmd(s: Session, v: Variant, k: int) -> list[str]:
     if v.copy:
-        return stream.hls_copy_cmd(s.path, k, v.seek, s.video_codec, v.dir, s.audio, s.channels, s.copy_audio)
+        return stream.hls_copy_cmd(s.path, k, v.seek, s.video_codec, v.dir, s.audio, s.channels, s.copy_audio,
+                                   ts=v.ts)
     return stream.hls_cmd(s.path, k, s.video, v.dir, s.audio, max_height=v.height, channels=s.channels,
                           burn=s.burn, gpu=v.gpu)
 
@@ -263,9 +266,11 @@ class Transcodes:
     def create(self, file_id: int, path: Path, video: dict | None, duration: float, audio: int = 0,
                heights: list[int | None] | None = None, *, channels: int = 2, burn: int | tuple | None = None,
                keyframes: list[float] | None = None, video_codec: str | None = None, start: float = 0.0,
-               encoder: str | None = None, bitrate: int | None = None, copy_audio: bool = False) -> Session:
+               encoder: str | None = None, bitrate: int | None = None, copy_audio: bool = False,
+               ts: bool = False) -> Session:
         """A conversion (`heights`: one or more sizes; None = full size) or, with `keyframes`, a copy of the
-        video with converted audio. `start`: where the player begins, so the first FFmpeg run starts there."""
+        video with converted audio (`ts`: in MPEG-TS segments rather than fMP4). `start`: where the player begins, so
+        the first FFmpeg run starts there."""
         copy = keyframes is not None
         with self._lock:
             if not copy:
@@ -277,7 +282,7 @@ class Transcodes:
         if copy:
             (d / "0").mkdir()
             w, h = (video or {}).get("width"), (video or {}).get("height")
-            variants.append(Variant(0, copy_bounds(keyframes), duration, d / "0", copy=True,
+            variants.append(Variant(0, copy_bounds(keyframes), duration, d / "0", copy=True, ts=ts,
                                     bandwidth=bitrate or 8_000_000, resolution=(w, h) if w and h else None))
         else:
             for i, height in enumerate(heights or [None]):

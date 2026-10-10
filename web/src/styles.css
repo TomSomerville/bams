@@ -600,6 +600,9 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .season-bar .btn { height: 36px; font-size: 13px; padding: 0 14px; }
 
 /* ---------- player menus & notes ---------- */
+.sub-delay { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 6px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sub-delay button { justify-content: center; min-width: 64px; background: rgba(255, 255, 255, 0.08); }
+.quality-menu button:disabled { opacity: 0.4; cursor: default; }
 .speed-pick { padding: 8px 12px 4px; }
 .speed-pick input { width: 100%; accent-color: var(--cyan); }
 .speed-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
@@ -693,3 +696,8 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .mosaic { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; width: 100%; height: 100%; }
 .mosaic img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .music-art .mosaic { border-radius: inherit; overflow: hidden; }
+/* Settings -> About */
+.release-notes { margin-top: 12px; }
+.release-notes summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.release-notes pre, pre.command { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0 0; max-height: 280px; overflow-y: auto; }
+.fine-print.tight { margin: 0; }

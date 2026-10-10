@@ -181,6 +181,8 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
         show = r["show"]
         if show in shows_done:
             continue
+        if not r["watched"] and r["position"] < min_resume:
+            continue  # opened but not really watched (or a play that failed): says nothing about where you are
         shows_done.add(show)  # only the most recent activity of a show decides what it offers
         if not r["watched"] and r["position"] >= min_resume:
             out.append((r["item_id"], "resume"))

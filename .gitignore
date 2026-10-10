@@ -34,3 +34,7 @@ branding/archive/**/concepts/
 # installer builds (deploy/build.py)
 /build/
 /dist/
+
+# Samsung TV app (tv/scripts/wgt.mjs)
+/tv/build/
+*.wgt

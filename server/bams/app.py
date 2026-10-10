@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+import socket
 import sqlite3
 import subprocess
 import threading
@@ -19,11 +20,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 import anyio
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
-from . import netflow, security
+from . import devices, netflow, security, updates
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
@@ -272,12 +274,29 @@ class HlsIn(BaseModel):
     # number of an embedded subtitle stream
     burn: int | str | None = None
     passthrough: bool = False  # remux: copy AC3/EAC3 audio as-is (the player's device says it decodes it)
+    ts: bool = False           # remux: MPEG-TS segments instead of fMP4 (the TV app: Samsung's player takes no fMP4 HLS)
     start: float = Field(0, ge=0)  # where the player starts, so the first FFmpeg run starts there
 
 
 class LoginIn(BaseModel):
     name: str = Field(max_length=100)
     password: str = Field(max_length=1024)
+
+
+class TokenLoginIn(LoginIn):
+    device: str = Field("TV", max_length=100)  # shown in Settings → Your TVs
+
+
+class LinkStartIn(BaseModel):
+    name: str = Field("TV", max_length=100)
+
+
+class LinkPollIn(BaseModel):
+    secret: str = Field(max_length=200)
+
+
+class LinkCodeIn(BaseModel):
+    code: str = Field(max_length=20)
 
 
 class PasswordIn(BaseModel):
@@ -332,30 +351,56 @@ class WatchedIn(BaseModel):
 
 # ------------------------------------------------------------------ login
 
-PUBLIC_API = frozenset({"/api/auth/state", "/api/auth/login", "/api/auth/setup"})
+PUBLIC_API = frozenset({"/api/auth/state", "/api/auth/login", "/api/auth/setup",
+                        # apps on other devices (devices.py): find the server, sign in or link with a code
+                        "/api/hello", "/api/auth/token", "/api/devices/link", "/api/devices/link/poll"})
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
+def bearer_token(req: Request) -> str | None:
+    """The session token an app sends as `Authorization: Bearer <token>` (the TV app; browsers use the cookie)."""
+    scheme, _, token = (req.headers.get("authorization") or "").partition(" ")
+    return token.strip() or None if scheme.lower() == "bearer" else None
+
+
+def request_token(req: Request) -> str | None:
+    return req.cookies.get(auth.COOKIE) or bearer_token(req)
+
+
 class LoginRequired:
-    """ASGI middleware: every /api/ route except signing in needs a valid session cookie. The signed-in user
-    goes into `request.state.user`. Changes (POST/PUT/PATCH/DELETE) from another site's page are refused.
+    """ASGI middleware: every /api/ route except signing in needs a valid session: the browser's cookie, an
+    app's `Authorization: Bearer` token, or a media ticket in the path (`/api/t/<ticket>/files/...`, GET only,
+    media only; devices.py). The signed-in user goes into `request.state.user`, the session's digest into
+    `request.state.session`. Changes (POST/PUT/PATCH/DELETE) from another site's page are refused; that only
+    matters for the cookie, which browsers attach by themselves (a bearer token never is).
     Plain ASGI rather than BaseHTTPMiddleware, which would sit between FFmpeg's streams and the client."""
 
-    def __init__(self, app, lookup):
-        self.app, self.lookup = app, lookup
+    def __init__(self, app, lookup, tickets: devices.Tickets):
+        self.app, self.lookup, self.tickets = app, lookup, tickets
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
         if scope["type"] != "http" or not path.startswith("/api/") or path in PUBLIC_API:
             return await self.app(scope, receive, send)
         req = Request(scope)
-        user = await anyio.to_thread.run_sync(self.lookup, req.cookies.get(auth.COOKIE))
+        digest, cookie = None, False
+        if tp := devices.split_ticket_path(path):
+            if scope.get("method") in ("GET", "HEAD"):
+                digest = self.tickets.check(tp[0])
+            # the route sees the real path; the traffic log too (the Gate reads this same scope afterwards)
+            scope["path"], scope["raw_path"] = tp[1], tp[1].encode()
+        elif token := req.cookies.get(auth.COOKIE):
+            digest, cookie = auth.digest(token) if len(token) <= 100 else None, True
+        elif token := bearer_token(req):
+            digest = auth.digest(token) if len(token) <= 100 else None
+        user = await anyio.to_thread.run_sync(self.lookup, digest) if digest else None
         if user is None:
             return await JSONResponse({"detail": "Sign in to BAMS first."}, status_code=401)(scope, receive, send)
-        if scope.get("method") not in _SAFE_METHODS and not same_origin(req):
+        if cookie and scope.get("method") not in _SAFE_METHODS and not same_origin(req):
             return await JSONResponse({"detail": "Refused: the request came from another site."},
                                       status_code=403)(scope, receive, send)
-        scope.setdefault("state", {})["user"] = user
+        state = scope.setdefault("state", {})
+        state["user"], state["session"] = user, digest
         return await self.app(scope, receive, send)
 
 
@@ -433,22 +478,22 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     finally:
         _con.close()
 
-    # Signed-in users by cookie, for a minute: a playing video asks for a segment every few seconds, and
-    # each would otherwise be a DB lookup. Signing out / password changes clear it.
+    # Signed-in users by session (its stored digest), for a minute: a playing video asks for a segment every few
+    # seconds, and each would otherwise be a DB lookup. Signing out / password changes clear it.
     seen: dict[str, tuple[float, dict]] = {}
     seen_lock = threading.Lock()
 
-    def lookup(token: str | None) -> dict | None:
-        if not token:
+    def lookup_digest(digest: str | None) -> dict | None:
+        if not digest:
             return None
         t = time.monotonic()
         with seen_lock:
-            hit = seen.get(token)
+            hit = seen.get(digest)
             if hit and t - hit[0] < 60:
                 return hit[1]
         con = connect(paths.db)
         try:
-            u = auth.session_user(con, token)
+            u = auth.session_user_by_digest(con, digest)
         finally:
             con.close()
         user = {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"])} if u else None
@@ -456,10 +501,17 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             if len(seen) > 1000:
                 seen.clear()
             if user:
-                seen[token] = (t, user)
+                seen[digest] = (t, user)
             else:
-                seen.pop(token, None)
+                seen.pop(digest, None)
         return user
+
+    def lookup(token: str | None) -> dict | None:
+        return lookup_digest(auth.digest(token)) if token and len(token) <= 100 else None
+
+    tickets = devices.Tickets()
+    link_codes = devices.LinkCodes()
+    link_throttle = auth.Throttle()  # wrong TV codes, per account: codes are short
 
     def forget_sessions() -> None:
         with seen_lock:
@@ -472,6 +524,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             scheduler.start()
             # find the video encoder now (a few test encodes) rather than on the first play
             threading.Thread(target=stream.video_encoder, name="encoder-detect", daemon=True).start()
+            # a finished update: its Task Scheduler task and the installer it ran go
+            threading.Thread(target=updates.tidy, args=(paths.root / "updates",), name="update-tidy", daemon=True).start()
         yield
         scheduler.stop()
         transcodes.shutdown()
@@ -483,7 +537,11 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     app.state.transcodes = transcodes
     app.state.security = sec
     app.state.netflow = flows
-    app.add_middleware(LoginRequired, lookup=lookup)
+    app.add_middleware(LoginRequired, lookup=lookup_digest, tickets=tickets)
+    # Apps on other devices (the TV app runs from its own origin) may call the API with a bearer token. "*" never
+    # lets another site use a browser's cookie: browsers don't send credentials to a wildcard origin.
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
+                       allow_headers=["authorization", "content-type"], max_age=3600)
     app.add_middleware(security.Gate, security=sec, flows=flows)  # added last = outermost: sees every request
 
     def db() -> Iterator[sqlite3.Connection]:
@@ -509,7 +567,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     def auth_state(request: Request, con=Depends(db)):
         """Who is signed in (null if nobody), and whether the first admin account still has to be created
         (`setup`), which this browser may do only from the server itself (`setup_here`)."""
-        u = lookup(request.cookies.get(auth.COOKIE))
+        u = lookup(request_token(request))
         if u:
             u = {**u, "prefs": auth.prefs(auth.get_user(con, u["id"]))}
         empty = auth.user_count(con) == 0
@@ -548,6 +606,23 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         lock it (Settings -> Security). Every attempt goes into the sign-in log."""
         if not same_origin(request):
             raise HTTPException(403, "Refused: the request came from another site.")
+        u = _sign_in(body, request, con)
+        _set_cookie(response, request, auth.new_session(con, u["id"], request.headers.get("user-agent")))
+        return auth.public(u)
+
+    @app.post("/api/auth/token")
+    def auth_token(body: TokenLoginIn, request: Request, con=Depends(db)):
+        """Sign in from an app (the TV app): the same checks as the web sign-in, but the session token comes back
+        in the body, for `Authorization: Bearer`. No cookie is set, so it can't be used by another site."""
+        u = _sign_in(body, request, con)
+        return {"token": auth.new_session(con, u["id"], _tv_agent(body.device)), "user": auth.public(u)}
+
+    def _tv_agent(device: str) -> str:
+        name = " ".join((device or "TV").split())[:100] or "TV"
+        return f"{devices.TV_AGENT} · {name}"
+
+    def _sign_in(body: LoginIn, request: Request, con: sqlite3.Connection) -> sqlite3.Row:
+        """Check a name and password (waits, lockout, sign-in log); the user's row, or an HTTPException."""
         ip, ua, name = _client(request), request.headers.get("user-agent"), body.name.strip()
 
         def refuse(status: int, why: str, msg: str, uid: int | None = None, headers: dict | None = None):
@@ -582,14 +657,81 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             sec.succeeded(key)
         throttle.ok(ip)
         sec.log("sign-in", "ok", name=name, user_id=u["id"], ip=ip, user_agent=ua)
-        _set_cookie(response, request, auth.new_session(con, u["id"], ua))
-        return auth.public(u)
+        return u
 
     @app.post("/api/auth/logout", status_code=204)
     def auth_logout(request: Request, response: Response, con=Depends(db)):
-        auth.end_session(con, request.cookies.get(auth.COOKIE))
+        auth.end_session(con, request_token(request))
         forget_sessions()
         response.delete_cookie(auth.COOKIE, path="/")
+
+    # -- apps on other devices (devices.py): finding the server, linking with a code, media tickets
+    @app.get("/api/hello")
+    def hello():
+        """Public: tells an app looking around the network that this is a BAMS server, and which."""
+        return {"app": "bams", "version": VERSION, "name": socket.gethostname()}
+
+    @app.post("/api/devices/link")
+    def link_start(body: LinkStartIn):
+        """Public: a TV asks for a code to show. Someone signed in enters it (POST /api/devices/approve or the
+        web page /link); the TV polls with `secret` until then."""
+        try:
+            return link_codes.start(" ".join(body.name.split())[:100] or "TV")
+        except devices.LinkError as e:
+            raise HTTPException(429, str(e)) from None
+
+    @app.post("/api/devices/link/poll")
+    def link_poll(body: LinkPollIn, request: Request, con=Depends(db)):
+        """Public: {status: waiting|expired} or, once the code was entered, {status: linked, token, user}
+        (once; the token is a session like any other)."""
+        status, uid, name = link_codes.poll(body.secret)
+        if status != "linked":
+            return {"status": status}
+        u = auth.get_user(con, uid)
+        if not u:  # removed in the meantime
+            return {"status": "expired"}
+        sec.log("sign-in", "ok", name=u["name"], user_id=uid, ip=_client(request), reason=f"TV linked: {name}",
+                user_agent=request.headers.get("user-agent"))
+        return {"status": "linked", "token": auth.new_session(con, uid, _tv_agent(name)), "user": auth.public(u)}
+
+    @app.post("/api/devices/approve")
+    def link_approve(body: LinkCodeIn, request: Request, me=Depends(current_user)):
+        """Link the TV showing `code` to your account."""
+        who = f"u{me['id']}"
+        if link_throttle.blocked(who):
+            raise HTTPException(429, "Too many wrong codes. Wait ten minutes and try again.")
+        try:
+            name = link_codes.approve(body.code, me["id"])
+        except devices.LinkError as e:
+            link_throttle.fail(who)
+            raise HTTPException(400, str(e)) from None
+        return {"name": name}
+
+    @app.get("/api/devices")
+    def list_devices(con=Depends(db), me=Depends(current_user)):
+        """Your linked TVs (their sessions), newest first."""
+        rows = con.execute("""SELECT token, created_at, last_seen_at, user_agent FROM sessions
+                              WHERE user_id=? AND user_agent LIKE ? ORDER BY created_at DESC""",
+                           (me["id"], devices.TV_AGENT + "%")).fetchall()
+        return [{"id": r["token"][:16], "name": r["user_agent"][len(devices.TV_AGENT):].lstrip(" ·") or "TV",
+                 "created_at": r["created_at"], "last_seen_at": r["last_seen_at"]} for r in rows]
+
+    @app.delete("/api/devices/{device_id}", status_code=204)
+    def remove_device(device_id: str, con=Depends(db), me=Depends(current_user)):
+        """Sign one of your TVs out."""
+        if not (len(device_id) == 16 and all(c in "0123456789abcdef" for c in device_id)):
+            raise HTTPException(404, "no such TV")
+        n = con.execute("DELETE FROM sessions WHERE user_id=? AND substr(token, 1, 16)=? AND user_agent LIKE ?",
+                        (me["id"], device_id, devices.TV_AGENT + "%")).rowcount
+        if not n:
+            raise HTTPException(404, "no such TV")
+        forget_sessions()
+
+    @app.get("/api/media-ticket")
+    def media_ticket(request: Request):
+        """A path prefix that opens this session's media (files, HLS, images) without headers, for players and
+        <img> tags that can't send any: replace "/api/" in a media URL with `prefix` + "/"."""
+        return {"prefix": f"/api/t/{tickets.make(request.state.session)}", "expires_in": devices.TICKET_TTL}
 
     @app.put("/api/auth/password")
     def change_password(body: PasswordIn, request: Request, response: Response, con=Depends(db),
@@ -747,6 +889,29 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             "read_only_guard": {"installed": True, "protected_roots": len(readonly.protected_roots())},
             "scans": scheduler.status(),
         }
+
+    # -- updates (Settings -> About): the newest release on GitHub, downloaded and checked, installed on Windows
+    @app.get("/api/update", dependencies=ADMIN)
+    def update_status(refresh: bool = False):
+        return {**updates.status(force=refresh), "updates_dir": str(paths.root / "updates")}
+
+    @app.post("/api/update/download", dependencies=ADMIN)
+    def update_download():
+        try:
+            updates.start_download(paths.root / "updates")
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+        return update_status()
+
+    @app.post("/api/update/install", dependencies=ADMIN)
+    def update_install():
+        try:
+            updates.install(paths.root / "updates")
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+        except RuntimeError as e:
+            raise HTTPException(500, str(e)) from None
+        return update_status()
 
     def _tmdb_status(con) -> dict:
         key = get_setting(con, "tmdb_key")
@@ -914,6 +1079,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     # -- items
     _SORTS = {"title": "COALESCE(sort_title, title) COLLATE NOCASE", "year": "year DESC, title COLLATE NOCASE",
               "added": "added_at DESC", "rating": "rating DESC",
+              # newest first, a show counting from its newest episode (new episodes bring it back up)
+              "recent": """COALESCE((SELECT MAX(e.added_at) FROM items s JOIN items e ON e.parent_id = s.id
+                                     WHERE s.parent_id = items.id AND items.kind = 'show'), added_at) DESC""",
+              "random": "RANDOM()",
               "artist": "parent_title COLLATE NOCASE, year IS NULL, year, title COLLATE NOCASE"}
     _LIB_KINDS = {"show": ("show",), "movie": ("movie",), "music": MUSIC_KINDS}
 
@@ -940,7 +1109,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     @app.get("/api/items")
     def all_items(kind: str = Query("show,movie", pattern="^(show|movie|artist|album|track)(,(show|movie|artist|album|track))*$"),
                   sort: str = "added", q: str | None = None, genre: str | None = None,
-                  limit: int = Query(100, le=5000), con=Depends(db), me=Depends(current_user)):
+                  min_rating: float | None = None, limit: int = Query(100, le=5000), con=Depends(db),
+                  me=Depends(current_user)):
         """Shows/movies (default) or artists/albums/tracks across every library (Home rows, search)."""
         kinds = kind.split(",")
         where, args = [f"kind IN ({','.join('?' * len(kinds))})"], list(kinds)
@@ -950,6 +1120,9 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if genre:
             where.append("genres LIKE ?")
             args.append(f'%"{genre}"%')
+        if min_rating is not None:
+            where.append("rating >= ?")
+            args.append(min_rating)
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {_SORTS.get(sort, _SORTS['added'])} LIMIT ?",
                            (*args, limit)).fetchall()
         return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
@@ -1421,6 +1594,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             copy_audio = _copy_audio(pr, body.audio, body.passthrough)
             s = transcodes.create(file_id, p, pr.get("video"), pr["duration"], body.audio, channels=ch,
                                   keyframes=kf, start=body.start, bitrate=pr.get("bitrate"), copy_audio=copy_audio,
+                                  ts=body.ts,
                                   video_codec=stream.plan(pr, jload(row["parse"]))["video_codec"])
         else:
             enc = stream.video_encoder()

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Tizen (Samsung TV) app manifest. scripts/wgt.mjs copies it next to the built app and fills in the version. -->
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://github.com/TomSomerville/bams/tv" version="@VERSION@" viewmodes="maximized">
+    <tizen:application id="BAMSmedia1.BAMS" package="BAMSmedia1" required_version="6.0"/>
+    <content src="index.html"/>
+    <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
+    <icon src="icon.png"/>
+    <name>BAMS</name>
+    <description>Bad Ass Media Server: watch your own movies and shows from your BAMS server.</description>
+    <author href="https://github.com/TomSomerville/bams">BAMS</author>
+    <license href="https://opensource.org/licenses/MIT">MIT</license>
+    <!-- talk to the BAMS server on the home network (any address: it's chosen in the app) -->
+    <access origin="*" subdomains="true"/>
+    <tizen:allow-navigation>*</tizen:allow-navigation>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <!-- the remote's media and colour keys -->
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <!-- the TV's own address, to look for servers next to it -->
+    <tizen:privilege name="http://developer.samsung.com/privilege/network.public"/>
+    <!-- the model name, shown when linking ("Samsung QN50LS03BAFXZA") -->
+    <tizen:privilege name="http://developer.samsung.com/privilege/productinfo"/>
+    <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
+    <tizen:profile name="tv-samsung"/>
+    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable"
+                   encryption="disable" install-location="auto" hwkey-event="enable" pointing-device-support="disable"/>
+</widget>

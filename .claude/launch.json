@@ -48,6 +48,30 @@
       "runtimeExecutable": "server\\.venv\\Scripts\\python",
       "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\7a84ce6f-fafb-4f28-a86e-9bf7b24fe2c4\\scratchpad\\data", "serve", "--port", "8491"],
       "port": 8491
+    },
+    {
+      "name": "bams-test-8492",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\8a360247-5d28-4bb7-beaa-807d05fd1845\\scratchpad\\data", "serve", "--port", "8492"],
+      "port": 8492
+    },
+    {
+      "name": "bams-test-8493",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\4484e078-b3c9-47e0-944e-b47b3114f2bd\\scratchpad\\data", "serve", "--port", "8493"],
+      "port": 8493
+    },
+    {
+      "name": "tv",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "tv", "run", "dev"],
+      "port": 5174
+    },
+    {
+      "name": "tv-built",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "http.server", "5175", "-d", "tv\\build\\wgt"],
+      "port": 5175
     }
   ]
 }

@@ -17,14 +17,17 @@ builds on Windows too. `--version X` stamps a different package version (for tes
 1. Bump `VERSION` in `server/bams/config.py` (the installers, the `.deb` and `bams --help` all read it). Windows
    doesn't strictly need a higher version, but apt only upgrades to a higher one.
 2. If dependencies changed: `uv pip compile server/pyproject.toml --universal --generate-hashes --python-version 3.11 -o deploy/requirements.txt`, then run the tests against it.
-3. `deploy\build.py all`, test, then commit, tag and publish (the README's download link points at the latest
-   release):
+3. `deploy\build.py all`, and the Samsung TV app with the same version (set `version` in `tv/package.json`, then
+   `cd tv && npm run build && npm run package -- --release` → `dist/BAMS-SamsungTV-<v>.wgt`; needs Tizen Studio and the
+   maintainer's signing profile, tv/README.md). Test, then commit, tag and publish (the README's download link points
+   at the latest release). The TV app is its own asset, not inside the server installers:
    ```bash
    git tag -a v0.2.0 -m "BAMS 0.2.0" && git push origin main v0.2.0
-   cd dist && sha256sum * > SHA256SUMS.txt && cd ..
-   gh release create v0.2.0 dist/BAMS-Setup-0.2.0.exe dist/bams_0.2.0_all.deb dist/SHA256SUMS.txt --title "BAMS 0.2.0" --notes "..."
+   cd dist && sha256sum BAMS-Setup-0.2.0.exe bams_0.2.0_all.deb BAMS-SamsungTV-0.2.0.wgt > SHA256SUMS.txt && cd ..
+   gh release create v0.2.0 dist/BAMS-Setup-0.2.0.exe dist/bams_0.2.0_all.deb dist/BAMS-SamsungTV-0.2.0.wgt dist/SHA256SUMS.txt --title "BAMS 0.2.0" --notes "..."
    ```
-   People run the new installer over the old one.
+   People run the new installer over the old one (or update from Settings → About). The in-app updater picks the
+   `.exe`/`.deb` by name, so other assets don't disturb it.
 
 ## What's inside
 

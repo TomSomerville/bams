@@ -134,10 +134,14 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | **Star Trek short forms** (DS9, TNG, TOS, VOY, ENT) are spelled out in the parser | The one franchise where scene packs routinely abbreviate; TMDB only knows the full names (TOS is just "Star Trek") |
 | 10-08 | TMDB: a **near-exact title (≥ 0.95) is accepted even with a wrong year**; TMDB's first result is accepted when its name is the tail of ours ("Star Wars Andor" → "Andor") | Years in scene names are often an episode's air year or a season's; South Park and Parks and Recreation sat at 0.75 for that. Only rank 0 gets the tail rule |
 | 10-08 | A scan **retries `unmatched` titles** when it re-parsed files or when `matcher.MATCHER_VERSION` changed since that library was last matched (else only `pending`) | Parser/matcher fixes otherwise never reach titles that failed once; found on the owner's server after 0.5.0 |
+| 10-09 | **Samsung TV app** = a Tizen web app (`tv/`, React + Vite, one classic script loaded from file://) using **AVPlay**, released as its own `.wgt` next to the server installers, installed in Developer Mode | Owner request. Tizen web apps are HTML/JS (same skills as `web/`); AVPlay decodes far more than a browser (MKV, HEVC/HDR, AC3/EAC3). No store submission for a home app |
+| 10-09 | TV signs in by **link code** (`/link` page + QR) or name+password, getting an ordinary **session token** sent as `Authorization: Bearer`; media through **ticket paths** `/api/t/<ticket>/…` (HMAC over the session digest, 24 h, key per process, GET-only, files/hls/images only); CORS `*` without credentials | The packaged app runs from its own origin (no cookies); AVPlay and `<img>` can't send headers; a ticket in a URL can't sign anyone in and dies with the session |
+| 10-09 | On the TV **everything the TV decodes is played as copy-HLS in MPEG-TS** (`hls?remux&ts&passthrough`), not from the file | The owner's 2022 Frame (Tizen 6.5) **can't seek** in a progressively streamed file (AVPlay and `<video>` both: one `bytes=0-` request, then `PLAYER_ERROR_SEEK_FAILED`), so resume/skip froze; and it **rejects fMP4 HLS** (`NOT_SUPPORTED_FILE`). Copy-HLS in TS seeks fine and converts nothing (AC3/EAC3 copied) |
+| 10-09 | Continue Watching **ignores episodes opened but not really watched** (position 0, not watched) when deciding what a show offers | Opening the next episode for a few seconds (or a play that failed) hid a show the viewer was half-way through |
 
 ## 4. Built so far
 
-### Server (`server/`, ~7,000 lines + 245 tests)
+### Server (`server/`, ~7,500 lines + 268 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval, order (`PUT /api/libraries/order`). Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -205,6 +209,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   admin-only data dir, update in place, uninstall that asks before deleting data) and `bams_<v>_all.deb` (offline wheels,
   venv, systemd unit as the desktop user, `/etc/default/bams`, ufw, update in place, remove keeps / purge deletes data).
   User guide `docs/INSTALL.md`; build/release notes `deploy/README.md`. In-app TMDB key guide `/help/tmdb.html`.
+- **Apps on other devices** (`devices.py`): `/api/hello` (public: "this is BAMS"), TV link codes (`/api/devices/link`,
+  `/poll`, `/approve`), `/api/auth/token` (name+password → bearer token), `/api/devices` (your TVs, sign one out),
+  `/api/media-ticket` (`/api/t/<ticket>/…` paths for players that can't send headers), CORS for the TV's origin;
+  copy-HLS can make MPEG-TS segments (`ts`) for Samsung's player.
 - **Deploy (manual):** `deploy/linux/bams.service` (hardened systemd unit; kernel-level read-only media).
 
 ### Web (`web/`, React 19 + Vite + TS, ~2,600 lines + 530 lines CSS)
@@ -235,6 +243,18 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
 
+### Samsung TV app (`tv/`, Tizen web app, React + Vite + TS)
+- Finds the server (TV's /24 from Tizen system info, else common home ranges, or typed), links with a code + QR or
+  name/password, Home (hero of the focused title, Continue Watching, Recently added, per-library rows), library grids
+  (sorts), detail (seasons/episodes, resume/start over/mark watched), search, settings (server, sign out, always
+  convert, "TV plays DTS"). Remote: spatial navigation (`nav.ts`), Back, media and colour keys registered.
+- Player (`screens/Player.tsx`, `engine.ts`): AVPlay on the TV (`<video>` + hls.js in a browser); copy-HLS in TS for
+  what the TV decodes (`plan.ts`), full conversion otherwise or after a failure; resume, ±skip, progress every 10 s,
+  sound/subtitle menus (text subtitles drawn by the app from the server's WebVTT, with a timing control; picture
+  subtitles burned in), up-next countdown. Packaging: `npm run package` (`scripts/wgt.mjs`) signs with the Tizen
+  Studio profile `BAMS`, `--install --run` puts it on the TV, `--release` copies `dist/BAMS-SamsungTV-<v>.wgt`.
+- Web: Settings → Your TVs (`TvSettings.tsx`) and `/link` (`LinkTv.tsx`).
+
 ### Docs
 README.md, CLAUDE.md, docs/PLAN.md, docs/STATUS.md, docs/CODEBASE.md, docs/FORMATS.md, docs/READ-ONLY.md,
 docs/INSTALL.md, deploy/README.md, server/README.md.
@@ -248,8 +268,11 @@ Roughly in priority order:
 2. **Music leftovers (minor):** sample-perfect gapless (Media Source Extensions); un-merging an album; making and
    editing playlists in BAMS (only imported today); `.cue` entries inside playlists.
 3. **ISO / DVD / Blu-ray folders** (phase 3).
-4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning), an in-app "update available" notice.
-5. **UI redesign** from the owner's mockups.
+4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning).
+5. **TV app leftovers:** music on the TV; Samsung TVs other than the owner's 2022 Frame untested (codec table in
+   `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
+   README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
+6. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
 
@@ -265,6 +288,7 @@ Roughly in priority order:
 | Test media | `C:\Users\Beached\Shows` (TV: Bob's Burgers, Family Guy, Simpsons, Burn Notice, South Park…) · `C:\Users\Beached\Movies` (2 movies) · `C:\Users\Beached\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) · `C:\Users\Beached\TestMedia` (Jellyfin DV profile 5 clip + its SDR version, CC BY-SA 4.0, `CREDITS.txt`) |
 | Libraries on the owner's server | 1 = "TV Shows" (`…\Shows`), 2 = "Movies" (`…\Movies`); the owner adds "Music" (`…\MyMusic`) when testing |
 | Art tools | local ComfyUI (Qwen Image); `tools/brand_art/rework.py` redraws the logo set from the supplied art |
+| Samsung TV | The Frame QN50LS03BAFXZA (2022, Tizen 6.5) at `192.168.1.211`, Developer Mode with host `192.168.1.40` (the owner's PC). Tizen Studio 6.1 in `C:	izen-studio` (TV Extensions, Samsung Certificate Extension); signing profile **BAMS** (`C:UsersBeachedSamsungCertificateBAMS`, keep it: updates must be signed with the same author certificate). `sdb connect 192.168.1.211`; remote inspector: `sdb shell 0 debug BAMSmedia1.BAMS` → port, `sdb forward tcp:P tcp:P`, then the DevTools protocol on `127.0.0.1:P` |
 
 ## 7. Repo state notes
 - Initial commit `3c79290` (plan, branding, UI prototype). Everything after it, server included, was
@@ -284,6 +308,27 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-09: Samsung TV app (The Frame), link codes, tickets, TS copy-HLS (release 0.6.1)
+- **What / why:** owner asked for a Samsung TV app driven by the remote. `tv/` (Tizen web app, AVPlay) + server support
+  (`devices.py`: link codes, bearer tokens, media tickets; CORS; `/api/hello`) + web Settings → Your TVs and `/link`.
+  Brought up on the owner's QN50LS03BAFXZA (Tizen 6.5) over sdb with the remote inspector: the TV can't seek in a
+  progressive file and rejects fMP4 HLS, so TV playback goes through copy-HLS in MPEG-TS (`hls_copy_cmd(ts=True)`).
+  Fixed on the TV: video hidden behind the page (`html` background), grey dot (full-size `<object>`), focus scrolling,
+  no server found (`webapis.network.getIp` refused). Continue Watching now skips opened-not-watched episodes. Released
+  as its own asset `BAMS-SamsungTV-<v>.wgt`; README has install steps for The Frame.
+- **Files:** `tv/` (all), `server/bams/devices.py`, `app.py` (LoginRequired: bearer + ticket paths; CORS; device
+  routes; `HlsIn.ts`), `auth.py` (`digest`, `session_user_by_digest`), `hls.py`/`stream.py` (TS copy variant),
+  `watch.py`, `tests/test_devices.py`, tests in `test_hls.py`/`test_stream.py`/`test_watch.py`,
+  `web/src/components/TvSettings.tsx`, `web/src/pages/LinkTv.tsx`, README, CHANGELOG, `config.VERSION` 0.6.1.
+- **Verified:** 268 tests pass. Browser run of the TV app at 1920×1080 against a DB copy (link, navigation, direct /
+  copy / converted playback, subtitles, up-next). On the TV (via `tveval.mjs`-style inspector scripts): AVPlay seeks
+  fail on progressive MKV/MP4 from BAMS and from a plain test server (no second Range request), fMP4 copy-HLS
+  `NOT_SUPPORTED_FILE`, TS copy-HLS plays AC3 5.1 and seeks (10:00, +30 s); after 0.6.1 + TV 0.1.5 resume from
+  Continue Watching and ±skip on the real app. Owner confirmed picture, dot gone, sign-in, playback.
+- **Left open:** see §5 4b. Subtitle timing default 0 (owner adjusts per TV). Release 0.6.1 also carries another
+  session's uncommitted-at-the-time work (in-app updates `updates.py` + Settings → About, Home rows, web player
+  subtitle timing / autoplay), bundled at the owner's request; that session documents its own part.
 
 ### 2026-10-08: Tester session 2: Continue Watching links, next episode, credits countdown, 30 s skip (release 0.5.3)
 - **What / why:** tester requests. Continue Watching card: picture plays, show name opens the show, episode line opens

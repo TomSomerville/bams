@@ -61,10 +61,12 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 245 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 268 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
+# Samsung TV app (tv/README.md): Tizen Studio in C:	izen-studio, signing profile "BAMS", TV at 192.168.1.211
+cd tv && npm install && npx tsc -p . && npm run build && npm run package -- --install --run   # --release: dist/BAMS-SamsungTV-<v>.wgt
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
@@ -183,4 +185,19 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **The live remux (`stream.remux_cmd`) needs `-noaccurate_seek`:** the copied video starts at the keyframe before `-ss`,
   but FFmpeg trims converted audio to the exact `-ss` and both start at 0, so the picture ran seconds behind the sound.
   A tone or mostly-silent test clip doesn't show it; `test_live_remux_keeps_sound_with_picture_after_a_seek` uses noise.
+- **Samsung's AVPlay (owner's 2022 Frame, Tizen 6.5) can't seek in a progressively streamed file** (one `bytes=0-`
+  request, then `PLAYER_ERROR_SEEK_FAILED`; `<video>` too) and **rejects fMP4 HLS**. The TV app plays everything it
+  decodes as copy-HLS in **MPEG-TS** (`POST /hls {remux, ts, passthrough}`). Don't switch it back to direct file play.
+- **TV app page layers must be transparent while playing** (`html.playing`, body, #root): AVPlay draws video *under* the
+  page. Keep the `<object type="application/avplayer">` at 1×1 px: full size it drew a grey dot mid-screen.
+- **TV app builds to one classic script** (`tv/vite.config.ts`: IIFE, ES2019, no module scripts, no `import.meta`):
+  Tizen loads the app from file://. Static images live in `tv/public` and are referenced by relative paths.
+- **`webapis.network.getIp()` throws on the owner's TV** ("pepper plugin"): the TV's address comes from
+  `tizen.systeminfo` (ETHERNET/WIFI_NETWORK) with fallbacks (`tizen.ts` `localIp`).
+- **Media tickets** (`/api/t/<ticket>/…`) are rewritten to the real path in `LoginRequired`; they open only
+  `MEDIA_PREFIXES` and only GET/HEAD. New media routes the TV must load need their prefix there.
+- **The released `.wgt` is signed for the owner's TV only** (Samsung distributor certificate = the TV's DUID). Updates
+  must be signed with the same author certificate (`C:UsersBeachedSamsungCertificateBAMS`) or the TV treats
+  them as another app. Certificate Manager 3.1.3 won't start on Tizen Studio's bundled Java 8 with `--add-modules` in
+  `toolscertificate-managereclipse.ini` (removed on the owner's PC; original kept as `eclipse.ini.orig`).
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
