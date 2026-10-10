@@ -128,11 +128,13 @@ bams/
 │   ├── tizen/config.xml       Manifest (app id BAMSmedia1.BAMS, privileges, pointing-device-support off) + icon.png
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
+│   ├── scripts/test.mjs       `npm test`: builds tv/test into one page, runs it in headless Chrome/Edge (CHROME_PATH) at 1920×1080, prints results
+│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
-│       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`) + focus restore, the one keydown handler (music media keys)
+│       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
 │       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback); MusicProvider in main.tsx
 │       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting; other servers of this TV (extras: apiFor/mediaFor(rid), checkExtras, sources() for everywhere.ts)
-│       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap])
+│       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
 │       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo)
 │       ├── engine.ts          AvplayEngine (webapis.avplay) / VideoEngine (<video> + hls.js) behind one interface
 │       ├── plan.ts            What the TV decodes (TV caps vs BROWSER caps) → direct / remux / convert; pickFile, pickAudio
@@ -572,7 +574,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | All-GPU path for an encoder | `stream._GPU_DECODER`, `_GPU_SCALER`, `gpu_filters`, `_gpu_filter_chain` (+ `test_all_gpu_filters_…`) |
 | How the TV app signs in / opens media | `devices.py` (`LinkCodes`, `Tickets`, `MEDIA_PREFIXES`), `LoginRequired` in `app.py`; TV side `tv/src/api.ts` |
 | What the TV plays as-is / how | `tv/src/plan.ts` (`TV` caps), `tv/src/screens/Player.tsx` `begin` (copy-HLS in TS on the TV) |
-| TV remote navigation | `tv/src/nav.ts` (`move`, `reveal`), key handling in `tv/src/App.tsx`, player keys in `Player.tsx` |
+| TV remote navigation | `tv/src/nav.ts` (`move`, `reveal`, `settleFocus`), key handling in `tv/src/App.tsx`, player keys + controls fade (`wake`, `OSD_HIDE`) in `Player.tsx`; tests `tv/test/nav.test.ts` (`cd tv && npm test`) |
 | Build / sign / install the TV app | `tv/README.md`, `tv/scripts/wgt.mjs`, `tv/tizen/config.xml` |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |
 | Password / session rules | `auth.py` (`MIN_PASSWORD`, `SESSION_DAYS`, `_SCRYPT`, `Throttle`) |

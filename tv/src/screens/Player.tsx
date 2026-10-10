@@ -182,13 +182,17 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
     return () => { live = false; };
   }, [sub]);
 
-  // the controls fade while playing
+  // the controls fade OSD_HIDE after the last key, once the video plays: while it's paused, still starting, restarting
+  // after a seek or a menu is open, look again each second (a one-off check at OSD_HIDE left them up for good when
+  // the stream was still loading then)
   const wake = useCallback(() => {
     setOsd(true);
     clearTimeout(timers.current.osd);
-    timers.current.osd = setTimeout(() => {
+    const hide = () => {
       if (engine.current && !engine.current.paused() && !document.querySelector("[data-trap]")) setOsd(false);
-    }, OSD_HIDE);
+      else timers.current.osd = setTimeout(hide, 1000);
+    };
+    timers.current.osd = setTimeout(hide, OSD_HIDE);
   }, []);
   useEffect(() => { wake(); }, [wake]);
 
@@ -275,11 +279,11 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
         if (isBack(e) || k === KEY.ENTER) { nav.back(); return true; }
         return false;
       }
+      wake();  // every key counts, menu keys too
       if (menu) {
         if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu}"]`))); return true; }
         return false;  // arrows and OK move within the menu
       }
-      wake();
       const inButtons = !!(document.activeElement as HTMLElement | null)?.closest(".osd-buttons");
       switch (k) {
         case KEY.PLAY_PAUSE: toggle(); return true;

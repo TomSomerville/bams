@@ -66,7 +66,7 @@ server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve 
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
 # Samsung TV app (tv/README.md): Tizen Studio in C:	izen-studio, signing profile "BAMS", TV at 192.168.1.211
-cd tv && npm install && npx tsc -p . && npm run build && npm run package -- --install --run   # --release: dist/BAMS-SamsungTV-<v>.wgt
+cd tv && npm install && npx tsc -p . && npm test && npm run build && npm run package -- --install --run   # --release: dist/BAMS-SamsungTV-<v>.wgt
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
@@ -214,4 +214,8 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   `hls_url` and DELETEs sessions on another server's ticket URLs). Keep `test_media_tickets`.
 - **sed with `#` as delimiter:** replacement text containing `#` ends the expression early and a following `w…` is the
   *write-to-file* flag (it created a stray file once). Use the Edit tool for anything with `#` or `/` in it.
+- **TV navigation:** the rail is `[data-side]` (only Left enters it, Up/Down stay in it, Right returns to the last
+  page element); bars over the page are `[data-group][data-cover]`. Screens get their first focus through
+  `useFocusOnReady` → `nav.settleFocus` (content like Home's shelves arrives after "ready"). Add a case to
+  `tv/test/nav.test.ts` for any navigation change (`cd tv && npm test`, headless Chrome/Edge).
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
