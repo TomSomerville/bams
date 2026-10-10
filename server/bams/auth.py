@@ -6,6 +6,10 @@
 - The very first account (an admin) is created from the web UI only by a browser on the server itself
   (loopback), so nobody else on the network can claim a fresh server; `bams user add` works anywhere.
 - Repeated wrong passwords from one address are slowed down (Throttle).
+- An admin can make an account set a new password at its next sign-in (`must_change_password`): until it does, its
+  session opens only the password change (app.LoginRequired).
+- Two-step sign-in: each account can add a time-based code (TOTP, RFC 6238: SHA-1, 6 digits, 30 s, the kind Google
+  Authenticator and other authenticator apps make). Stdlib only. A code is accepted once, +-1 step for clock drift.
 """
 
 from __future__ import annotations
@@ -15,8 +19,10 @@ import hashlib
 import hmac
 import secrets
 import sqlite3
+import struct
 import threading
 import time
+from urllib.parse import quote, urlencode
 
 from .db import jdump, jload, now
 
@@ -126,7 +132,8 @@ def set_prefs(con: sqlite3.Connection, user_id: int, changes: dict) -> dict:
 
 def public(u: sqlite3.Row) -> dict:
     return {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"]),
-            "created_at": u["created_at"], "last_login_at": u["last_login_at"], "prefs": prefs(u)}
+            "created_at": u["created_at"], "last_login_at": u["last_login_at"], "prefs": prefs(u),
+            "must_change_password": bool(u["must_change_password"]), "two_factor": bool(u["totp_secret"])}
 
 
 def get_user(con: sqlite3.Connection, ref: int | str) -> sqlite3.Row | None:
@@ -134,17 +141,22 @@ def get_user(con: sqlite3.Connection, ref: int | str) -> sqlite3.Row | None:
     return con.execute(f"SELECT * FROM users WHERE {col}=?", (ref,)).fetchone()
 
 
-def create_user(con: sqlite3.Connection, name: str, password: str, is_admin: bool = False) -> int:
+def create_user(con: sqlite3.Connection, name: str, password: str, is_admin: bool = False,
+                must_change_password: bool = False) -> int:
     name = _check_name(name)
     _check_password(password)
     if get_user(con, name):
         raise AuthError(f"There's already a user called {name!r}.")
-    return con.execute("INSERT INTO users(name, password, is_admin, created_at) VALUES (?,?,?,?)",
-                       (name, hash_password(password), int(is_admin), now())).lastrowid
+    return con.execute("INSERT INTO users(name, password, is_admin, created_at, must_change_password) "
+                       "VALUES (?,?,?,?,?)",
+                       (name, hash_password(password), int(is_admin), now(), int(must_change_password))).lastrowid
 
 
 def update_user(con: sqlite3.Connection, user_id: int, *, name: str | None = None, password: str | None = None,
-                is_admin: bool | None = None) -> None:
+                is_admin: bool | None = None, must_change_password: bool | None = None) -> None:
+    """An admin's change to an account. A new password or turning on "must change password" signs the user out
+    everywhere, so their next sign-in is the one that asks for a new password. A new password without the flag
+    in the same call clears it."""
     u = get_user(con, user_id)
     if not u:
         raise AuthError("No such user.")
@@ -159,8 +171,26 @@ def update_user(con: sqlite3.Connection, user_id: int, *, name: str | None = Non
     if is_admin is not None:
         con.execute("UPDATE users SET is_admin=? WHERE id=?", (int(is_admin), user_id))
     if password is not None:
-        con.execute("UPDATE users SET password=? WHERE id=?", (hash_password(_check_password(password)), user_id))
+        con.execute("UPDATE users SET password=?, must_change_password=? WHERE id=?",
+                    (hash_password(_check_password(password)), int(bool(must_change_password)), user_id))
         con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))  # signed out everywhere
+    elif must_change_password is not None:
+        con.execute("UPDATE users SET must_change_password=? WHERE id=?", (int(must_change_password), user_id))
+        if must_change_password and not u["must_change_password"]:
+            con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+
+
+def change_own_password(con: sqlite3.Connection, user_id: int, current: str, new: str) -> None:
+    """The user's own change (they know the current password). Clears "must change password" and signs them out
+    everywhere (the caller starts a new session for the device that asked)."""
+    u = get_user(con, user_id)
+    if not verify_password(current or "", u["password"]):
+        raise AuthError("Your current password isn't right.")
+    _check_password(new)
+    if verify_password(new, u["password"]):
+        raise AuthError("Pick a password that's different from the current one.")
+    con.execute("UPDATE users SET password=?, must_change_password=0 WHERE id=?", (hash_password(new), user_id))
+    con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
 
 
 def delete_user(con: sqlite3.Connection, user_id: int) -> None:
@@ -182,6 +212,78 @@ def authenticate(con: sqlite3.Connection, name: str, password: str) -> sqlite3.R
         verify_password(password or "", _DUMMY)
         return None
     return u if verify_password(password or "", u["password"]) else None
+
+
+# ------------------------------------------------------------------ two-step sign-in (TOTP)
+
+TOTP_STEP = 30
+TOTP_DIGITS = 6
+
+
+def new_totp_secret() -> str:
+    """160 random bits in base32 (what authenticator apps take), without padding."""
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def _secret_bytes(secret: str) -> bytes:
+    s = "".join(secret.split()).upper()
+    return base64.b32decode(s + "=" * (-len(s) % 8))
+
+
+def totp(secret: str, step: int) -> str:
+    """The code for one time step (RFC 6238 over RFC 4226)."""
+    h = hmac.new(_secret_bytes(secret), struct.pack(">Q", step), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    n = (struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 10**TOTP_DIGITS
+    return str(n).zfill(TOTP_DIGITS)
+
+
+def totp_step(code: str, secret: str, last: int | None = None, t: float | None = None) -> int | None:
+    """The time step `code` belongs to (now, or one step either side for clock drift), or None. Steps at or before
+    `last` (the last code used) don't count, so a code can't be used twice."""
+    code = "".join((code or "").split())
+    if not (len(code) == TOTP_DIGITS and code.isdigit()):
+        return None
+    try:
+        _secret_bytes(secret)
+    except (ValueError, TypeError):
+        return None
+    now_step = int((time.time() if t is None else t) // TOTP_STEP)
+    for step in (now_step, now_step - 1, now_step + 1):
+        if (last is None or step > last) and hmac.compare_digest(totp(secret, step), code):
+            return step
+    return None
+
+
+def totp_uri(secret: str, account: str, issuer: str) -> str:
+    """The otpauth:// link an authenticator app reads from the QR code."""
+    label = quote(f"{issuer}:{account}", safe="")
+    return f"otpauth://totp/{label}?" + urlencode({"secret": secret, "issuer": issuer, "algorithm": "SHA1",
+                                                   "digits": TOTP_DIGITS, "period": TOTP_STEP}, quote_via=quote)
+
+
+def check_code(con: sqlite3.Connection, u: sqlite3.Row, code: str | None) -> bool:
+    """Whether `code` is a right, unused code for u's two-step sign-in. A right one is used up."""
+    step = totp_step(code or "", u["totp_secret"], u["totp_last"])
+    if step is None:
+        return False
+    # of two requests with the same code at once, only one moves totp_last past it
+    return con.execute("UPDATE users SET totp_last=? WHERE id=? AND (totp_last IS NULL OR totp_last < ?)",
+                       (step, u["id"], step)).rowcount == 1
+
+
+def enable_two_factor(con: sqlite3.Connection, user_id: int, secret: str, code: str) -> None:
+    """Turn on two-step sign-in with `secret`, once the app shows a right code for it."""
+    step = totp_step(code, secret)
+    if step is None:
+        raise AuthError("That code doesn't match. Type the code the app shows for BAMS now (it changes every 30 "
+                        "seconds), and check that the phone's clock is right.")
+    con.execute("UPDATE users SET totp_secret=?, totp_last=? WHERE id=?", ("".join(secret.split()).upper(), step,
+                                                                          user_id))
+
+
+def disable_two_factor(con: sqlite3.Connection, user_id: int) -> None:
+    con.execute("UPDATE users SET totp_secret=NULL, totp_last=NULL WHERE id=?", (user_id,))
 
 
 # ------------------------------------------------------------------ sessions

@@ -2,7 +2,8 @@
 // the Vite dev server proxies /api to 127.0.0.1:8484.
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** `data`: the server's whole answer ({detail, code_required, must_change_password…}) */
+  constructor(public status: number, message: string, public data?: Record<string, unknown> | null) {
     super(message);
   }
 }
@@ -25,7 +26,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   if (!r.ok) {
     const d = data?.detail;
     const msg = typeof d === "string" ? d : Array.isArray(d) ? d.map((x) => x.msg).join("; ") : `HTTP ${r.status}`;
-    throw new ApiError(r.status, msg);
+    throw new ApiError(r.status, msg, data);
   }
   return data as T;
 }
@@ -99,6 +100,10 @@ export type Genre = { name: string; count: number };
 export type Prefs = { home_hero: boolean; home_rows: HomeRowPref[] };
 export type User = {
   id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null; prefs?: Prefs;
+  /** an admin asked them to set a new password: until they do, the app shows only that */
+  must_change_password?: boolean;
+  /** two-step sign-in (a code from an authenticator app) is on */
+  two_factor?: boolean;
 };
 /** Admin settings: when a title counts as watched (% of its length) and as started (seconds in). */
 export type WatchSettings = { watched_percent: number; resume_after: number };
@@ -353,7 +358,7 @@ export type AccountLock = {
   locked: boolean; locked_at: number | null; locked_by: string | null; wait_until: number | null;
 };
 export type AuthLogEntry = {
-  id: number; at: number; event: "sign-in" | "lock" | "unlock"; result: "ok" | "failed" | "admin";
+  id: number; at: number; event: "sign-in" | "lock" | "unlock" | "2fa"; result: "ok" | "failed" | "admin";
   name: string | null; user_id: number | null; ip: string | null; reason: string | null; user_agent: string | null;
 };
 export type FlowEntry = {

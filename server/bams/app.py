@@ -281,6 +281,7 @@ class HlsIn(BaseModel):
 class LoginIn(BaseModel):
     name: str = Field(max_length=100)
     password: str = Field(max_length=1024)
+    code: str | None = Field(None, max_length=20)  # the authenticator app's code, for accounts with two-step sign-in
 
 
 class TokenLoginIn(LoginIn):
@@ -326,12 +327,24 @@ class UserIn(BaseModel):
     name: str = Field(max_length=100)
     password: str = Field(max_length=1024)
     is_admin: bool = False
+    must_change_password: bool = False  # they set their own password at their first sign-in
 
 
 class UserPatch(BaseModel):
     name: str | None = Field(None, max_length=100)
     password: str | None = Field(None, max_length=1024)
     is_admin: bool | None = None
+    must_change_password: bool | None = None  # on: signs them out; their next sign-in asks for a new password
+
+
+class TwoFactorIn(BaseModel):
+    secret: str = Field(pattern="^[A-Z2-7]{16,64}$")  # from POST /api/auth/2fa/setup
+    code: str = Field(max_length=20)
+    password: str = Field(max_length=1024)
+
+
+class PasswordCheckIn(BaseModel):
+    password: str = Field(max_length=1024)
 
 
 class LockoutIn(BaseModel):
@@ -373,6 +386,16 @@ PUBLIC_API = frozenset({"/api/auth/state", "/api/auth/login", "/api/auth/setup",
                         # apps on other devices (devices.py): find the server, sign in or link with a code
                         "/api/hello", "/api/auth/token", "/api/devices/link", "/api/devices/link/poll"})
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# all an account that must set a new password (auth.py) can do until it has
+MUST_CHANGE_API = frozenset({"/api/auth/password", "/api/auth/logout"})
+
+
+class CodeNeeded(Exception):
+    """A sign-in whose password was right but which needs (another) two-step code: 401 with `code_required`, so
+    the client shows the code box."""
+
+    def __init__(self, message: str):
+        self.message = message
 
 
 def bearer_token(req: Request) -> str | None:
@@ -421,6 +444,9 @@ class LoginRequired:
         if cookie and scope.get("method") not in _SAFE_METHODS and not same_origin(req):
             return await JSONResponse({"detail": "Refused: the request came from another site."},
                                       status_code=403)(scope, receive, send)
+        if user.get("must_change") and scope.get("path") not in MUST_CHANGE_API:
+            return await JSONResponse({"detail": "Set a new password for your account first.",
+                                       "must_change_password": True}, status_code=403)(scope, receive, send)
         state = scope.setdefault("state", {})
         state["user"], state["session"] = user, digest
         return await self.app(scope, receive, send)
@@ -518,7 +544,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             u = auth.session_user_by_digest(con, digest)
         finally:
             con.close()
-        user = {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"])} if u else None
+        user = {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"]),
+                "must_change": bool(u["must_change_password"])} if u else None
         with seen_lock:
             if len(seen) > 1000:
                 seen.clear()
@@ -577,6 +604,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     async def _lib_err(_req: Request, e: library.LibraryError):
         return JSONResponse({"detail": str(e)}, status_code=400)
 
+    @app.exception_handler(CodeNeeded)
+    async def _code_needed(_req: Request, e: CodeNeeded):
+        return JSONResponse({"detail": e.message, "code_required": True}, status_code=401)
+
     # -- signing in, accounts
     def _set_cookie(resp: Response, request: Request, token: str) -> None:
         resp.set_cookie(auth.COOKIE, token, max_age=auth.SESSION_DAYS * 86400, httponly=True, samesite="lax",
@@ -590,8 +621,9 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         """Who is signed in (null if nobody), and whether the first admin account still has to be created
         (`setup`), which this browser may do only from the server itself (`setup_here`)."""
         u = lookup(request_token(request))
-        if u:
-            u = {**u, "prefs": auth.prefs(auth.get_user(con, u["id"]))}
+        row = auth.get_user(con, u["id"]) if u else None
+        u = {k: v for k, v in auth.public(row).items()
+             if k in ("id", "name", "is_admin", "prefs", "must_change_password", "two_factor")} if row else None
         empty = auth.user_count(con) == 0
         return {"user": u, "setup": empty, "setup_here": empty and auth.is_loopback(_client(request))}
 
@@ -637,6 +669,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         """Sign in from an app (the TV app): the same checks as the web sign-in, but the session token comes back
         in the body, for `Authorization: Bearer`. No cookie is set, so it can't be used by another site."""
         u = _sign_in(body, request, con)
+        if u["must_change_password"]:
+            # apps have no "set your new password" screen
+            raise HTTPException(403, f"{u['name']} must set a new password first: sign in to "
+                                     f"{server_name(con)['name']} in a web browser, then try again.")
         return {"token": auth.new_session(con, u["id"], _tv_agent(body.device)), "user": auth.public(u)}
 
     def _tv_agent(device: str) -> str:
@@ -676,6 +712,24 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                            "to unlock it.", uid)
                 refuse(401, why, f"Wrong name or password. Wait {_wait_text(security.wait_after(n))} before "
                                  "trying again.", uid)
+            if u["totp_secret"]:
+                # the password alone neither counts as a failure nor resets the count: otherwise someone who knows
+                # it could try codes forever
+                if not (body.code or "").strip():
+                    raise CodeNeeded("Enter the 6-digit code from your authenticator app.")
+                if not auth.check_code(con, u, body.code):
+                    throttle.fail(ip)
+                    n, locked = sec.failed(key, security.threshold(con))
+                    log.warning("wrong two-step code for %r from %s", name[:40], ip)
+                    if locked:
+                        refuse(403, f"wrong two-step code; locked after {n} in a row",
+                               "Wrong code. That was too many: the account is now locked. Ask an admin to unlock "
+                               "it.", uid)
+                    sec.log("sign-in", "failed", name=name, user_id=uid, ip=ip, reason="wrong two-step code",
+                            user_agent=ua)
+                    raise CodeNeeded(f"That code isn't right (or was already used). Wait "
+                                     f"{_wait_text(security.wait_after(n))} and try again with the code the app "
+                                     "shows now.")
             sec.succeeded(key)
         throttle.ok(ip)
         sec.log("sign-in", "ok", name=name, user_id=u["id"], ip=ip, user_agent=ua)
@@ -762,17 +816,58 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     @app.put("/api/auth/password")
     def change_password(body: PasswordIn, request: Request, response: Response, con=Depends(db),
                         me=Depends(current_user)):
-        """Change your own password. Signs you out everywhere else."""
-        u = auth.get_user(con, me["id"])
-        if not auth.verify_password(body.current, u["password"]):
-            raise HTTPException(400, "Your current password isn't right.")
+        """Change your own password (also the one an admin asked you to change). Signs you out everywhere else."""
         try:
-            auth.update_user(con, me["id"], password=body.new)
+            with Tx(con):
+                auth.change_own_password(con, me["id"], body.current, body.new)
         except auth.AuthError as e:
             raise HTTPException(400, str(e)) from None
         forget_sessions()
         _set_cookie(response, request, auth.new_session(con, me["id"], request.headers.get("user-agent")))
         return auth.public(auth.get_user(con, me["id"]))
+
+    # -- two-step sign-in (auth.py): codes from an authenticator app such as Google Authenticator
+    @app.post("/api/auth/2fa/setup")
+    def two_factor_setup(con=Depends(db), me=Depends(current_user)):
+        """A new secret to show as a QR code; nothing changes until POST /api/auth/2fa confirms a code from it."""
+        secret = auth.new_totp_secret()
+        return {"secret": secret, "uri": auth.totp_uri(secret, me["name"], server_name(con)["name"])}
+
+    @app.post("/api/auth/2fa")
+    def two_factor_on(body: TwoFactorIn, request: Request, con=Depends(db), me=Depends(current_user)):
+        """Turn on two-step sign-in: your password, the secret from /setup and a code the app shows for it."""
+        u = auth.get_user(con, me["id"])
+        if not auth.verify_password(body.password, u["password"]):
+            raise HTTPException(400, "Your password isn't right.")
+        try:
+            auth.enable_two_factor(con, me["id"], body.secret, body.code)
+        except auth.AuthError as e:
+            raise HTTPException(400, str(e)) from None
+        sec.log("2fa", "ok", name=me["name"], user_id=me["id"], ip=_client(request), reason="two-step sign-in on",
+                user_agent=request.headers.get("user-agent"))
+        return auth.public(auth.get_user(con, me["id"]))
+
+    @app.post("/api/auth/2fa/off")
+    def two_factor_off(body: PasswordCheckIn, request: Request, con=Depends(db), me=Depends(current_user)):
+        """Turn off your own two-step sign-in (needs your password)."""
+        u = auth.get_user(con, me["id"])
+        if not auth.verify_password(body.password, u["password"]):
+            raise HTTPException(400, "Your password isn't right.")
+        auth.disable_two_factor(con, me["id"])
+        sec.log("2fa", "ok", name=me["name"], user_id=me["id"], ip=_client(request), reason="two-step sign-in off",
+                user_agent=request.headers.get("user-agent"))
+        return auth.public(auth.get_user(con, me["id"]))
+
+    @app.delete("/api/users/{user_id}/2fa", dependencies=ADMIN)
+    def two_factor_reset(user_id: int, request: Request, con=Depends(db), me=Depends(current_user)):
+        """Admins: turn off someone's two-step sign-in (a lost phone). They can sign in with their password again."""
+        u = auth.get_user(con, user_id)
+        if not u:
+            raise HTTPException(404, "No such user.")
+        auth.disable_two_factor(con, user_id)
+        sec.log("2fa", "admin", name=u["name"], user_id=user_id, ip=_client(request),
+                reason=f"two-step sign-in turned off by {me['name']}", user_agent=request.headers.get("user-agent"))
+        return auth.public(auth.get_user(con, user_id))
 
     @app.put("/api/me/prefs")
     def put_prefs(body: PrefsIn, con=Depends(db), me=Depends(current_user)):
@@ -786,7 +881,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     @app.post("/api/users", status_code=201, dependencies=ADMIN)
     def add_user(body: UserIn, con=Depends(db)):
         try:
-            uid = auth.create_user(con, body.name, body.password, body.is_admin)
+            uid = auth.create_user(con, body.name, body.password, body.is_admin, body.must_change_password)
         except auth.AuthError as e:
             raise HTTPException(400, str(e)) from None
         sec.forget_name(body.name)
@@ -794,7 +889,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     @app.patch("/api/users/{user_id}", dependencies=ADMIN)
     def patch_user(user_id: int, body: UserPatch, con=Depends(db)):
-        """Rename, reset the password (signs them out), or make/unmake an admin."""
+        """Rename, reset the password (signs them out), make/unmake an admin, or make them set a new password at
+        their next sign-in (signs them out)."""
         try:
             with Tx(con):
                 auth.update_user(con, user_id, **body.model_dump())

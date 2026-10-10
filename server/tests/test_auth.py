@@ -133,9 +133,128 @@ def test_migration_to_v4_keeps_data(tmp_path):
     con.close()
     con = connect(p)
     db.migrate(con, backup_dir=tmp_path / "backups")
-    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 8
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 9
     assert db.get_setting(con, "tmdb_key") == "k" and auth.user_count(con) == 0
     assert "prefs" in [r[1] for r in con.execute("PRAGMA table_info(users)")]  # v5
     assert "manual" in [r[1] for r in con.execute("PRAGMA table_info(files)")]  # v6
     assert "sort_order" in [r[1] for r in con.execute("PRAGMA table_info(libraries)")]  # v7
     assert list((tmp_path / "backups").iterdir())
+
+
+# ------------------------------------------------------------------ must change password, two-step sign-in
+
+@pytest.fixture
+def clock(monkeypatch):
+    """security.now() under the test's control, so the wait after a wrong code passes without sleeping."""
+    from bams import security
+    t = {"now": 1_000_000.0}
+    monkeypatch.setattr(security, "now", lambda: t["now"])
+    return t
+
+
+def test_totp_matches_rfc_6238():
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # the RFC's SHA-1 key, "12345678901234567890"
+    assert auth.totp(secret, 59 // 30) == "287082"            # RFC 6238 appendix B, last 6 of 94287082
+    assert auth.totp(secret, 1111111109 // 30) == "081804"    # 07081804
+    assert auth.totp_step("287 082", secret, t=59) == 1       # spaces are fine
+    assert auth.totp_step("287082", secret, t=59 + 30) == 1   # one step late still counts (clock drift)
+    assert auth.totp_step("287082", secret, t=59 + 90) is None
+    assert auth.totp_step("287082", secret, last=1, t=59) is None  # already used
+    assert auth.totp_step("28708", secret, t=59) is None and auth.totp_step("abcdef", secret, t=59) is None
+    uri = auth.totp_uri(secret, "Tom", "Tom's BAM Server")
+    assert uri.startswith("otpauth://totp/Tom%27s%20BAM%20Server%3ATom?") and f"secret={secret}" in uri
+
+
+def test_must_change_password(app):
+    admin = signed_in(app, "Tom")
+    kid = admin.post("/api/users", json={"name": "Kid", "password": PASSWORD, "must_change_password": True}).json()
+    assert kid["must_change_password"] is True
+    k = TestClient(app)
+    assert k.post("/api/auth/login", json={"name": "Kid", "password": PASSWORD}).status_code == 200
+    assert k.get("/api/auth/state").json()["user"]["must_change_password"] is True
+    r = k.get("/api/libraries")
+    assert r.status_code == 403 and r.json()["must_change_password"] is True  # nothing else until it's changed
+    assert k.put("/api/me/prefs", json={"home_hero": False}).status_code == 403
+    tv = TestClient(app).post("/api/auth/token", json={"name": "Kid", "password": PASSWORD})
+    assert tv.status_code == 403 and "web browser" in tv.json()["detail"]  # apps can't ask for a new password
+    assert k.put("/api/auth/password", json={"current": PASSWORD, "new": PASSWORD}).status_code == 400  # the same
+    assert k.put("/api/auth/password", json={"current": PASSWORD, "new": "kid's own pw"}).status_code == 200
+    assert k.get("/api/libraries").status_code == 200
+    assert k.get("/api/auth/state").json()["user"]["must_change_password"] is False
+    # turning it on later signs them out; the next sign-in asks again
+    assert admin.patch(f"/api/users/{kid['id']}", json={"must_change_password": True}).status_code == 200
+    assert k.get("/api/libraries").status_code == 401
+    assert k.post("/api/auth/login", json={"name": "Kid", "password": "kid's own pw"}).status_code == 200
+    assert k.get("/api/libraries").status_code == 403
+    # an admin's new password keeps the flag only when asked to
+    admin.patch(f"/api/users/{kid['id']}", json={"password": "temporary pw"})
+    assert [u for u in admin.get("/api/users").json() if u["name"] == "Kid"][0]["must_change_password"] is False
+    admin.patch(f"/api/users/{kid['id']}", json={"password": "temporary pw", "must_change_password": True})
+    assert [u for u in admin.get("/api/users").json() if u["name"] == "Kid"][0]["must_change_password"] is True
+
+
+def _code(secret: str, ahead: int = 1) -> str:
+    """A code the app would show `ahead` steps from now (turning it on uses up the current step's)."""
+    import time
+    return auth.totp(secret, int(time.time() // auth.TOTP_STEP) + ahead)
+
+
+def later(app):
+    """As if the app showed a new code since the last one used (codes older than a used one don't count)."""
+    con = connect(app.state.paths.db)
+    con.execute("UPDATE users SET totp_last = totp_last - 10")
+    con.close()
+
+
+def test_two_factor_sign_in(app, clock):
+    admin = signed_in(app, "Tom")
+    c = signed_in(app, "Kid", admin=False)
+    s = c.post("/api/auth/2fa/setup").json()
+    assert s["uri"].startswith("otpauth://totp/") and s["secret"] in s["uri"]
+    on = {"secret": s["secret"], "password": PASSWORD}
+    assert c.post("/api/auth/2fa", json={**on, "code": "000000" if _code(s["secret"], 0) != "000000" else "111111"}
+                  ).status_code == 400
+    assert c.post("/api/auth/2fa", json={**on, "password": "wrong", "code": _code(s["secret"], 0)}).status_code == 400
+    assert c.get("/api/auth/state").json()["user"]["two_factor"] is False
+    r = c.post("/api/auth/2fa", json={**on, "code": _code(s["secret"], 0)})
+    assert r.status_code == 200 and r.json()["two_factor"] is True
+
+    other = TestClient(app, client=("10.0.0.7", 1))
+    r = other.post("/api/auth/login", json={"name": "Kid", "password": PASSWORD})
+    assert r.status_code == 401 and r.json()["code_required"] is True  # the password alone isn't enough
+    assert other.get("/api/libraries").status_code == 401
+    r = other.post("/api/auth/login", json={"name": "Kid", "password": PASSWORD, "code": "12345"})
+    assert r.status_code == 401 and r.json()["code_required"] is True  # wrong code: counted like a wrong password
+    assert other.post("/api/auth/login", json={"name": "Kid", "password": PASSWORD, "code": _code(s["secret"])}
+                      ).status_code == 429  # the wait after a wrong try
+    clock["now"] += 2
+    code = _code(s["secret"])
+    assert other.post("/api/auth/login", json={"name": "Kid", "password": PASSWORD, "code": code}).status_code == 200
+    assert other.get("/api/libraries").status_code == 200
+    again = TestClient(app, client=("10.0.0.8", 1))
+    r = again.post("/api/auth/login", json={"name": "Kid", "password": PASSWORD, "code": code})
+    assert r.status_code == 401  # a code works once
+    # a wrong password with a right code is still a wrong password
+    clock["now"] += 5
+    r = again.post("/api/auth/login", json={"name": "Kid", "password": "wrong", "code": _code(s["secret"], -1)})
+    assert r.status_code == 401 and "code_required" not in r.json()
+    # apps (the TV, other servers' web pages) send the code too
+    clock["now"] += 5
+    r = TestClient(app).post("/api/auth/token", json={"name": "Kid", "password": PASSWORD})
+    assert r.status_code == 401 and r.json()["code_required"] is True
+    later(app)
+    r = TestClient(app).post("/api/auth/token", json={"name": "Kid", "password": PASSWORD, "code": _code(s["secret"])})
+    assert r.status_code == 200 and r.json()["token"]
+    log = admin.get("/api/security/auth-log").json()
+    assert any(e.get("reason") == "wrong two-step code" for e in (log["entries"] if isinstance(log, dict) else log))
+
+    # a lost phone: an admin turns it off; or the user does, with their password
+    kid_id = c.get("/api/auth/state").json()["user"]["id"]
+    assert c.delete(f"/api/users/{kid_id}/2fa").status_code == 403  # viewers can't
+    assert admin.delete(f"/api/users/{kid_id}/2fa").json()["two_factor"] is False
+    clock["now"] += 5
+    assert TestClient(app).post("/api/auth/login", json={"name": "Kid", "password": PASSWORD}).status_code == 200
+    s = c.post("/api/auth/2fa/setup").json()
+    c.post("/api/auth/2fa", json={"secret": s["secret"], "password": PASSWORD, "code": _code(s["secret"], 0)})
+    assert c.post("/api/auth/2fa/off", json={"password": "wrong"}).status_code == 400
+    assert c.post("/api/auth/2fa/off", json={"password": PASSWORD}).json()["two_factor"] is False

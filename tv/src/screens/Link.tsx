@@ -19,6 +19,8 @@ export default function Link({ onLinked, onChangeServer, target }: {
   const [withPassword, setWithPassword] = useState(false);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [code2, setCode2] = useState("");          // two-step sign-in: the authenticator app's code
+  const [askCode, setAskCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
   const linked = useRef(onLinked);  // App passes a new function every render: don't restart the code for that
@@ -74,10 +76,16 @@ export default function Link({ onLinked, onChangeServer, target }: {
     setBusy(true);
     setErr(null);
     try {
-      const r = await post<{ token: string; user: User }>("/api/auth/token", { name, password, device: deviceName() });
+      const r = await post<{ token: string; user: User }>("/api/auth/token",
+        { name, password, device: deviceName(), ...(askCode ? { code: code2.replace(/\s/g, "") } : {}) });
       done.current(r.token, r.user);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Couldn't sign in.");
+      if (e instanceof ApiError && e.data?.code_required) {
+        setErr(askCode ? e.message : null);
+        setAskCode(true);
+        setCode2("");
+        setTimeout(() => (document.querySelector(".signin .code-input") as HTMLElement | null)?.focus());
+      } else setErr(e instanceof ApiError ? e.message : "Couldn't sign in.");
     } finally {
       setBusy(false);
     }
@@ -92,9 +100,12 @@ export default function Link({ onLinked, onChangeServer, target }: {
         <img className="wordmark" src="bams-wordmark.png" alt="BAMS" />
         <h1>Sign in</h1>
         <form className="signin" onSubmit={(e) => { e.preventDefault(); void signIn(); }}>
-          <input className="text-input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} data-autofocus />
+          <input className="text-input" placeholder="Name" value={name} onChange={(e) => { setName(e.target.value); setAskCode(false); }} data-autofocus />
           <input className="text-input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button className="btn primary" disabled={busy || !name || !password}>{busy ? "Signing in…" : "Sign in"}</button>
+          {askCode && <input className="text-input code-input" inputMode="numeric" maxLength={7}
+            placeholder="Code from your authenticator app" value={code2} onChange={(e) => setCode2(e.target.value)} />}
+          <button className="btn primary" disabled={busy || !name || !password || (askCode && code2.replace(/\s/g, "").length !== 6)}>
+            {busy ? "Signing in…" : "Sign in"}</button>
         </form>
         {err && <p className="error">{err}</p>}
         <button className="btn ghost" onClick={() => { setErr(null); setWithPassword(false); }}>Use a code instead</button>
