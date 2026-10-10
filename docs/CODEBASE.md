@@ -575,7 +575,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | When something counts as watched, what Continue Watching offers | admin settings via `watch.thresholds` (defaults `WATCHED_PERCENT`, `RESUME_AFTER`), `continue_watching`, `next_episode` |
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
 | Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
-| Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + its rendering in `pages/Home.tsx`; ids are saved in users' `home_rows`, so keep old ids stable |
+| Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + its rendering in `pages/Home.tsx` and in the TV app's `tv/src/screens/Home.tsx` (which imports `homeRows.ts`); ids are saved in users' `home_rows`, so keep old ids stable |
 | Recognise more sidecar subtitle names / languages | `subtitles.sidecars`, `subtitles.tracks` (`_FLAGS`), `subtitles.language`; VobSub: `vobsub_streams` |
 | Auto quality sizes | `hls.LADDER`, `hls.ladder` |
 | How far ahead / behind HLS works | `AHEAD`, `SOON`, `KEEP`, `SWITCHED`, `IDLE` in `hls.py` (seconds) |

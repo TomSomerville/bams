@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type ItemSummary } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import { Poster } from "../Cards";
@@ -20,6 +20,7 @@ export default function Library({ id }: { id: number }) {
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [shown, setShown] = useState(PAGE);
   const [err, setErr] = useState<string | null>(null);
+  const [genre, setGenre] = useState<string | null>(() => sessionStorage.getItem(`bams.genre.${id}`));
 
   useEffect(() => {
     setItems(null);
@@ -28,6 +29,15 @@ export default function Library({ id }: { id: number }) {
   }, [id, sort]);
 
   useFocusOnReady(items !== null);
+
+  // the web Library page's genre filter: the genres of this library's titles
+  const genres = useMemo(() => [...new Set((items ?? []).flatMap((i) => i.genres))].sort(), [items]);
+  const list = (items ?? []).filter((i) => !genre || i.genres.includes(genre));
+  const pickGenre = (g: string | null) => {
+    if (g) sessionStorage.setItem(`bams.genre.${id}`, g); else sessionStorage.removeItem(`bams.genre.${id}`);
+    setShown(PAGE);
+    setGenre(g);
+  };
 
   const pick = (s: string) => {
     sessionStorage.setItem(`bams.sort.${id}`, s);
@@ -49,11 +59,19 @@ export default function Library({ id }: { id: number }) {
       </div>
       {err && <p className="error big">{err}</p>}
       {items === null && !err && <div className="spinner" />}
+      {genres.length > 1 && (
+        <div className="chips genres" data-row>
+          <button className={`chip ${!genre ? "on" : ""}`} data-fid="genre-all" onClick={() => pickGenre(null)}>All</button>
+          {genres.map((g) => (
+            <button key={g} className={`chip ${genre === g ? "on" : ""}`} data-fid={`genre-${g}`} onClick={() => pickGenre(g)}>{g}</button>
+          ))}
+        </div>
+      )}
       {items && !items.length && <p className="muted big">This library is empty.</p>}
       <div className="grid">
-        {items?.slice(0, shown).map((it, i) => (
+        {list.slice(0, shown).map((it, i) => (
           <Poster key={it.id} item={it} fid={`item-${it.id}`} autoFocus={i === 0}
-            onFocus={() => { if (i > shown - 30 && shown < items.length) setShown((n) => n + PAGE); }}
+            onFocus={() => { if (i > shown - 30 && shown < list.length) setShown((n) => n + PAGE); }}
             onPress={() => nav.push({ name: "detail", id: it.id })} />
         ))}
       </div>

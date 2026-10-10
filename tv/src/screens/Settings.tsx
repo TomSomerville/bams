@@ -32,9 +32,11 @@ export default function Settings() {
 
       <section className="panel">
         <h2>Account</h2>
-        <p className="big">Signed in as <strong>{nav.user?.name}</strong>. This TV keeps its own watch history under this
-          account, the same as the web.</p>
-        <button className="btn" data-fid="signout" onClick={nav.signOut}>Sign out of this TV</button>
+        <p className="big">Signed in as <strong>{nav.user?.name}</strong>.</p>
+        <p>What you've watched, where you stopped, Continue Watching and your Home rows belong to this account and are
+          kept on the server: the same here as on the web, and the TV and a computer can play at the same time. To use
+          another account's, switch: then link the TV again from a browser signed in as that person.</p>
+        <button className="btn" data-fid="signout" onClick={nav.signOut}>Switch account (sign out of this TV)</button>
       </section>
 
       <section className="panel">
