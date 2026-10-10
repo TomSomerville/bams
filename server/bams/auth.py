@@ -82,7 +82,8 @@ def user_count(con: sqlite3.Connection) -> int:
 # Each user's display preferences: name -> default. Unknown names are ignored when saving.
 PREFS: dict[str, object] = {
     "home_hero": True,   # the rotating "Recently added" banner at the top of Home
-    # Home's rows in the user's order, each {"id", "show"}: "continue", "recent", "lib:<id>", "top_rated", "genres".
+    # Home's rows in the user's order, each {"id", "show"}: "continue", "recent", "lib:<id>", "top_rated",
+    # "genre:<name>" (older saves: one "genres" entry for every genre).
     # Empty = the default layout; rows missing from the list (a new library) are shown at their default place.
     "home_rows": [],
 }

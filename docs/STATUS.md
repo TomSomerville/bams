@@ -109,7 +109,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-08 | Files can be **identified by hand** (`files.manual`, schema v6): stored per file and used instead of the name on every scan; TMDB/IMDb links fill the fields (IMDb ids via TMDB `/find`) | Owner request; survives rescans, file changes and moves; IMDb itself is never fetched |
 | 10-08 | Watched % and "started after N s" are **admin settings** (one for everyone; defaults 90% / 30 s); saving progress and Continue Watching use the same threshold | Tester request (10 s / 95%); the old split (save at 10 s, offer at 30 s) wasn't worth two settings |
 | 10-08 | Per-user display preferences in `users.prefs` (schema v5), first one `home_hero` | Follows the person across devices, unlike browser storage |
-| 10-08 | Home's rows are **per user** (`home_rows` pref: ordered `{id, show}`; empty = default). Rows not in the saved list (a new library) are shown at their default place; genres are one entry (the 4 most common) | Owner request. Per user like the banner toggle, unlike the shared library order: Home is personal. No schema change (prefs is JSON) |
+| 10-08 | Home's rows are **per user** (`home_rows` pref: ordered `{id, show}`; empty = default). Rows not in the saved list (a new library) are shown at their default place; genres were one entry (the 4 most common); since 0.6.2 one row per genre (`genre:<name>`), an old `genres` entry expands in place | Owner request. Per user like the banner toggle, unlike the shared library order: Home is personal. No schema change (prefs is JSON) |
 | 10-08 | The admin can **choose the encoder** (`settings.video_encoder`, Settings → Playback); only encoders that pass a test encode are offered; a choice that stops working falls back to automatic; `BAMS_VIDEO_ENCODER` still wins | Tester asked for a CPU/GPU switch; GPU is faster, x264 can look better per bit |
 | 10-08 | Scan progress = step + done/total + bytes, "left" counted in **files and size** (titles while matching), time left from the step's own pace | Shows/episodes aren't known until files are parsed; files and bytes are exact. Time left comes from the server's clock (`step_elapsed`) |
 | 10-08 | Libraries have an **admin-set order** (`libraries.sort_order`, schema v7), shared by everyone; sidebar drag + Settings ▲▼ | Tester request; one order for the household like Plex's pinned sources; the icon-only sidebar on small screens hides the handles, so Settings has buttons |
@@ -141,7 +141,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 
 ## 4. Built so far
 
-### Server (`server/`, ~7,500 lines + 268 tests)
+### Server (`server/`, ~7,500 lines + 269 tests)
 - **Libraries:** create/rename/delete, add/remove folders, scan interval, order (`PUT /api/libraries/order`). Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -308,6 +308,19 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-09: Every genre on Home, each one its own row in Settings (release 0.6.2)
+- **What / why:** owner saw genres in the library filters that Home didn't show. Home only counted the 500 newest
+  titles, needed 2+ titles and kept the top 4. New `GET /api/genres` (every show/movie genre, most titles first);
+  Home and Settings → Home page show one row per genre (`genre:<name>` ids), so each can be hidden and moved. A saved
+  layout's old single `genres` entry expands in place into the genres it doesn't place itself, keeping its on/off.
+- **Files:** `server/bams/app.py` (`all_genres`), `auth.py` (pref comment), `tests/test_watch.py`
+  (`test_home_lists_every_genre`); web `homeRows.ts` (`defaultRows(libs, genres)`, `rowGenre`, old-save expansion),
+  `pages/Home.tsx`, `components/HomeSettings.tsx`, `api.ts` (`Genre`); CHANGELOG, `config.VERSION` 0.6.2.
+- **Verified:** 269 tests pass; `homeRows` merge checked with tsx (default, old `genres` save, new genre lands after its
+  neighbour). Test server on a DB copy: an old-style save showed all 8 genres where "Genres" was; unticking Drama and
+  moving Science Fiction saved `genre:Drama` off and the new order, and Home rendered exactly that.
+- **Left open:** none.
 
 ### 2026-10-09: Samsung TV app (The Frame), link codes, tickets, TS copy-HLS (release 0.6.1)
 - **What / why:** owner asked for a Samsung TV app driven by the remote. `tv/` (Tizen web app, AVPlay) + server support

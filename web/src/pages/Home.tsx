@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ContinueItem, ItemSummary, ServerLibrary } from "../api";
+import type { ContinueItem, Genre, ItemSummary, ServerLibrary } from "../api";
 import { Backdrop } from "../components/Art";
 import { AlbumCard, ContinueCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { fmtRuntime, seasonsLabel } from "../format";
-import { homeRows } from "../homeRows";
+import { homeRows, rowGenre } from "../homeRows";
 import { useAuth } from "../auth";
 import { useApi } from "../useApi";
 
@@ -74,11 +74,7 @@ export default function Home() {
   const recent = items?.slice(0, 20) ?? [];
   const hero = useMemo(() => (prefs.home_hero ? (items ?? []).filter((i) => i.backdrop || i.poster).slice(0, 6) : []),
     [items, prefs.home_hero]);
-  const topGenres = useMemo(() => {
-    const n = new Map<string, number>();
-    for (const i of items ?? []) for (const g of i.genres) n.set(g, (n.get(g) ?? 0) + 1);
-    return [...n.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([g]) => g);
-  }, [items]);
+  const { data: genres } = useApi<Genre[]>("/api/genres");  // every genre in the libraries, most titles first
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   if (libs && !libs.length) {
@@ -100,13 +96,13 @@ export default function Home() {
       </div>
     );
   }
-  if (!items || !libs || (hasMusic && !albums)) return <div className="page muted">Loading…</div>;
+  if (!items || !libs || !genres || (hasMusic && !albums)) return <div className="page muted">Loading…</div>;
 
   return (
     <div className={`home ${hero.length ? "" : "no-hero"}`}>
       {hero.length > 0 && <Hero items={hero} />}
       <div className="rows">
-        {homeRows(prefs.home_rows, libs).filter((r) => r.show).map((r) => {
+        {homeRows(prefs.home_rows, libs, genres).filter((r) => r.show).map((r) => {
           if (r.id === "continue") {
             return !!resume?.length && <Row key={r.id} title={r.label}>{resume.map((i) => <ContinueCard key={i.id} item={i} />)}</Row>;
           }
@@ -118,11 +114,10 @@ export default function Home() {
             return <ItemsRow key={r.id} title={r.label} min={4}
               path={`/api/items?sort=random&min_rating=${TOP_RATING}&limit=${ROW_SIZE}`} />;
           }
-          if (r.id === "genres") {
-            return topGenres.map((g) => (
-              <ItemsRow key={`genre:${g}`} title={g}
-                path={`/api/items?sort=random&genre=${encodeURIComponent(g)}&limit=${ROW_SIZE}`} />
-            ));
+          const g = rowGenre(r.id);
+          if (g !== null) {
+            return <ItemsRow key={r.id} title={g}
+              path={`/api/items?sort=random&genre=${encodeURIComponent(g)}&limit=${ROW_SIZE}`} />;
           }
           const l = libs.find((x) => `lib:${x.id}` === r.id)!;
           if (l.type === "music") {

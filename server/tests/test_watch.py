@@ -79,6 +79,19 @@ def test_home_row_sorts(tv):
     assert len(c.get("/api/items?sort=random&limit=1").json()) == 1
 
 
+def test_home_lists_every_genre(tv):
+    """/api/genres: every genre of the shows/movies, even one with a single title, most titles first."""
+    app, c, ep, show = tv
+    con = connect(app.state.paths.db)
+    con.execute("""UPDATE items SET genres='["Drama","Western"]' WHERE id=?""", (show,))
+    con.execute("""UPDATE items SET genres='["Drama"]' WHERE kind='show' AND title='Other'""")
+    con.execute("""UPDATE items SET genres='["Kids"]' WHERE id=?""", (ep[(1, 1)],))  # episodes don't count
+    con.commit()
+    con.close()
+    assert c.get("/api/genres").json() == [{"name": "Drama", "count": 2}, {"name": "Western", "count": 1}]
+    assert {i["title"] for i in c.get("/api/items?genre=Western").json()} == {"Show"}
+
+
 def test_continue_watching(tv):
     app, c, ep, show = tv
     assert c.get("/api/continue").json() == []

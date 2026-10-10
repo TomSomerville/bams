@@ -88,8 +88,11 @@ export type ServerStatus = {
 export type BrowseResult = { path: string | null; parent: string | null; dirs: { name: string; path: string }[] };
 
 /** Each account's own display preferences (server: auth.PREFS). */
-/** A row of Home in the user's order: "continue", "recent", "lib:<id>", "top_rated", "genres". */
+/** A row of Home in the user's order: "continue", "recent", "lib:<id>", "top_rated", "genre:<name>"
+ *  (older saves have one "genres" entry for all of them). */
 export type HomeRowPref = { id: string; show: boolean };
+/** GET /api/genres: every show/movie genre, most titles first. */
+export type Genre = { name: string; count: number };
 export type Prefs = { home_hero: boolean; home_rows: HomeRowPref[] };
 export type User = {
   id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null; prefs?: Prefs;

@@ -3,6 +3,14 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.6.2 (2026-10-09)
+
+### Changed
+- **Home shows every genre**: the genre rows used to show only your four most common genres, worked out from the 500
+  newest titles. Now there's a row for every genre in your libraries (the same ones the library filters offer), most
+  common first. **Settings → Home page** lists each genre as its own row, so you can switch genres off and move them
+  anywhere. If you had already arranged your rows, the genres take the place of the old "Genres" entry.
+
 ## 0.6.1 (2026-10-09)
 
 A Samsung TV app, and updates from inside BAMS.
