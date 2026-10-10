@@ -138,13 +138,17 @@ def describe(con: sqlite3.Connection, row: sqlite3.Row) -> dict:
         "SELECT kind, COUNT(*) n FROM items WHERE library_id=? GROUP BY kind", (lib_id,))}
     files = con.execute("SELECT COUNT(*) n, SUM(available) a, COALESCE(SUM(size),0) s FROM files WHERE library_id=?",
                         (lib_id,)).fetchone()
-    unrecognized = con.execute("SELECT COUNT(*) FROM files WHERE library_id=? AND id NOT IN (SELECT file_id FROM file_items)",
+    unrecognized = con.execute("""SELECT COUNT(*) FROM files WHERE library_id=? AND id NOT IN (SELECT file_id FROM file_items)
+                                  AND json_extract(manual, '$.skip') IS NULL""",  # left out on purpose: not to do
                                (lib_id,)).fetchone()[0]
+    guessed = con.execute("SELECT COUNT(*) FROM files WHERE library_id=? AND manual IS NULL AND json_extract(parse, '$.guessed')",
+                          (lib_id,)).fetchone()[0]  # placed by auto fill: to review
     return {
         "id": lib_id, "name": row["name"], "type": row["type"],
         "scan_interval_hours": row["scan_interval_hours"],
         "last_scan_at": row["last_scan_at"], "last_scan_status": row["last_scan_status"],
         "roots": [{"path": r["path"], **readonly.root_status(Path(r["path"]))} for r in roots(con, lib_id)],
         "counts": counts,
-        "files": {"total": files["n"], "available": files["a"] or 0, "bytes": files["s"], "unrecognized": unrecognized},
+        "files": {"total": files["n"], "available": files["a"] or 0, "bytes": files["s"], "unrecognized": unrecognized,
+                  "guessed": guessed},
     }

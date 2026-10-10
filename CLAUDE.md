@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 274 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 291 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -223,4 +223,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Two-step sign-in:** the right password alone must neither count as a failure nor reset the wrong-password count
   (`_sign_in`), or someone with the password could try codes forever. Codes before `totp_last` never count: tests that
   sign in twice need a later step (`test_auth.later`).
+- **Auto fill (`parse.guess`) is on by default:** a test that expects a file to stay *unrecognised* must turn it off
+  (`set_setting(con, "autofill", "0")` or `PUT /api/settings/autofill`), as `test_identify.tv` and
+  `test_groups_shows_seasons_episodes` do. Guesses must never turn a movie in its own folder into a fake show
+  (`test_movie_in_tv_library_is_flagged`). "Don't place" is `files.manual = {skip: true}`: code reading `manual` must
+  expect it (no title).
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

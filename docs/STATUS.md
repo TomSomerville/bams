@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-10** (release 0.7.0).
+Last updated: **2026-10-10** (release 0.9.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -146,6 +146,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-10 | **"Must change password at next sign-in"** per account (`users.must_change_password`): such a session opens only `PUT /api/auth/password` and logout (403 `must_change_password` elsewhere); setting it signs them out; on by default in the add/reset forms; `/api/auth/token` refuses (apps have no new-password screen) | Owner request: "force password change upon next authentication to allow a user to set their own password" |
 | 10-10 | **Two-step sign-in = TOTP** (RFC 6238, SHA-1/6 digits/30 s) in stdlib, secret in `users.totp_secret` (plain, like the rest of `bams.db`), ±1 step, each step once (`totp_last`); no recovery codes: an admin or `bams user 2fa-off` turns it off | Owner asked for Google Authenticator. No new server dependency. A wrong code counts toward the same waits/lockout; the right password alone neither counts nor resets them (else codes could be tried forever) |
 | 10-10 | **Music on the TV** with one HTML `<audio>` (not AVPlay), no gapless | AVPlay is the video player and owns the screen; `<audio>` plays MP3/AAC/FLAC and falls back to the server's conversion on an error |
+| 10-10 | **Auto fill** (`parse.guess`, setting `autofill`, on by default): files the naming rules can't place are **placed automatically** by a best guess (show from the folder, season from "Season/Volume/Level" folders, number from "Part 3"/"Lesson 12"/"01 - Name", no number = extra, a film in its show's folder = Specials), marked `parse.guessed` and listed for review (Keep / Change / Don't place). Replaces the 10-08 "loose in a show folder stays unrecognised" rule while it's on. Still not guessed: a loose top-level file with no number, a movie in its own folder in a TV library | Owner asked for a best-guess parser and chose automatic placing over a pre-filled form. A wrong guess is one click to fix; turning the setting off takes every guess out at once |
 
 ## 4. Built so far
 
@@ -165,7 +166,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   else the deepest season-pack folder; Star Trek short forms (DS9/TNG/TOS/VOY/ENT) spelled out; a year after a
   "Series N" marker is the season's, not the show's. ~50 real-world cases in `tests/test_parse.py`.
 - **Identify by hand** (`identify.py`): unrecognised files listed with hints; an admin pastes a TMDB/IMDb link or
-  enters title/year/season/episodes; kept in `files.manual` across rescans; undo.
+  enters title/year/season/episodes; kept in `files.manual` across rescans; undo; "Don't place" (`{skip: true}`).
+- **Auto fill** (0.9.0, `parse.guess`): what the rules can't place is placed by a best guess from folders and name
+  (on by default, Settings → Unrecognized files → Auto fill); guesses are listed for review (Keep / Change / Don't place).
 - **Grouping:** `item_keys` aliases so differently-named folders of one show (e.g. "Bobs Burgers S01-S08…" and
   "Bob's Burgers (2011) S14…") become one show, and stay merged on later scans.
 - **TMDB matcher:** path-id hints → `/find`, else search + confidence score (≥0.80) → details, images, seasons,
@@ -327,6 +330,38 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-10: Auto fill: unrecognised files placed by a best guess (release 0.9.0, parser v7)
+- **What / why:** owner: "an Auto fill parser… when a file cannot be identified… a best guess based on the file name and
+  directories". Asked how far to go, the owner chose **placing automatically** (marked "guessed", reviewable) over a
+  pre-filled form. `parse.guess(rel, type)` runs only when `parse.parse` can't place a file. TV: the show from the
+  folders (`_show_dir`, else the nearest non-season folder), season from Season/Volume/Level/Book/Part/Disc folders else 1,
+  an episode number from `_LOOSE_EP_RE` (Part/Lesson/Ep/Chapter/Day/#…), a leading "01 - " or a trailing " - 05", else an
+  unnumbered extra named after the file (release tags, "-GRP" and a bare "S01" stripped). A file that reads as a film
+  (title + year) in its show's folder → Specials, but a film whose folder is its own name ("Happy Gilmore 2/…2025…") is
+  left unrecognised with the movie hint, as is a loose top-level file with no number. Movies: the nearest folder with a
+  name ("CD1", "1080p" skipped), else the bare file name. `Parsed.guessed` is stored in `files.parse`.
+  `identify.from_name` = rules, then guess when `autofill` is on; used by the scanner (`parsed_for`) and `store`. "Don't
+  place" = `files.manual {skip: true}` (`PUT /api/files/{id}/skip`, undone by `DELETE …/identify`); "Keep" saves the guess
+  as a hand identification. `PUT /api/settings/autofill` re-places every unplaced/guessed file at once
+  (`identify.replace_unplaced`) and, when turned on, queues a scan of each TV/Movies library for TMDB matching.
+  `library.describe` → `files.guessed`; skipped files no longer count as unrecognised. Web: Auto fill card, guessed rows
+  (dashed border, "Placed by a best guess: …", Keep / Change / Don't place), "N placed by a best guess: review them" on
+  the library card, the library's Unrecognized tab counts guesses too. `PARSER_VERSION` 7 so existing unrecognised files
+  are guessed on the next scan.
+- **Files:** `server/bams/parse.py` (`guess`, `_loose_number`, `_bare`, `_words`, `_strip_show`, regexes, v7),
+  `identify.py` (`autofill_enabled`, `from_name`, `replace_unplaced`, skip), `app.py` (`/api/settings/autofill`,
+  `/api/files/{id}/skip`, `guessed` in `/unrecognized`, `autofill` in `/api/settings`), `library.py`; tests
+  `test_parse.py` (+15 guess cases), `test_identify.py` (auto fill flow; the hand-identify fixture turns it off),
+  `test_scanner.py`; web `components/Identify.tsx` (`AutofillSettings`, `fromGuess`, row actions), `pages/Settings.tsx`,
+  `pages/Library.tsx`, `api.ts`, `styles.css`; CHANGELOG, VERSION 0.9.0.
+- **Verified:** 291 server tests pass (this box has NVENC and the two encoder tests passed too); `web` and `tv` tsc.
+  Test server on :8496 with dummy media: 4 of 6 problem files placed by guess (Korean Lessons extras in seasons 1/2,
+  Random Show S01E03 "The End", Simpsons Movie in Specials), Happy Gilmore 2 and a loose file left with their hints;
+  Keep turned a guess into a hand identification, Don't place took one out and showed "Left out", counts updated.
+- **Left open:** not run against a copy of the owner's library (the service's `C:\ProgramData\BAMS` isn't readable from
+  this session): check the Unrecognized list after the update. A guessed show is matched on TMDB like any other title,
+  so a made-up folder name can pick up a wrong poster (Fix match / Don't place). Guesses aren't marked on title pages.
 
 ### 2026-10-10: Must change password at next sign-in, two-step sign-in (release 0.8.0)
 - **What / why:** owner: a "Must Change Password on next login" checkbox per account "to allow a user to set their own

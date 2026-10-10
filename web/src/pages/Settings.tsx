@@ -9,7 +9,7 @@ import { HomeSettings } from "../components/HomeSettings";
 import { ConnectServer, RemoteServers } from "../components/RemoteSettings";
 import { TvSettings } from "../components/TvSettings";
 import Icon from "../components/Icon";
-import { UnrecognizedFiles } from "../components/Identify";
+import { AutofillSettings, UnrecognizedFiles } from "../components/Identify";
 import MusicSettings from "../components/MusicSettings";
 import SecuritySettings from "../components/SecuritySettings";
 import ServerNameSettings from "../components/ServerNameSettings";
@@ -35,12 +35,16 @@ const gb = (b: number) => (b >= 1e12 ? `${(b / 1e12).toFixed(1)} TB` : `${(b / 1
 /** "N files couldn't be identified": a link to the library's Unrecognized tab, where they can be identified. */
 function Unrecognized({ lib }: { lib: ServerLibrary }) {
   const n = lib.files.unrecognized;
-  if (!n) return null;
+  const g = lib.files.guessed ?? 0;
+  if (!n && !g) return null;
   return (
     <div className="unrecognized">
-      <Link className="link-btn warn" to={`/library/${lib.id}?tab=unrecognized`}>
+      {n > 0 && <Link className="link-btn warn" to={`/library/${lib.id}?tab=unrecognized`}>
         <Icon name="alert" size={14} /> {n} file{n === 1 ? "" : "s"} couldn't be identified: identify them
-      </Link>
+      </Link>}
+      {g > 0 && <Link className="link-btn" to={`/library/${lib.id}?tab=unrecognized`}>
+        <Icon name="edit" size={14} /> {g} file{g === 1 ? "" : "s"} placed by a best guess: review them
+      </Link>}
     </div>
   );
 }
@@ -413,7 +417,8 @@ function AdminSettings() {
       <p className="muted">Files the scan found but couldn't place from their names. Paste a TMDB or IMDb link, or say
         what each one is. They stay hidden from the libraries until they're identified, and what you enter is kept
         across rescans.</p>
-      <UnrecognizedFiles reloadKey={libs?.map((l) => l.files.unrecognized).join()} onChange={changed} />
+      <div className="lib-list"><AutofillSettings onChange={changed} /></div>
+      <UnrecognizedFiles reloadKey={libs?.map((l) => `${l.files.unrecognized}/${l.files.guessed ?? 0}`).join()} onChange={changed} />
 
       <div className="section-head"><h2 className="section-title">Metadata</h2></div>
       <TmdbSettings />

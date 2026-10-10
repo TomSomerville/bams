@@ -28,6 +28,11 @@ function parseEpisodes(s: string): number[] | null {
   return parts.every((p) => /^\d+$/.test(p)) ? parts.map(Number) : null;
 }
 
+/** The parser's reading of a file (an auto fill guess) as an identification. */
+const fromGuess = (g: UnrecognizedFile["guess"]): Identification => ({
+  title: g.title ?? "", year: g.year, season: g.season, episodes: g.episodes ?? [], episode_title: g.episode_title,
+});
+
 function describe(m: Identification, type: string) {
   if (type === "movie") return [m.title, m.year && `(${m.year})`, m.edition && `· ${m.edition}`].filter(Boolean).join(" ");
   const eps = m.episodes?.length ? m.episodes : null;
@@ -38,10 +43,7 @@ function describe(m: Identification, type: string) {
 /** Say what one file is: paste a TMDB / IMDb link, or fill the fields in (with suggestions from the library). */
 function IdentifyForm({ file, onDone, onCancel }: { file: UnrecognizedFile; onDone: (msg: string, itemId: number) => void; onCancel: () => void }) {
   const isShow = file.library_type === "show";
-  const start: Identification = file.manual ?? {
-    title: file.guess.title ?? "", year: file.guess.year, season: file.guess.season,
-    episodes: file.guess.episodes ?? [], episode_title: file.guess.episode_title,
-  };
+  const start: Identification = file.manual && !file.manual.skip ? file.manual : fromGuess(file.guess);
   const [names, setNames] = useState<LibraryNames>([]);
   const [link, setLink] = useState("");
   const [title, setTitle] = useState(start.title);
@@ -195,36 +197,96 @@ function FileRow({ f, onChange }: { f: UnrecognizedFile; onChange: () => void })
   const [msg, setMsg] = useState<{ text: string; itemId?: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const canEdit = f.library_type !== "music";
+  const skipped = !!f.manual?.skip;
+  const guessed = !f.manual && !!f.guessed;
 
-  const undo = async () => {
+  const act = (run: () => Promise<unknown>) => async () => {
     setErr(null);
     try {
-      await api.del(`/api/files/${f.id}/identify`);
+      await run();
       namesCache.delete(f.library_id);
       onChange();
     } catch (e) {
       setErr((e as Error).message);
     }
   };
+  const undo = act(() => api.del(`/api/files/${f.id}/identify`));
+  const keep = act(() => api.put(`/api/files/${f.id}/identify`, fromGuess(f.guess)));  // the guess, kept as a hand identification
+  const skip = act(() => api.put(`/api/files/${f.id}/skip`, {}));
 
   return (
-    <li className={f.manual ? "identified" : ""}>
+    <li className={skipped ? "" : f.manual ? "identified" : guessed ? "guessed" : ""}>
       <div className="file-line">
         <code>{f.path}</code>
         <span className="muted">{size(f.size)}</span>
         <span className="spacer" />
         {canEdit && !editing && <button className="btn ghost small" onClick={() => { setEditing(true); setMsg(null); }}>
-          <Icon name="edit" size={14} /> {f.manual ? "Edit" : "Identify"}</button>}
+          <Icon name="edit" size={14} /> {f.manual && !skipped ? "Edit" : guessed ? "Change" : "Identify"}</button>}
+        {guessed && !editing && <button className="btn ghost small" onClick={keep}
+          title="The guess is right: keep it as it is, like a hand identification">Keep</button>}
+        {canEdit && !f.manual && !editing && <button className="btn ghost small" onClick={skip}
+          title="Don't place this file anywhere (kept across rescans)">Don't place</button>}
         {f.manual && !editing && <button className="btn ghost small" onClick={undo}
           title="Forget this and place the file by its name again">Undo</button>}
       </div>
-      {f.manual ? <span className="ok-text"><Icon name="check" size={14} /> Identified by hand: {describe(f.manual, f.library_type)}</span>
+      {skipped ? <span className="muted">Left out: not placed in the library.</span>
+        : f.manual ? <span className="ok-text"><Icon name="check" size={14} /> Identified by hand: {describe(f.manual, f.library_type)}</span>
+        : guessed ? <span className="guess-text"><Icon name="edit" size={14} /> Placed by a best guess: {describe(fromGuess(f.guess), f.library_type)}</span>
         : <span className="muted">{f.hint}</span>}
       {msg && <span className="ok-text">{msg.text}{msg.itemId && <> · <Link to={`/title/${msg.itemId}`}>open</Link></>}</span>}
       {err && <span className="key-msg bad">{err}</span>}
       {editing && <IdentifyForm file={f} onCancel={() => setEditing(false)}
         onDone={(text, itemId) => { setEditing(false); setMsg({ text, itemId }); onChange(); }} />}
     </li>
+  );
+}
+
+/** On/off for Auto fill: files the naming rules can't place are placed by a best guess from their folders and name. */
+export function AutofillSettings({ onChange }: { onChange?: () => void }) {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get<{ autofill?: boolean }>("/api/settings").then((s) => setOn(s.autofill ?? null)).catch((e) => setErr(e.message));
+  }, []);
+
+  const toggle = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      setOn((await api.put<{ autofill: boolean }>("/api/settings/autofill", { enabled: !on })).autofill);
+      namesCache.clear();
+      onChange?.();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="lib-card settings-card">
+      <div className="lib-head">
+        <h3>Auto fill</h3>
+        {on !== null && (on
+          ? <span className="status-pill ok"><Icon name="check" size={14} /> On</span>
+          : <span className="status-pill warn">Off</span>)}
+      </div>
+      <p className="muted">
+        When a file's name doesn't follow the naming rules, BAMS makes a best guess from its folders and name and
+        places it anyway: the show from the folder, a season from "Season", "Volume" or "Level" folders, an episode
+        number from "Part 3", "Lesson 12" or "01 - Name", and files with no number as extras. A film in its show's
+        folder goes to Specials. Guesses are listed below to review: keep, change, or leave each one out.
+      </p>
+      <div className="key-row">
+        <button className={`btn small ${on ? "ghost" : "primary"}`} onClick={toggle} disabled={on === null || busy}>
+          {busy ? "Working…" : on ? "Turn off" : "Turn on"}
+        </button>
+        <span className="muted">Turning it off takes the guesses out at once. What you kept or identified by hand stays.</span>
+        {err && <span className="key-msg bad">{err}</span>}
+      </div>
+    </section>
   );
 }
 
@@ -249,13 +311,15 @@ export function UnrecognizedFiles({ libraryId, reloadKey, onChange }: { libraryI
   return (
     <div className="unrecognized-list">
       {[...groups.values()].map((g) => {
-        const open = g.filter((f) => !f.manual).length;
+        const open = g.filter((f) => !f.manual && !f.guessed).length;
+        const guesses = g.filter((f) => !f.manual && f.guessed).length;
         return (
           <section key={g[0].library_id} className="lib-card settings-card">
             {!libraryId && (
               <div className="lib-head">
                 <h3><Link to={`/library/${g[0].library_id}?tab=unrecognized`}>{g[0].library_name}</Link></h3>
                 <span className={`status-pill ${open ? "warn" : "ok"}`}>{open ? `${open} to identify` : "All identified"}</span>
+                {guesses > 0 && <span className="status-pill">{guesses} guessed</span>}
               </div>
             )}
             <ul className="unrecognized-files">

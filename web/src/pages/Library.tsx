@@ -21,7 +21,7 @@ export default function Library() {
   const admin = rid === null && user.is_admin;
   const [params, setParams] = useSearchParams();
   const tab = admin && params.get("tab") === "unrecognized" ? "unrecognized" : "titles";
-  const unrecognized = lib?.files.unrecognized ?? 0;
+  const unrecognized = (lib?.files.unrecognized ?? 0) + (lib?.files.guessed ?? 0);  // incl. auto fill guesses to review
   const isMusic = lib?.type === "music";
   const { data: items } = useApi<ItemSummary[]>(lib && !isMusic ? `/api/libraries/${id}/items?sort=${sort}` : null);
 
@@ -52,8 +52,9 @@ export default function Library() {
       </div>
       {tab === "unrecognized" && lib && (
         <>
-          <p className="muted">Files in this library the scan couldn't place from their names. Paste a TMDB or IMDb link,
-            or say what each one is (the fields suggest what's already in the library). Kept across rescans.</p>
+          <p className="muted">Files in this library the scan couldn't place from their names, and files Auto fill placed
+            by a best guess (check those, then keep, edit or leave them out). Paste a TMDB or IMDb link, or say what each one
+            is (the fields suggest what's already in the library). Kept across rescans.</p>
           <UnrecognizedFiles libraryId={lib.id} onChange={reload} />
         </>
       )}

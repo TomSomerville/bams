@@ -1044,6 +1044,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     def get_settings(con=Depends(db)):
         return {"tmdb": _tmdb_status(con), "language": get_setting(con, "language", "en-US"),
                 "music_lookup": music_lookup_enabled(con), "music_output": music_output(con),
+                "autofill": identify.autofill_enabled(con),
                 "max_transcodes": int(get_setting(con, "max_transcodes", "0") or 0),
                 "max_transcodes_auto": auto_transcode_limit(), "watch": watch.thresholds(con),
                 "server_name": server_name(con)}
@@ -1098,6 +1099,18 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         """Turn online music identification (MusicBrainz, Cover Art Archive, Wikipedia) on or off."""
         set_setting(con, "music_lookup", "1" if body.enabled else "0")
         return {"music_lookup": body.enabled}
+
+    @app.put("/api/settings/autofill", dependencies=ADMIN)
+    def put_autofill(body: ToggleIn, con=Depends(db)):
+        """Auto fill on or off: files the naming rules can't place are placed by a best guess (or not). Takes effect
+        at once; a scan of each TV/Movies library follows so newly placed titles are matched on TMDB."""
+        set_setting(con, "autofill", "1" if body.enabled else "0")
+        with Tx(con):
+            identify.replace_unplaced(con)
+        if body.enabled:
+            for r in con.execute("SELECT id FROM libraries WHERE type IN ('show', 'movie')").fetchall():
+                scheduler.request(r["id"], "autofill")
+        return {"autofill": body.enabled}
 
     @app.put("/api/settings/music-output", dependencies=ADMIN)
     def put_music_output(body: MusicOutputIn, con=Depends(db)):
@@ -1423,19 +1436,22 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 "tracks": _queue(con, ids)}
 
     def _unrecognized(con, lib_id: int | None) -> list[dict]:
-        """Files the parser couldn't place (each with a hint about why), and files identified by hand."""
+        """Files the parser couldn't place (each with a hint about why), files placed by a best guess (auto fill,
+        `guessed`: to review), and files identified by hand."""
         rows = con.execute(f"""SELECT f.*, lr.path AS root, l.name AS library_name, l.type AS library_type
                                FROM files f JOIN library_roots lr ON lr.id=f.root_id JOIN libraries l ON l.id=f.library_id
-                               WHERE (f.id NOT IN (SELECT file_id FROM file_items) OR f.manual IS NOT NULL)
+                               WHERE (f.id NOT IN (SELECT file_id FROM file_items) OR f.manual IS NOT NULL
+                                      OR json_extract(f.parse, '$.guessed'))
                                {"AND f.library_id=?" if lib_id is not None else ""}
                                ORDER BY l.name COLLATE NOCASE, f.rel_path""", (() if lib_id is None else (lib_id,)))
         out = []
         for r in rows:
             manual = jload(r["manual"])
             guess = jload(r["parse"]) or {}
+            guessed = not manual and bool(guess.get("guessed"))
             out.append({**file_info(r), "library_id": r["library_id"], "library_name": r["library_name"],
-                        "library_type": r["library_type"], "manual": manual,
-                        "hint": None if manual else unrecognized_hint(r["rel_path"], r["library_type"]),
+                        "library_type": r["library_type"], "manual": manual, "guessed": guessed,
+                        "hint": None if manual or guessed else unrecognized_hint(r["rel_path"], r["library_type"]),
                         "guess": {k: guess.get(k) for k in ("title", "year", "season", "episodes", "episode_title")}})
         return out
 
@@ -1505,6 +1521,20 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         target = con.execute("SELECT item_id FROM file_items WHERE file_id=? ORDER BY item_id LIMIT 1",
                              (file_id,)).fetchone()["item_id"]
         return {"item_id": target, "title_id": identify.title_of(con, target), "note": note}
+
+    @app.put("/api/files/{file_id}/skip", dependencies=ADMIN)
+    def skip_file(file_id: int, con=Depends(db)):
+        """Don't place this file (an auto fill guess that's wrong, a sample, junk). Kept like a hand identification;
+        DELETE /identify undoes it."""
+        f = con.execute("SELECT l.type FROM files f JOIN libraries l ON l.id=f.library_id WHERE f.id=?",
+                        (file_id,)).fetchone()
+        if not f:
+            raise HTTPException(404, "no such file")
+        if f["type"] == "music":
+            raise HTTPException(400, "Music is identified from its tags.")
+        with Tx(con):
+            identify.store(con, file_id, {"skip": True})
+        return {"recognized": False}
 
     @app.delete("/api/files/{file_id}/identify", dependencies=ADMIN)
     def unidentify_file(file_id: int, con=Depends(db)):
