@@ -201,4 +201,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   must be signed with the same author certificate (`C:UsersBeachedSamsungCertificateBAMS`) or the TV treats
   them as another app. Certificate Manager 3.1.3 won't start on Tizen Studio's bundled Java 8 with `--add-modules` in
   `toolscertificate-managereclipse.ini` (removed on the owner's PC; original kept as `eclipse.ini.orig`).
+- **`web/src/homeRows.ts` is shared with the TV app** (`tv/src/screens/Home.tsx` imports it): keep it free of browser,
+  React Router and `web/`-only imports (types from `web/src/api.ts` are fine), and check `cd tv && npx tsc -p .` after
+  changing it or the Home row ids.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

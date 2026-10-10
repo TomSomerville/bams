@@ -322,6 +322,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   moving Science Fiction saved `genre:Drama` off and the new order, and Home rendered exactly that.
 - **Left open:** none.
 
+### 2026-10-09: TV app shows the web's Home (rows, genres) and the account it uses (release 0.6.3)
+- **What / why:** owner: the TV should have the same history, genres and settings as the web, all server-side, and one
+  account should be able to watch on the web and the TV at once. History already was per account on the server; the
+  owner's TV was linked as **Alex** (approved from a browser signed in as Alex), so it showed Alex's history. The TV's
+  Home now builds its rows with the web's `homeRows.ts` (imported, not copied) from the user's server-side
+  `home_rows`/`home_hero` prefs and the same endpoints (`/api/genres`, `sort=random&min_rating=7`, `sort=recent`);
+  music rows skipped. TV library pages got the genre filter; TV Settings explains the account and offers Switch account.
+- **Files:** `tv/src/screens/Home.tsx`, `Library.tsx`, `Settings.tsx`, `tv/src/styles.css`,
+  `server/tests/test_watch.py` (`test_one_account_on_two_devices_at_once`), CHANGELOG, `config.VERSION` 0.6.3.
+- **Verified:** 270 tests pass (new: web cookie + TV bearer of one account report progress on two titles interleaved;
+  both see both in Continue Watching; watched on the TV shows on the web). On the TV (inspector): Home rows = Continue
+  Watching, Recently Added, Science Fiction, Comedy, Animation, Drama, Action & Adventure, exactly Alex's saved layout
+  (library rows and Top Rated switched off there).
+- **Left open:** the same title on two devices at once: the latest report wins. Per-TV playback settings (always
+  convert, DTS, subtitle timing, languages) stay on the TV on purpose, like the web's per-browser ones.
+
 ### 2026-10-09: Samsung TV app (The Frame), link codes, tickets, TS copy-HLS (release 0.6.1)
 - **What / why:** owner asked for a Samsung TV app driven by the remote. `tv/` (Tizen web app, AVPlay) + server support
   (`devices.py`: link codes, bearer tokens, media tickets; CORS; `/api/hello`) + web Settings → Your TVs and `/link`.

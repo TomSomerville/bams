@@ -203,3 +203,24 @@ def test_an_episode_only_opened_doesnt_hide_the_show(tv):
     c.put(f"/api/items/{ep[(1, 2)]}/progress", json={"position": 5, "duration": 1300})  # stored as 0
     [r] = c.get("/api/continue").json()
     assert r["id"] == ep[(1, 1)] and r["reason"] == "resume"
+
+
+def test_one_account_on_two_devices_at_once(tv):
+    """The same account watching one show in the browser and another on the TV: both are recorded on the server and
+    both devices see the same state (it's per account and title, not per device)."""
+    app, c, ep, show = tv
+    con = connect(app.state.paths.db)
+    other = con.execute("""SELECT e.id FROM items e JOIN items s ON s.id=e.parent_id
+        JOIN items sh ON sh.id=s.parent_id WHERE e.kind='episode' AND sh.title='Other'""").fetchone()["id"]
+    con.close()
+    tvc = TestClient(app, client=("192.168.1.211", 40000), headers={"origin": "file://"})
+    tok = tvc.post("/api/auth/token", json={"name": "Tom", "password": PASSWORD, "device": "TV"}).json()["token"]
+    tvc.headers["authorization"] = f"Bearer {tok}"
+    for t in (60, 120, 180):  # interleaved, as two players report every few seconds
+        assert c.put(f"/api/items/{ep[(1, 1)]}/progress", json={"position": t, "duration": 1300}).status_code == 200
+        assert tvc.put(f"/api/items/{other}/progress", json={"position": t + 500, "duration": 1300}).status_code == 200
+    for client in (c, tvc):
+        cont = {i["id"]: i["progress"]["position"] for i in client.get("/api/continue").json()}
+        assert cont == {ep[(1, 1)]: 180, other: 680}
+    tvc.put(f"/api/items/{ep[(1, 1)]}/watched", json={"watched": True})  # marked on the TV, seen on the web
+    assert c.get(f"/api/items/{ep[(1, 1)]}").json()["progress"]["watched"] is True

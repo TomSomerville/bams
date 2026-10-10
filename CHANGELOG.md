@@ -3,6 +3,19 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.6.3 (2026-10-09)
+
+### Changed
+- **Samsung TV app: the same Home as the web.** The TV's Home now has exactly the rows of the web's Home, in the order
+  and with the rows each person chose in **Settings → Home page** (Continue Watching, Recently Added, each library's
+  newest, Top Rated, one row per genre). Change them on the web and the TV follows. Library pages on the TV have the
+  genre filter too.
+- **TV Settings** says which account the TV uses: what you've watched, where you stopped and Continue Watching belong
+  to that account on the server, shared with the web. **Switch account** signs the TV out to link it to someone else.
+
+Watching on a computer and on the TV at the same time with one account works: both are recorded (now covered by a
+test). To update the TV app, re-sign and install the new `BAMS-SamsungTV-0.6.3.wgt` as in the README.
+
 ## 0.6.2 (2026-10-09)
 
 ### Changed
