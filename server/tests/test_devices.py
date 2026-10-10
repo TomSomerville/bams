@@ -43,6 +43,23 @@ def test_hello_is_public(app):
     assert r.status_code == 200 and r.json()["app"] == "bams" and r.json()["version"]
 
 
+def test_server_name(app):
+    """Apps list servers by name: the admin's choice, else "<first admin>'s BAM Server"."""
+    bare = TestClient(app)
+    assert bare.get("/api/hello").json()["name"]  # no accounts yet: the computer's name
+    tom = signed_in(app, "Tom")
+    signed_in(app, "Ann")  # a later admin doesn't rename it
+    assert bare.get("/api/hello").json()["name"] == "Tom's BAM Server"
+    viewer = signed_in(app, "Kid", admin=False)
+    assert viewer.put("/api/settings/server-name", json={"name": "Mine"}).status_code == 403
+    r = tom.put("/api/settings/server-name", json={"name": "  Living   room  "})
+    assert r.json() == {"name": "Living room", "default": "Tom's BAM Server", "custom": True}
+    assert bare.get("/api/hello").json()["name"] == "Living room"
+    assert viewer.get("/api/settings").json()["server_name"]["name"] == "Living room"
+    assert tom.put("/api/settings/server-name", json={"name": ""}).json()["custom"] is False  # back to the default
+    assert bare.get("/api/hello").json()["name"] == "Tom's BAM Server"
+
+
 def test_link_a_tv_with_a_code(app):
     web = signed_in(app, "Tom")
     tv, token = _link(app, web)
@@ -128,6 +145,12 @@ def test_media_tickets(app, tmp_path):
     assert bare.get(f"{prefix}/libraries").status_code == 401
     assert bare.get(f"{prefix}/../libraries").status_code in (401, 404)
     assert bare.delete(f"{prefix}/hls/abc").status_code == 401
+    # ...but with the session itself, a client can use a ticket link as it is (the web app keeps another server's
+    # media links as ticket URLs and opens/closes HLS sessions on them)
+    assert tv.delete(f"{prefix}/hls/abc").status_code in (204, 404)
+    other_ticket = "/api/t/nonsense/hls/abc"
+    assert tv.delete(other_ticket).status_code in (204, 404)  # the token decides, not the ticket
+    assert tv.get(other_ticket + "/index.m3u8").status_code == 401  # reading takes a valid ticket
     # forged or altered tickets
     t = prefix.split("/")[3]
     digest, exp, sig = t.split(".")

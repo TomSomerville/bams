@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, getServer } from "../api";
+import { api, getServer, hello, removeExtra, updateExtra } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import { prefs, setPref } from "../prefs";
 import { appVersion, deviceName } from "../tizen";
@@ -9,9 +9,12 @@ import { hasAvplay } from "../engine";
 export default function Settings() {
   const nav = useNav();
   const [server, setServerInfo] = useState<{ version: string } | null>(null);
+  const [name, setName] = useState<string | null>(null);  // what its admin calls it (Settings on the web)
   const [, redraw] = useState(0);
   useEffect(() => {
     api.get<{ version: string }>("/api/status").then(setServerInfo).catch(() => undefined);
+    const url = getServer();
+    if (url) void hello(url).then((h) => setName(h?.name ?? null));
   }, []);
   useFocusOnReady(true);
 
@@ -26,7 +29,7 @@ export default function Settings() {
 
       <section className="panel">
         <h2>Server</h2>
-        <p className="big">{getServer()?.replace(/^https?:\/\//, "")}{server ? `  ·  BAMS ${server.version}` : ""}</p>
+        <p className="big">{name && <strong>{name}  ·  </strong>}{getServer()?.replace(/^https?:\/\//, "")}{server ? `  ·  BAMS ${server.version}` : ""}</p>
         <button className="btn" data-fid="server" onClick={nav.changeServer}>Change server</button>
       </section>
 
@@ -37,6 +40,36 @@ export default function Settings() {
           kept on the server: the same here as on the web, and the TV and a computer can play at the same time. To use
           another account's, switch: then link the TV again from a browser signed in as that person.</p>
         <button className="btn" data-fid="signout" onClick={nav.signOut}>Switch account (sign out of this TV)</button>
+      </section>
+
+      <section className="panel">
+        <h2>Other BAMS servers</h2>
+        <p>More servers on this TV, each linked to an account there. Their libraries appear in the menu under the
+          server's name. This list is this TV's own: another TV or a browser has its own.</p>
+        {nav.servers.map((s) => (
+          <div key={s.id} className="extra-server">
+            <p className="big"><strong>{s.name}</strong>  ·  {s.url.replace(/^https?:\/\//, "")}
+              {s.user ? `  ·  ${s.user.name}` : ""}{s.state ? `  ·  ${s.state}` : ""}</p>
+            {s.libraries.map((l) => (
+              <button key={l.id} className="toggle" data-fid={`srv-${s.id}-lib-${l.id}`} onClick={() => {
+                updateExtra(s.id, (e) => ({ ...e, hidden: { ...e.hidden, [l.id]: !e.hidden[l.id] } }));
+                nav.reloadServers();
+              }}>
+                <span className={`switch ${s.hidden[l.id] ? "" : "on"}`} />
+                <span><strong>{l.name}</strong><small>Show in the menu</small></span>
+              </button>
+            ))}
+            <div className="button-row">
+              <button className="btn" data-fid={`srv-${s.id}-relink`} onClick={() => nav.addServer({ url: s.url, name: s.name })}>
+                Link again
+              </button>
+              <button className="btn" data-fid={`srv-${s.id}-remove`} onClick={() => { removeExtra(s.id); nav.reloadServers(); }}>
+                Remove from this TV
+              </button>
+            </div>
+          </div>
+        ))}
+        <button className="btn" data-fid="add-server" onClick={() => nav.addServer()}>Add a server</button>
       </section>
 
       <section className="panel">

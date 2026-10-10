@@ -14,12 +14,16 @@ const PATHS = {
   restart: "M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4",
   eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6z",
   next: "M5 4v16l11-8zM18 4h2v16h-2z",
+  prev: "M19 4v16L8 12zM4 4h2v16H4z",
+  music: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+  shuffle: "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
+  stop: "M6 6h12v12H6z",
 };
 
 export type IconName = keyof typeof PATHS;
 
 export default function Icon({ name, size = 36 }: { name: IconName; size?: number }) {
-  const fill = name === "play" || name === "pause" || name === "next";
+  const fill = name === "play" || name === "pause" || name === "next" || name === "prev" || name === "stop";
   return (
     <svg className="icon" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"
       fill={fill ? "currentColor" : "none"} stroke={fill ? "none" : "currentColor"} strokeWidth={2}

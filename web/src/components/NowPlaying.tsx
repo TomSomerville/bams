@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtClock } from "../format";
 import { useMusic } from "../music";
+import { ridOf, scopeLink } from "../servers";
 import { Poster } from "./Art";
 import Icon from "./Icon";
 import { useReorder } from "./useReorder";
@@ -40,6 +41,7 @@ export default function NowPlaying() {
   const t = m.current;
   if (!t) return null;
   const pct = m.duration ? Math.min(100, (m.time / m.duration) * 100) : 0;
+  const to = (p: string) => scopeLink(ridOf(t.playback.url), p);  // the track may be from another BAMS server
 
   return (
     <div className="now-playing" role="region" aria-label="Now playing">
@@ -54,10 +56,10 @@ export default function NowPlaying() {
       )}
 
       <div className="np-track">
-        <Link to={`/title/${t.album_id}`} className="np-cover"><Poster src={t.poster} title={t.album} /></Link>
+        <Link to={to(`/title/${t.album_id}`)} className="np-cover"><Poster src={t.poster} title={t.album} /></Link>
         <div className="np-text">
-          <Link to={`/title/${t.album_id}`} className="np-title">{t.title}</Link>
-          <Link to={`/title/${t.artist_id}`} className="np-artist muted">{t.artist}</Link>
+          <Link to={to(`/title/${t.album_id}`)} className="np-title">{t.title}</Link>
+          <Link to={to(`/title/${t.artist_id}`)} className="np-artist muted">{t.artist}</Link>
         </div>
       </div>
 

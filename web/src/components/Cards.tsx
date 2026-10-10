@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import type { ContinueItem, ItemSummary, PlayMethod } from "../api";
 import { fmtRuntime, PLAY_LABEL, plural, subLabel, sxe } from "../format";
 import { useMusic } from "../music";
+import { useItemServer } from "../servers";
 import { Poster } from "./Art";
 import Icon from "./Icon";
 
@@ -28,8 +29,9 @@ export function WatchMarks({ item }: { item: ItemSummary }) {
 }
 
 export function PosterCard({ item }: { item: ItemSummary }) {
+  const { to } = useItemServer(item);
   return (
-    <Link to={`/title/${item.id}`} className="poster-card">
+    <Link to={to(`/title/${item.id}`)} className="poster-card">
       <div className="poster-frame">
         <Poster src={item.poster} title={item.title} />
         {item.match_status === "unmatched" && <span className="corner-badge warn" title="Not matched on TMDB">?</span>}
@@ -47,6 +49,7 @@ export function PosterCard({ item }: { item: ItemSummary }) {
 /** Continue Watching: a wide still with the progress bar. The picture plays straight away; the show's name opens
  *  the show, the episode line opens its season (the show page on that season's tab). */
 export function ContinueCard({ item }: { item: ContinueItem }) {
+  const { to } = useItemServer(item);
   const pct = progressOf(item);
   const img = item.still || item.show?.backdrop || item.backdrop || item.show?.poster || item.poster;
   const title = item.show?.title ?? item.title;
@@ -56,11 +59,11 @@ export function ContinueCard({ item }: { item: ContinueItem }) {
     item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number)} · ${item.title}` : null,
     item.reason === "next" ? "Next episode" : left ? `${fmtRuntime(left)} left` : null,
   ].filter(Boolean).join(" · ");
-  const page = item.show ? `/title/${item.show.id}` : `/title/${item.id}`;
+  const page = to(item.show ? `/title/${item.show.id}` : `/title/${item.id}`);
   const seasonPage = item.season_id ? `${page}?season=${item.season_id}` : page;
   return (
     <div className="continue-card">
-      <Link to={`/play/${item.id}`} className="continue-frame" aria-label={`Play ${title}${item.show ? ` ${item.title}` : ""}`}>
+      <Link to={to(`/play/${item.id}`)} className="continue-frame" aria-label={`Play ${title}${item.show ? ` ${item.title}` : ""}`}>
         {img ? <img className="continue-img" src={img} alt="" loading="lazy" /> : <Poster src={null} title={title} />}
         <div className="continue-play"><span className="round-btn"><Icon name="play" size={18} /></span></div>
         {pct !== null && <div className="progress"><div style={{ width: `${pct * 100}%` }} /></div>}
@@ -74,13 +77,14 @@ export function ContinueCard({ item }: { item: ContinueItem }) {
 /** Square album cover; the play button on hover starts the album without opening it. */
 export function AlbumCard({ item, showArtist = true }: { item: ItemSummary; showArtist?: boolean }) {
   const music = useMusic();
+  const { to, rid } = useItemServer(item);
   return (
-    <Link to={`/title/${item.id}`} className="poster-card album-card">
+    <Link to={to(`/title/${item.id}`)} className="poster-card album-card">
       <div className="poster-frame square">
         <Poster src={item.poster} title={item.title} />
         <div className="poster-hover">
           <button className="round-btn" aria-label={`Play ${item.title}`}
-            onClick={(e) => { e.preventDefault(); music.playItem(item.id); }}>
+            onClick={(e) => { e.preventDefault(); music.playItem(item.id, { rid }); }}>
             <Icon name="play" size={18} />
           </button>
         </div>
@@ -92,8 +96,9 @@ export function AlbumCard({ item, showArtist = true }: { item: ItemSummary; show
 }
 
 export function ArtistCard({ item }: { item: ItemSummary }) {
+  const { to } = useItemServer(item);
   return (
-    <Link to={`/title/${item.id}`} className="poster-card artist-card">
+    <Link to={to(`/title/${item.id}`)} className="poster-card artist-card">
       <div className="poster-frame round"><Poster src={item.poster} title={item.title} /></div>
       <div className="poster-title">{item.title}</div>
       <div className="poster-sub">{plural(item.child_count ?? 0, "album")}</div>

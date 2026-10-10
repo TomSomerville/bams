@@ -160,15 +160,16 @@ def next_episode(con: sqlite3.Connection, episode_id: int) -> int | None:
     return r["id"] if r else None
 
 
-def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) -> list[tuple[int, str]]:
-    """(item id, why) pairs, most recent first: titles stopped part-way ("resume"), and for shows whose last
-    watched episode was finished, the next unwatched one ("next")."""
+def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) -> list[tuple[int, str, float]]:
+    """(item id, why, when) most recent first: titles stopped part-way ("resume"), and for shows whose last
+    watched episode was finished, the next unwatched one ("next"). `when` = the activity it comes from (apps that
+    show several servers' rows as one order them by it)."""
     recent = con.execute("""
         SELECT w.item_id, w.position, w.watched, w.updated_at, i.kind,
                (SELECT s.parent_id FROM items s WHERE s.id=i.parent_id) AS show
         FROM watch_state w JOIN items i ON i.id=w.item_id
         WHERE w.user_id=? ORDER BY w.updated_at DESC LIMIT 400""", (user_id,)).fetchall()
-    out: list[tuple[int, str]] = []
+    out: list[tuple[int, str, float]] = []
     shows_done: set[int] = set()
     min_resume = max(thresholds(con)["resume_after"], 1)
     for r in recent:
@@ -176,7 +177,7 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
             break
         if r["kind"] == "movie":
             if not r["watched"] and r["position"] >= min_resume:
-                out.append((r["item_id"], "resume"))
+                out.append((r["item_id"], "resume", r["updated_at"]))
             continue
         show = r["show"]
         if show in shows_done:
@@ -185,7 +186,7 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
             continue  # opened but not really watched (or a play that failed): says nothing about where you are
         shows_done.add(show)  # only the most recent activity of a show decides what it offers
         if not r["watched"] and r["position"] >= min_resume:
-            out.append((r["item_id"], "resume"))
+            out.append((r["item_id"], "resume", r["updated_at"]))
             continue
         if not r["watched"]:
             continue
@@ -193,6 +194,6 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
         while (nxt := next_episode(con, nxt)) is not None:
             w = con.execute("SELECT watched FROM watch_state WHERE user_id=? AND item_id=?", (user_id, nxt)).fetchone()
             if not w or not w["watched"]:
-                out.append((nxt, "next"))
+                out.append((nxt, "next", r["updated_at"]))
                 break
     return out

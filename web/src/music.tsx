@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, type QueueTrack } from "./api";
+import type { QueueTrack } from "./api";
+import { callFor } from "./servers";
 
 // The music player lives above the routes, so a song keeps playing while you browse.
 // "file" tracks play the original bytes (the browser seeks with Range). "transcode" tracks are converted
@@ -23,8 +24,8 @@ type Music = {
   error: string | null;
   /** Play `tracks` from `start` (optionally shuffled). */
   playTracks: (tracks: QueueTrack[], start?: number, shuffle?: boolean) => void;
-  /** Play an artist, album or track by item id. */
-  playItem: (itemId: number, opts?: { startTrackId?: number; shuffle?: boolean }) => Promise<void>;
+  /** Play an artist, album or track by item id (rid: of another BAMS server, servers.tsx). */
+  playItem: (itemId: number, opts?: { startTrackId?: number; shuffle?: boolean; rid?: number | null }) => Promise<void>;
   toggle: () => void;
   pause: () => void;
   next: () => void;
@@ -204,8 +205,8 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     startAt(at);
   }, [startAt]);
 
-  const playItem = useCallback(async (itemId: number, opts: { startTrackId?: number; shuffle?: boolean } = {}) => {
-    const tracks = await api.get<QueueTrack[]>(`/api/items/${itemId}/tracks`);
+  const playItem = useCallback(async (itemId: number, opts: { startTrackId?: number; shuffle?: boolean; rid?: number | null } = {}) => {
+    const tracks = await callFor(opts.rid ?? null).get<QueueTrack[]>(`/api/items/${itemId}/tracks`);
     const start = opts.startTrackId ? Math.max(0, tracks.findIndex((t) => t.id === opts.startTrackId)) : 0;
     playTracks(tracks, start, opts.shuffle);
   }, [playTracks]);

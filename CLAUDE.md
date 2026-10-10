@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 269 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 271 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -204,4 +204,14 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **`web/src/homeRows.ts` is shared with the TV app** (`tv/src/screens/Home.tsx` imports it): keep it free of browser,
   React Router and `web/`-only imports (types from `web/src/api.ts` are fine), and check `cd tv && npx tsc -p .` after
   changing it or the Home row ids.
+- **Web and TV are clients of several servers** (0.7.0): each browser/TV keeps its own list and talks to each server
+  directly; servers store nothing about other servers (an account-side proxy was built and dropped at the owner's
+  request). Item ids are per server: key lists with `everywhere.keyOf`, link with the item's `rid` (web
+  `useItemServer`/`scopeLink`, TV `ridOf`). Another server's 401 must never fire this server's `SIGNED_OUT`.
+- **`web/src/everywhere.ts` is shared with the TV app** (Home rows, Search, merging): like `homeRows.ts`, no React,
+  router or browser-only imports; the owner wants web and TV to show exactly the same thing, so change both through it.
+- **Ticket paths:** GET/HEAD are opened by the ticket; any other method needs the cookie/bearer (the web POSTs
+  `hls_url` and DELETEs sessions on another server's ticket URLs). Keep `test_media_tickets`.
+- **sed with `#` as delimiter:** replacement text containing `#` ends the expression early and a following `w…` is the
+  *write-to-file* flag (it created a stray file once). Use the Edit tool for anything with `#` or `/` in it.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

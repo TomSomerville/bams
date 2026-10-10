@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { api, getServer, getToken, hello, refreshTicket, savedUser, setSession, SIGNED_OUT, type User } from "./api";
+import { addExtra, api, checkExtras, extras, getServer, getToken, hello, refreshTicket, savedUser, setSession, SIGNED_OUT, type Extra, type User } from "./api";
 import type { ServerLibrary } from "../../web/src/api";
 import { keyHandler } from "./keys";
 import { currentFid, focusFirst, focusId, move, type Dir } from "./nav";
@@ -13,12 +13,15 @@ import Player from "./screens/Player";
 import Search from "./screens/Search";
 import Settings from "./screens/Settings";
 import Rail from "./Rail";
+import { useMusic } from "./music";
+import { NowPlaying, PlaylistScreen } from "./screens/Music";
 
 export type Route =
   | { name: "home" }
-  | { name: "library"; id: number }
-  | { name: "detail"; id: number }
-  | { name: "player"; id: number; resume: boolean }
+  | { name: "library"; id: number; rid?: number }
+  | { name: "detail"; id: number; rid?: number }
+  | { name: "player"; id: number; resume: boolean; rid?: number }
+  | { name: "playlist"; id: number; rid?: number }
   | { name: "search" }
   | { name: "settings" };
 
@@ -33,6 +36,12 @@ type Nav = {
   back: () => void;
   user: User | null;
   libraries: ServerLibrary[];
+  /** the other BAMS servers on this TV (its own list, api.ts): state null = answered, else why not */
+  servers: (Extra & { state: string | null })[];
+  /** after adding/removing a server or changing which libraries show: read the list again, ask each server */
+  reloadServers: () => void;
+  /** add a server: find it, then link this TV to an account there (`again`: link one on the list again) */
+  addServer: (again?: { url: string; name: string }) => void;
   signOut: () => void;
   changeServer: () => void;
 };
@@ -65,7 +74,23 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>("start");
   const [user, setUser] = useState<User | null>(savedUser());
   const [libraries, setLibraries] = useState<ServerLibrary[]>([]);
+  const [servers, setServers] = useState<Nav["servers"]>([]);
+  const states = useRef<Record<number, string | null>>({});
+  // the list now (as last seen), then again once each server answered (a few seconds at most when one is offline)
+  const reloadServers = useCallback(() => {
+    const show = () => setServers(extras().map((e) => ({ ...e, state: e.token ? states.current[e.id] ?? null : "signed out" })));
+    show();
+    void checkExtras().then((s) => { states.current = s; show(); });
+  }, []);
+  const [adding, setAdding] = useState<{ url: string; name: string } | "find" | null>(null);
   const [stack, setStack] = useState<Entry[]>([{ route: { name: "home" }, fid: null, key: 0 }]);
+  const music = useMusic();
+  // a video starting pauses the music (like the web)
+  const watching = stack[stack.length - 1].route.name === "player";
+  const { pause } = music;
+  useEffect(() => {
+    if (watching) pause();
+  }, [watching, pause]);
   const [fatal, setFatal] = useState<string | null>(null);
 
   // where to start: no server -> Connect; no token -> Link; else check both still work
@@ -86,12 +111,13 @@ export default function App() {
       setSession(getToken(), st.user);
       await refreshTicket(true);
       setLibraries(await api.get<ServerLibrary[]>("/api/libraries"));
+      reloadServers();  // not awaited: an offline server mustn't hold up the start
       setStack([{ route: { name: "home" }, fid: null, key: ++keyCounter }]);
       setPhase("main");
     } catch (e) {
       setFatal((e as Error).message);
     }
-  }, []);
+  }, [reloadServers]);
 
   useEffect(() => {
     registerKeys();
@@ -129,14 +155,17 @@ export default function App() {
       }),
       user,
       libraries,
+      servers,
+      reloadServers,
       signOut: () => {
         void api.post("/api/auth/logout").catch(() => undefined);
         setSession(null);
         setPhase("link");
       },
       changeServer: () => setPhase("connect"),
+      addServer: (again) => setAdding(again ?? "find"),
     };
-  }, [stack, user, libraries]);
+  }, [stack, user, libraries, servers, reloadServers]);
 
   // the remote: the screen's own handler first (the player), then Back and the arrows
   useEffect(() => {
@@ -146,9 +175,19 @@ export default function App() {
         e.preventDefault();
         return;
       }
+      // the remote's media keys, outside the video player: the music
+      const mk = ({ [KEY.PLAY_PAUSE]: music.toggle, [KEY.PLAY]: music.toggle, [KEY.PAUSE]: music.pause,
+        [KEY.NEXT]: music.next, [KEY.FF]: music.next, [KEY.PREV]: music.prev, [KEY.RW]: music.prev,
+        [KEY.STOP]: music.stop } as Record<number, () => void>)[e.keyCode];
+      if (mk && music.current) {
+        e.preventDefault();
+        mk();
+        return;
+      }
       if (isBack(e)) {
         e.preventDefault();
-        if (phase === "main") nav.back();
+        if (adding) setAdding(null);  // adding a server: Back cancels it
+        else if (phase === "main") nav.back();
         else if (phase === "start" || (phase === "connect" && !getServer())) exitApp();
         return;
       }
@@ -174,7 +213,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [nav, phase]);
+  }, [nav, phase, adding, music]);
 
   if (fatal) {
     return (
@@ -191,6 +230,17 @@ export default function App() {
   if (phase === "start") return <div className="center-screen"><div className="spinner" /></div>;
   if (phase === "connect") return <Connect onConnected={() => void start()} />;
   if (phase === "link") return <Link onLinked={() => void start()} onChangeServer={() => setPhase("connect")} />;
+  // adding another server (Settings): find it, then link this TV to an account there; Back cancels
+  if (adding === "find") {
+    return <Connect adding={{ onPick: (url, name) => setAdding({ url, name }), onCancel: () => setAdding(null) }} />;
+  }
+  if (adding) {
+    return <Link key={adding.url} target={{ ...adding, onDone: (token, u) => {
+      addExtra(adding.url, adding.name, token, u);
+      setAdding(null);
+      reloadServers();
+    } }} onLinked={() => undefined} onChangeServer={() => setAdding("find")} />;
+  }
 
   const top = stack[stack.length - 1];
   const r = top.route;
@@ -198,17 +248,19 @@ export default function App() {
     <NavCtx.Provider value={nav}>
       <ScreenCtx.Provider value={{ fid: top.fid }} key={top.key}>
         {r.name === "player" ? (
-          <Player key={`${r.id}`} id={r.id} resume={r.resume} />
+          <Player key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} resume={r.resume} />
         ) : (
-          <div className="shell">
+          <div className={`shell ${music.current ? "has-np" : ""}`}>
             <Rail />
             <main className="content" data-scroll>
               {r.name === "home" && <Home />}
-              {r.name === "library" && <Library id={r.id} />}
-              {r.name === "detail" && <Detail id={r.id} />}
+              {r.name === "library" && <Library key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} />}
+              {r.name === "detail" && <Detail id={r.id} rid={r.rid} />}
               {r.name === "search" && <Search />}
+              {r.name === "playlist" && <PlaylistScreen id={r.id} rid={r.rid} />}
               {r.name === "settings" && <Settings />}
             </main>
+            <NowPlaying />
           </div>
         )}
       </ScreenCtx.Provider>

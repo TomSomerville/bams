@@ -5,12 +5,16 @@ import { Backdrop } from "../components/Art";
 import { AlbumCard, ContinueCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
+import { heroItems, heroPath, homeSpecs, keyOf, mergeGenres, mergeRow, type HomeRowSpec, type Tagged } from "../everywhere";
 import { fmtRuntime, seasonsLabel } from "../format";
-import { homeRows, rowGenre } from "../homeRows";
 import { useAuth } from "../auth";
+import { scopeLink, useEverywhere, useSources } from "../servers";
 import { useApi } from "../useApi";
 
-function Hero({ items }: { items: ItemSummary[] }) {
+// Home combines every server this browser shows (its own and the others in Settings → Other BAMS servers): the
+// rows, what each asks and how answers merge are in everywhere.ts, shared with the TV app's Home.
+
+function Hero({ items }: { items: Tagged<ItemSummary>[] }) {
   const [i, setI] = useState(0);
   useEffect(() => {
     if (items.length < 2) return;
@@ -18,10 +22,11 @@ function Hero({ items }: { items: ItemSummary[] }) {
     return () => clearInterval(t);
   }, [items.length]);
   const item = items[i % items.length];
+  const page = scopeLink(item.rid, `/title/${item.id}`);
   return (
     <section className="hero">
       {items.map((f, k) => (
-        <div key={f.id} className={`hero-bg ${k === i ? "on" : ""}`}>
+        <div key={keyOf(f)} className={`hero-bg ${k === i ? "on" : ""}`}>
           <Backdrop src={f.backdrop} poster={f.poster} title={f.title} className="hero-img" />
         </div>
       ))}
@@ -37,14 +42,14 @@ function Hero({ items }: { items: ItemSummary[] }) {
         </div>
         {item.overview && <p className="hero-overview">{item.overview}</p>}
         <div className="actions">
-          <Link to={`/title/${item.id}`} className="btn primary"><Icon name="play" /> Watch</Link>
-          <Link to={`/title/${item.id}`} className="btn ghost"><Icon name="info" /> More info</Link>
+          <Link to={page} className="btn primary"><Icon name="play" /> Watch</Link>
+          <Link to={page} className="btn ghost"><Icon name="info" /> More info</Link>
         </div>
       </div>
       {items.length > 1 && (
         <div className="hero-dots">
           {items.map((f, k) => (
-            <button key={f.id} className={k === i ? "on" : ""} onClick={() => setI(k)} aria-label={`Show ${f.title}`} />
+            <button key={keyOf(f)} className={k === i ? "on" : ""} onClick={() => setI(k)} aria-label={`Show ${f.title}`} />
           ))}
         </div>
       )}
@@ -52,32 +57,34 @@ function Hero({ items }: { items: ItemSummary[] }) {
   );
 }
 
-/** A row whose items the server picks (newest first, random...): fetched on its own, so it isn't limited to the
- *  items Home loads for the banner. Hidden while empty, or below `min` items. */
-function ItemsRow({ title, path, to, min = 1 }: { title: string; path: string; to?: string; min?: number }) {
-  const { data } = useApi<ItemSummary[]>(path);
-  if (!data || data.length < min) return null;
-  return <Row title={title} to={to}>{data.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
+/** One Home row: asked of every server (or only this one, for a library's own row), merged as answers arrive. */
+function HomeRow({ spec }: { spec: HomeRowSpec }) {
+  const all = useSources();
+  const sources = useMemo(() => (spec.everywhere ? all : all.filter((s) => s.rid === null)), [all, spec.everywhere]);
+  const { lists } = useEverywhere<ItemSummary>(sources, spec.path);
+  const items = useMemo(() => mergeRow(spec, lists), [spec, lists]);
+  if (items.length < spec.min) return null;
+  const to = spec.library !== undefined ? `/library/${spec.library}` : undefined;
+  if (spec.kind === "continue") {
+    return <Row title={spec.title}>{items.map((i) => <ContinueCard key={keyOf(i)} item={i as Tagged<ContinueItem>} />)}</Row>;
+  }
+  if (spec.kind === "albums") return <Row title={spec.title} to={to}>{items.map((a) => <AlbumCard key={keyOf(a)} item={a} />)}</Row>;
+  return <Row title={spec.title} to={to}>{items.map((i) => <PosterCard key={keyOf(i)} item={i} />)}</Row>;
 }
 
-const ROW_SIZE = 30;
-const TOP_RATING = 7;  // "Top Rated" picks at random from titles rated at least this (TMDB, out of 10)
-
 export default function Home() {
+  const sources = useSources();
   const { data: libs, error } = useApi<ServerLibrary[]>("/api/libraries");
-  const { data: items } = useApi<ItemSummary[]>("/api/items?sort=added&limit=500");
-  const hasMusic = !!libs?.some((l) => l.type === "music");
-  const { data: albums } = useApi<ItemSummary[]>(hasMusic ? "/api/items?kind=album&sort=added&limit=300" : null);
-  const { data: resume } = useApi<ContinueItem[]>("/api/continue");
+  const { lists: genreLists, done: genresDone } = useEverywhere<Genre>(sources, "/api/genres");
+  const { lists: newest, done: newestDone } = useEverywhere<ItemSummary>(sources, heroPath);
   const { prefs } = useAuth();
 
-  const recent = items?.slice(0, 20) ?? [];
-  const hero = useMemo(() => (prefs.home_hero ? (items ?? []).filter((i) => i.backdrop || i.poster).slice(0, 6) : []),
-    [items, prefs.home_hero]);
-  const { data: genres } = useApi<Genre[]>("/api/genres");  // every genre in the libraries, most titles first
+  const genres = useMemo(() => mergeGenres(genreLists), [genreLists]);
+  const hero = useMemo(() => (prefs.home_hero ? heroItems(newest) : []), [newest, prefs.home_hero]);
+  const specs = useMemo(() => (libs ? homeSpecs(prefs.home_rows, libs, genres) : null), [libs, prefs.home_rows, genres]);
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
-  if (libs && !libs.length) {
+  if (libs && !libs.length && sources.length === 1) {
     return (
       <div className="page empty-state">
         <img src="/brand/bams-icon.png" alt="" />
@@ -87,49 +94,14 @@ export default function Home() {
       </div>
     );
   }
-  if (items && !items.length && (!hasMusic || (albums && !albums.length))) {
-    return (
-      <div className="page empty-state">
-        <h1>Nothing here yet</h1>
-        <p className="muted">Your libraries haven't found any media yet. Scans run in the background; check their status in Settings.</p>
-        <Link to="/settings" className="btn ghost">Open Settings</Link>
-      </div>
-    );
-  }
-  if (!items || !libs || !genres || (hasMusic && !albums)) return <div className="page muted">Loading…</div>;
+  // wait for every server's genres (or its giving up), so the rows don't jump about as genres arrive
+  if (!specs || !genresDone || !newestDone) return <div className="page muted">Loading…</div>;
 
   return (
     <div className={`home ${hero.length ? "" : "no-hero"}`}>
       {hero.length > 0 && <Hero items={hero} />}
       <div className="rows">
-        {homeRows(prefs.home_rows, libs, genres).filter((r) => r.show).map((r) => {
-          if (r.id === "continue") {
-            return !!resume?.length && <Row key={r.id} title={r.label}>{resume.map((i) => <ContinueCard key={i.id} item={i} />)}</Row>;
-          }
-          if (r.id === "recent") {
-            return recent.length > 0 && <Row key={r.id} title={r.label}>{recent.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
-          }
-          // Top Rated and the genres: a different random pick, in random order, each time Home opens
-          if (r.id === "top_rated") {
-            return <ItemsRow key={r.id} title={r.label} min={4}
-              path={`/api/items?sort=random&min_rating=${TOP_RATING}&limit=${ROW_SIZE}`} />;
-          }
-          const g = rowGenre(r.id);
-          if (g !== null) {
-            return <ItemsRow key={r.id} title={g}
-              path={`/api/items?sort=random&genre=${encodeURIComponent(g)}&limit=${ROW_SIZE}`} />;
-          }
-          const l = libs.find((x) => `lib:${x.id}` === r.id)!;
-          if (l.type === "music") {
-            const la = (albums ?? []).filter((a) => a.library_id === l.id).slice(0, 30);
-            return la.length > 0 && (
-              <Row key={r.id} title={r.label} to={`/library/${l.id}`}>{la.map((a) => <AlbumCard key={a.id} item={a} />)}</Row>
-            );
-          }
-          // newest first; a show with new episodes counts as new again
-          return <ItemsRow key={r.id} title={r.label} to={`/library/${l.id}`}
-            path={`/api/libraries/${l.id}/items?sort=recent&limit=${ROW_SIZE}`} />;
-        })}
+        {specs.map((s) => <HomeRow key={s.id} spec={s} />)}
       </div>
     </div>
   );

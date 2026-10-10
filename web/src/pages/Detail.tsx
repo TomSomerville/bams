@@ -1,12 +1,13 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { api, MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
+import { MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
 import { Backdrop, Poster } from "../components/Art";
 import { PlayBadge, PosterCard, progressOf } from "../components/Cards";
 import FixMatch from "../components/FixMatch";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { fmtClock, fmtRuntime, fmtSize, seasonsLabel, sxe } from "../format";
+import { useScope } from "../servers";
 import { useApi } from "../useApi";
 import { MusicDetail } from "./Music";
 
@@ -48,12 +49,13 @@ function TechInfo({ f }: { f: FileInfo }) {
 
 /** Mark a movie/episode, or all of a season/show, watched or not; `done` reloads what shows it. */
 function WatchedButton({ item, watched, done, small }: { item: ItemSummary; watched: boolean; done: () => void; small?: boolean }) {
+  const { call } = useScope();
   const label = watched ? "Mark unwatched" : "Mark watched";
   const what = item.kind === "season" ? " (season)" : item.kind === "show" ? " (all episodes)" : "";
   const toggle = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    api.put(`/api/items/${item.id}/watched`, { watched: !watched }).then(done).catch(() => {});
+    call.put(`/api/items/${item.id}/watched`, { watched: !watched }).then(done).catch(() => {});
   };
   return small ? (
     <button className={`icon-btn subtle watch-toggle ${watched ? "on" : ""}`} onClick={toggle} title={label} aria-label={label}>
@@ -65,6 +67,7 @@ function WatchedButton({ item, watched, done, small }: { item: ItemSummary; watc
 }
 
 function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => void }) {
+  const { to } = useScope();
   const { data, reload } = useApi<ItemDetail>(`/api/items/${season.id}`);
   if (!data) return <p className="muted">Loading episodes…</p>;
   const changed = () => { reload(); onChange(); };
@@ -77,7 +80,7 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
       <ol className="episodes">
         {data.children.map((e) => (
           <li key={e.id}>
-            <Link to={`/play/${e.id}`} className={`episode ${e.progress?.watched ? "seen" : ""}`}>
+            <Link to={to(`/play/${e.id}`)} className={`episode ${e.progress?.watched ? "seen" : ""}`}>
               <span className="ep-num">{e.episode_number ?? "·"}</span>
               <div className="ep-thumb">
                 {e.still ? <img className="ep-img" src={e.still} alt="" loading="lazy" />
@@ -101,6 +104,7 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
 
 export default function Detail() {
   const { id } = useParams();
+  const { to, remote } = useScope();
   const [search] = useSearchParams();
   const wantSeason = Number(search.get("season")) || null;  // ?season=<season id> (Continue Watching's episode line)
   const { data: item, error, reload } = useApi<ItemDetail>(`/api/items/${id}`);
@@ -154,17 +158,18 @@ export default function Detail() {
             )}
           <div className="actions">
             {item.kind === "movie" && file && (
-              <Link to={`/play/${item.id}`} className="btn primary">
+              <Link to={to(`/play/${item.id}`)} className="btn primary">
                 <Icon name="play" /> {resumeAt ? `Resume from ${fmtClock(resumeAt)}` : "Play"}
               </Link>
             )}
-            {resumeAt > 0 && <Link to={`/play/${item.id}?start=0`} className="btn ghost"><Icon name="refresh" /> Start over</Link>}
+            {resumeAt > 0 && <Link to={to(`/play/${item.id}?start=0`)} className="btn ghost"><Icon name="refresh" /> Start over</Link>}
             {item.kind === "movie" && <WatchedButton item={item} watched={!!item.progress?.watched} done={reload} />}
             {item.kind === "show" && !!item.episodes && <WatchedButton item={item} watched={item.unwatched === 0} done={reload} />}
             {item.kind === "movie" && file && (
               <a className="btn ghost" href={file.download_url} download><Icon name="download" /> Download</a>
             )}
-            <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>
+            {(!remote || remote.is_admin) && (  // another server's titles: only its admins can fix them
+              <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>)}
             {item.ids.imdb && (
               <a className="btn ghost" href={`https://www.imdb.com/title/${item.ids.imdb}/`} target="_blank" rel="noreferrer">IMDb</a>
             )}

@@ -4,6 +4,7 @@ import type { ItemSummary, ServerLibrary } from "../api";
 import { useAuth } from "../auth";
 import { PosterCard } from "../components/Cards";
 import { UnrecognizedFiles } from "../components/Identify";
+import { useScope } from "../servers";
 import { useApi } from "../useApi";
 import { MusicLibrary } from "./Music";
 
@@ -15,8 +16,11 @@ export default function Library() {
   const [genre, setGenre] = useState<string | null>(null);
   const { data: lib, error, reload } = useApi<ServerLibrary>(`/api/libraries/${id}`);
   const { user } = useAuth();
+  const { rid, libName } = useScope();
+  // identifying files (Unrecognized tab) is done on the server they are on, not through another one
+  const admin = rid === null && user.is_admin;
   const [params, setParams] = useSearchParams();
-  const tab = user.is_admin && params.get("tab") === "unrecognized" ? "unrecognized" : "titles";
+  const tab = admin && params.get("tab") === "unrecognized" ? "unrecognized" : "titles";
   const unrecognized = lib?.files.unrecognized ?? 0;
   const isMusic = lib?.type === "music";
   const { data: items } = useApi<ItemSummary[]>(lib && !isMusic ? `/api/libraries/${id}/items?sort=${sort}` : null);
@@ -30,9 +34,9 @@ export default function Library() {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>{lib?.name ?? ""}</h1>
+        <h1>{lib ? libName(lib.id, lib.name) : ""}</h1>
         {items && <span className="count">{list.length} {noun}</span>}
-        {user.is_admin && (unrecognized > 0 || tab === "unrecognized") && (
+        {admin && (unrecognized > 0 || tab === "unrecognized") && (
           <div className="segmented lib-tabs">
             <button className={tab === "titles" ? "on" : ""} onClick={() => setParams({})}>{noun[0].toUpperCase() + noun.slice(1)}</button>
             <button className={tab === "unrecognized" ? "on" : ""} onClick={() => setParams({ tab: "unrecognized" })}>

@@ -1,18 +1,20 @@
+import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { ItemSummary } from "../api";
 import { ItemCard } from "../components/Cards";
 import Icon from "../components/Icon";
+import { byTitle, keyOf, searchPaths, type Tagged } from "../everywhere";
 import { fmtClock } from "../format";
 import { useMusic } from "../music";
-import { useApi } from "../useApi";
+import { useEverywhere, useSources } from "../servers";
 
-function TrackHits({ tracks }: { tracks: ItemSummary[] }) {
+function TrackHits({ tracks }: { tracks: Tagged<ItemSummary>[] }) {
   const music = useMusic();
   return (
     <ol className="tracklist">
       {tracks.map((t) => (
-        <li key={t.id}>
-          <button className={`track ${music.current?.id === t.id ? "on" : ""}`} onClick={() => music.playItem(t.id)}>
+        <li key={keyOf(t)}>
+          <button className="track" onClick={() => music.playItem(t.id, { rid: t.rid })}>
             <span className="track-num"><Icon name="play" size={14} /></span>
             <span className="track-text">
               <span className="track-title">{t.title}</span>
@@ -26,17 +28,22 @@ function TrackHits({ tracks }: { tracks: ItemSummary[] }) {
   );
 }
 
+/** Search every server this browser shows (everywhere.ts; the TV's Search asks the same). */
 export default function Search() {
   const [params] = useSearchParams();
   const q = params.get("q") ?? "";
-  const enc = encodeURIComponent(q);
-  const { data: video } = useApi<ItemSummary[]>(q ? `/api/items?sort=title&q=${enc}` : null);
-  const { data: music } = useApi<ItemSummary[]>(q ? `/api/items?kind=artist,album&sort=title&q=${enc}` : null);
-  const { data: tracks } = useApi<ItemSummary[]>(q ? `/api/items?kind=track&sort=title&q=${enc}&limit=50` : null);
-  const done = video && music && tracks;
-  const total = (video?.length ?? 0) + (music?.length ?? 0) + (tracks?.length ?? 0);
-  const artists = music?.filter((i) => i.kind === "artist") ?? [];
-  const albums = music?.filter((i) => i.kind === "album") ?? [];
+  const sources = useSources();
+  const p = q.trim() ? searchPaths(q) : null;
+  const v = useEverywhere<ItemSummary>(sources, p?.video ?? null);
+  const m = useEverywhere<ItemSummary>(sources, p?.music ?? null);
+  const t = useEverywhere<ItemSummary>(sources, p?.tracks ?? null);
+  const video = useMemo(() => byTitle(v.lists), [v.lists]);
+  const music = useMemo(() => byTitle(m.lists), [m.lists]);
+  const tracks = useMemo(() => byTitle(t.lists, 50), [t.lists]);
+  const done = v.done && m.done && t.done;
+  const total = video.length + music.length + tracks.length;
+  const artists = music.filter((i) => i.kind === "artist");
+  const albums = music.filter((i) => i.kind === "album");
 
   return (
     <div className="page">
@@ -45,25 +52,25 @@ export default function Search() {
         {done && <span className="count">{total}</span>}
       </div>
       {done && !total && <p className="muted">Nothing in your libraries matches that.</p>}
-      {!!video?.length && (
+      {video.length > 0 && (
         <section className="search-section">
-          {(artists.length > 0 || albums.length > 0 || !!tracks?.length) && <h2>Shows &amp; movies</h2>}
-          <div className="grid">{video.map((i) => <ItemCard key={i.id} item={i} />)}</div>
+          {(artists.length > 0 || albums.length > 0 || tracks.length > 0) && <h2>Shows &amp; movies</h2>}
+          <div className="grid">{video.map((i) => <ItemCard key={keyOf(i)} item={i} />)}</div>
         </section>
       )}
       {artists.length > 0 && (
         <section className="search-section">
           <h2>Artists</h2>
-          <div className="grid">{artists.map((i) => <ItemCard key={i.id} item={i} />)}</div>
+          <div className="grid">{artists.map((i) => <ItemCard key={keyOf(i)} item={i} />)}</div>
         </section>
       )}
       {albums.length > 0 && (
         <section className="search-section">
           <h2>Albums</h2>
-          <div className="grid">{albums.map((i) => <ItemCard key={i.id} item={i} />)}</div>
+          <div className="grid">{albums.map((i) => <ItemCard key={keyOf(i)} item={i} />)}</div>
         </section>
       )}
-      {!!tracks?.length && (
+      {tracks.length > 0 && (
         <section className="search-section">
           <h2>Tracks</h2>
           <TrackHits tracks={tracks} />

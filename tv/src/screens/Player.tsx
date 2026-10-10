@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, media, refreshTicket, type FileInfo, type ItemDetail, type SubtitleTrack } from "../api";
+import { apiFor, mediaFor, refreshTicket, type FileInfo, type ItemDetail, type SubtitleTrack } from "../api";
 import { useNav } from "../App";
 import { AvplayEngine, hasAvplay, VideoEngine, type Engine } from "../engine";
 import { clock, sxe } from "../format";
@@ -17,8 +17,11 @@ const SEEK_SETTLE = 700; // ms after the last left/right press before the seek i
 const UP_NEXT = 10;      // seconds before the next episode starts by itself
 
 /** The player: the file as-is when the TV can (AVPlay decodes MKV/HEVC/AC3...), else an HLS session from the
- *  server (sound converted, or everything converted). Saves the position like the web player does. */
-export default function Player({ id, resume }: { id: number; resume: boolean }) {
+ *  server (sound converted, or everything converted). Saves the position like the web player does.
+ *  `rid`: the item is on another of this TV's servers (api.ts); everything then goes to that one. */
+export default function Player({ id, resume, rid }: { id: number; resume: boolean; rid?: number }) {
+  const api = apiFor(rid);      // this item's server
+  const media = mediaFor(rid);
   const nav = useNav();
   const videoRef = useRef<HTMLVideoElement>(null);
   const engine = useRef<Engine | null>(null);
@@ -73,7 +76,7 @@ export default function Player({ id, resume }: { id: number; resume: boolean }) 
     setMode(how.mode);
     s.startAt = at;
     try {
-      await refreshTicket();
+      if (rid === undefined) await refreshTicket();  // another server's: kept fresh by its api calls
       let url: string | null;
       let hls = false;
       // Samsung's player can't seek in a file it streams itself (resume and skipping froze), so on the TV even what
@@ -223,7 +226,7 @@ export default function Player({ id, resume }: { id: number; resume: boolean }) 
   const playNext = () => {
     clearInterval(timers.current.next);
     const next = st.current.item?.next_id;
-    if (next) nav.replace({ name: "player", id: next, resume: true });
+    if (next) nav.replace({ name: "player", id: next, rid, resume: true });
   };
 
   // the up-next countdown

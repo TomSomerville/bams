@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type ItemDetail, type MbResult } from "../api";
+import { type ItemDetail, type MbResult } from "../api";
+import { useScope } from "../servers";
 import Icon from "./Icon";
 
 /** Search MusicBrainz and pin an album (to a release) or an artist. */
@@ -12,6 +13,7 @@ export default function MusicFixMatch({ item, onClose }: { item: ItemDetail; onC
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { call, to } = useScope();  // this server, or another one's title (servers.tsx)
 
   const search = async () => {
     setBusy("search");
@@ -19,7 +21,7 @@ export default function MusicFixMatch({ item, onClose }: { item: ItemDetail; onC
     try {
       const params = new URLSearchParams({ kind: isAlbum ? "album" : "artist", q });
       if (isAlbum && artist.trim()) params.set("artist", artist.trim());
-      setResults(await api.get<MbResult[]>(`/api/musicbrainz/search?${params}`));
+      setResults(await call.get<MbResult[]>(`/api/musicbrainz/search?${params}`));
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -31,10 +33,10 @@ export default function MusicFixMatch({ item, onClose }: { item: ItemDetail; onC
     setBusy(r.mbid);
     setErr(null);
     try {
-      const d = await api.post<ItemDetail>(`/api/items/${item.id}/music-match`, { mbid: r.mbid });
+      const d = await call.post<ItemDetail>(`/api/items/${item.id}/music-match`, { mbid: r.mbid });
       onClose(true);
       // merged into another copy of the same release: that album is this one now
-      if (d.id !== item.id) navigate(`/title/${d.id}`, { replace: true });
+      if (d.id !== item.id) navigate(to(`/title/${d.id}`), { replace: true });
     } catch (e) {
       setErr((e as Error).message);
       setBusy(null);

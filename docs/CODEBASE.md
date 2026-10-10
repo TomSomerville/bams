@@ -67,7 +67,7 @@ bams/
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 268 tests, see §7
+│   └── tests/                 pytest: 271 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
@@ -81,14 +81,18 @@ bams/
 │       ├── settings.tsx       SettingsProvider: server TMDB status (configured/last4), serverError
 │       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
+│       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search)
+│       ├── everywhere.ts      Home rows (`homeSpecs`) and Search across every server, and how answers merge (newest, interleave, Continue Watching by `last_watched_at`, genres); SHARED with the TV app (no React/router)
 │       ├── homeRows.ts        Home's rows: defaultRows(libs, genres) (default order, labels; one `genre:<name>` row per genre) + homeRows(saved, libs, genres) (user order merged with what exists; an old `genres` entry expands in place)
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
-│       │   ├── Sidebar.tsx    Logo, Home, one link per library in the admin's order (admins drag to reorder), Settings
+│       │   ├── Sidebar.tsx    Logo, Home, one link per library in the admin's order (admins drag to reorder), each other server's shown libraries under its name, Settings
 │       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
 │       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out) + admins' "Who can sign in" (users CRUD)
+│       │   ├── RemoteSettings.tsx  Settings → Other BAMS servers: connect form, per-server card (rename/hide libraries, sign in again, disconnect)
+│       │   ├── ServerNameSettings.tsx  Settings → This server → Server name (admins)
 │       │   ├── HomeSettings.tsx  Your Home page: banner pref + rows on/off and order (drag/arrow keys/▲▼), reset → `home_rows` pref
 │       │   ├── PasswordInput.tsx  Password field with a show/hide button (sign-in, setup, accounts)
 │       │   ├── WatchSettings.tsx  Playback card: "started after" seconds and "watched at" %
@@ -125,15 +129,16 @@ bams/
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
 │   └── src/
-│       ├── App.tsx            Phases (connect → link → main), screen stack + focus restore, the one keydown handler
-│       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting
+│       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`) + focus restore, the one keydown handler (music media keys)
+│       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback); MusicProvider in main.tsx
+│       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting; other servers of this TV (extras: apiFor/mediaFor(rid), checkExtras, sources() for everywhere.ts)
 │       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap])
 │       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo)
 │       ├── engine.ts          AvplayEngine (webapis.avplay) / VideoEngine (<video> + hls.js) behind one interface
 │       ├── plan.ts            What the TV decodes (TV caps vs BROWSER caps) → direct / remux / convert; pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── Rail.tsx · Cards.tsx · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password), Home, Library, Detail, Search, Settings, Player
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
 │   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
@@ -179,7 +184,8 @@ and every request, allowed or blocked, goes to the traffic log (`netflow.Netflow
 thread) when it finishes.
 
 **Every request to `/api/`** passes `LoginRequired` (plain ASGI middleware): the `bams_session` cookie, else an
-`Authorization: Bearer` token (the TV app), else a media ticket path `/api/t/<ticket>/files|hls|images/…` (GET only;
+`Authorization: Bearer` token (the TV app), else a media ticket path `/api/t/<ticket>/files|hls|images/…` (GET/HEAD: the ticket signs it in; other methods need
+the cookie/bearer as usual, so a client keeping media links as ticket URLs can POST/DELETE them;
 the path is rewritten to the real one, so routes and the traffic log never see the ticket) → `lookup_digest()`
 (cached a minute per token, cleared on sign-out / password / user changes) → `auth.session_user` → the user dict in
 `request.state.user` (+ `state.session` = the session's digest), else 401. Non-GET cookie requests whose Origin isn't this
@@ -452,7 +458,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | Route | Purpose | Used by (web) |
 |---|---|---|
 | `GET /api/auth/state` · `POST /api/auth/login {name,password}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
-| `GET /api/hello` (public) · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server; sign an app in (bearer token, no cookie) | tv |
+| `GET /api/hello` (public) → `{app, version, name}` · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx |
+| `PUT /api/settings/server-name {name}` (admin; `""` = default) → `{name, default, custom}` (also in `GET /api/settings` → `server_name`) | what the server is called in apps' lists; default "<oldest admin>'s BAM Server" (`app.default_server_name`) | ServerNameSettings |
 | `POST /api/devices/link {name}` (public) → `{code, secret, expires_in}` · `POST /api/devices/link/poll {secret}` (public) → `{status}` or `{status: linked, token, user}` · `POST /api/devices/approve {code}` · `GET /api/devices` · `DELETE /api/devices/{id}` | TV link codes; your linked TVs, sign one out | tv, TvSettings, LinkTv |
 | `GET /api/media-ticket` → `{prefix, expires_in}` | `/api/t/<ticket>`: media URLs for players and `<img>` that can't send headers | tv |
 | `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin) | accounts | AccountSettings |
@@ -460,7 +467,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
 | `GET /api/security/accounts` · `PUT /api/security/accounts/{id}/lock {locked}` (admin) | lock state per account / lock (signs out) or unlock | SecuritySettings |
 | `GET /api/security/auth-log?result=ok\|failed\|admin&before=&limit=` · `GET /api/security/netflow/entries?q=&before=&limit=` (admin) → `{entries, next}` | sign-in log / traffic log, newest first | SecuritySettings |
-| `PUT /api/items/{id}/progress {position,duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` | watch state of the signed-in user | Player, Detail, Home |
+| `PUT /api/items/{id}/progress {position,duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` (items carry `reason`, `last_watched_at`) | watch state of the signed-in user | Player, Detail, Home |
 | `GET /api/status` | version, data dir, ffprobe/ffmpeg paths, `video_encoder` `{id,name,hardware,hw_decode}`, `transcodes` `{running,limit}`, TMDB configured, guard, scan running/queued | TopBar, Settings |
 | `GET /api/settings` | TMDB status (never the key) | SettingsProvider |
 | `PUT /api/settings/tmdb-key` · `DELETE` · `POST …/test` | save (verified) / remove / re-check | TmdbSettings |
@@ -526,10 +533,10 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | File | Covers |
 |---|---|
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
-| `test_devices.py` | /api/hello, link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session), traffic log shows the real path |
+| `test_devices.py` | /api/hello + server name (default from the first admin, admin-only, reset), link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session; POST/DELETE on a ticket path with the token), traffic log shows the real path |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
-| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
+| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
 | `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB |
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
 | `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |
@@ -575,7 +582,10 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | When something counts as watched, what Continue Watching offers | admin settings via `watch.thresholds` (defaults `WATCHED_PERCENT`, `RESUME_AFTER`), `continue_watching`, `next_episode` |
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
 | Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
-| Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + its rendering in `pages/Home.tsx` and in the TV app's `tv/src/screens/Home.tsx` (which imports `homeRows.ts`); ids are saved in users' `home_rows`, so keep old ids stable |
+| Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + what it asks and how servers merge in `web/src/everywhere.ts` `homeSpecs`/`mergeRow` (web `pages/Home.tsx` and TV `tv/src/screens/Home.tsx` both use them); ids are saved in users' `home_rows`, so keep old ids stable |
+| Other BAMS servers in a client | web `web/src/servers.tsx` (connect, `rewrite` of links, `/r/:rid` scope; pages use `useScope()`), `components/RemoteSettings.tsx`; TV `tv/src/api.ts` (extras, `apiFor`/`mediaFor`), `screens/Settings.tsx`, Connect/Link (`adding`/`target`) |
+| How Home/Search merge servers | `web/src/everywhere.ts` (`newestFirst`, `interleave`, `continueOrder`, `mergeGenres`, `byTitle`) |
+| Music on the TV | `tv/src/music.tsx` (player), `tv/src/screens/Music.tsx` (pages, NowPlaying), media keys in `tv/src/App.tsx` |
 | Recognise more sidecar subtitle names / languages | `subtitles.sidecars`, `subtitles.tracks` (`_FLAGS`), `subtitles.language`; VobSub: `vobsub_streams` |
 | Auto quality sizes | `hls.LADDER`, `hls.ladder` |
 | How far ahead / behind HLS works | `AHEAD`, `SOON`, `KEEP`, `SWITCHED`, `IDLE` in `hls.py` (seconds) |

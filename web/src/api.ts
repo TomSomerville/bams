@@ -85,6 +85,9 @@ export type ServerStatus = {
   scans: ScanState;
 };
 
+/** What this server is called in apps' server lists (GET /api/settings → server_name; GET /api/hello → name). */
+export type ServerName = { name: string; default: string; custom: boolean };
+
 export type BrowseResult = { path: string | null; parent: string | null; dirs: { name: string; path: string }[] };
 
 /** Each account's own display preferences (server: auth.PREFS). */
@@ -137,6 +140,9 @@ export type ItemSummary = {
   disc_number?: number | null;
   /** the performer, when it isn't the album artist */
   artist?: string | null;
+  /** client side: the server this item came from (null = the first one; web servers.tsx, TV api.ts) when a
+   *  page shows several servers' items together (Home, Search) */
+  rid?: number | null;
   // watch state of the signed-in user
   progress?: Progress;
   /** shows/seasons: how many episodes, and how many of them aren't watched */
@@ -149,6 +155,8 @@ export type ContinueItem = ItemSummary & {
   reason: "resume" | "next";
   show?: { id: number; title: string; poster: string | null; backdrop: string | null };
   season_id?: number;  // episodes: their season (the card's episode line opens it)
+  /** when the activity it comes from happened (newer servers): merging several servers' rows */
+  last_watched_at?: number;
 };
 
 export type AudioTrack = { index: number; label: string; language: string | null; codec: string | null;
@@ -315,6 +323,21 @@ export type PlaylistSummary = {
 export type Playlist = PlaylistSummary & { library_name: string; tracks: QueueTrack[] };
 
 export type TmdbResult ={ tmdb_id: number; title: string; year: number | null; overview: string | null; poster_path: string | null };
+
+// ---- other BAMS servers this browser is connected to (kept in the browser: servers.tsx)
+
+/** One of the other server's libraries: `name` is what this account calls it (own_name = the server's own). */
+export type RemoteLibrary = { id: number; type: "movie" | "show" | "music"; name: string; own_name: string; show: boolean };
+export type RemoteServer = {
+  id: number; name: string; url: string;
+  /** the account signed in to there, and whether it's an admin there */
+  account: string; is_admin: boolean;
+  /** false: the other server no longer accepts the sign-in (sign in again) */
+  signed_in: boolean;
+  /** answered just now; when not, `libraries` are the ones it had last time */
+  online: boolean; error: string | null;
+  libraries: RemoteLibrary[];
+};
 
 // ---- Settings -> Security (server: security.py, netflow.py)
 

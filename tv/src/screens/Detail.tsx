@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
-import { api, media, type ContinueItem, type ItemDetail, type ItemSummary } from "../api";
+import { apiFor, mediaFor, type ContinueItem, type ItemDetail, type ItemSummary } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import Icon from "../Icon";
 import { clock, metaLine, progressOf, runtime, sxe } from "../format";
 import { pickAudio, pickFile, plan } from "../plan";
+import { MusicDetail } from "./Music";
 
-/** A movie, show, season or episode: art, text, Play / Resume, and for shows the seasons and their episodes. */
-export default function Detail({ id }: { id: number }) {
+/** A movie, show, season or episode: art, text, Play / Resume, and for shows the seasons and their episodes.
+ *  `rid`: of another of this TV's servers (api.ts). */
+export default function Detail({ id, rid }: { id: number; rid?: number }) {
+  const api = apiFor(rid);      // this item's server
+  const media = mediaFor(rid);
+  const seasonKey = rid === undefined ? `bams.season.${id}` : `bams.season.r${rid}.${id}`;
   const nav = useNav();
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -19,20 +24,20 @@ export default function Detail({ id }: { id: number }) {
     api.get<ItemDetail>(`/api/items/${id}`).then((d) => {
       setItem(d);
       if (d.kind === "show") {
-        const saved = Number(sessionStorage.getItem(`bams.season.${id}`));
+        const saved = Number(sessionStorage.getItem(seasonKey));
         const ids = d.children.map((c) => c.id);
         setSeason((s) => s ?? (ids.includes(saved) ? saved : d.children.find((c) => (c.unwatched ?? 0) > 0)?.id ?? ids[0] ?? null));
       }
     }).catch((e) => setErr((e as Error).message));
     api.get<ContinueItem[]>("/api/continue?limit=100")
       .then((c) => setNext(c.find((x) => x.show?.id === id || x.season_id === id) ?? null)).catch(() => undefined);
-  }, [id, reload]);
+  }, [id, reload]); // eslint-disable-line react-hooks/exhaustive-deps -- api is per rid, and rid keys the screen
 
   // a show's season (or a season's own page): its episodes
   useEffect(() => {
     if (item?.kind === "season") return setEpisodes(item);
     if (season === null) return;
-    sessionStorage.setItem(`bams.season.${id}`, String(season));
+    sessionStorage.setItem(seasonKey, String(season));
     api.get<ItemDetail>(`/api/items/${season}`).then(setEpisodes).catch((e) => setErr((e as Error).message));
   }, [item, season, id]);
 
@@ -40,6 +45,7 @@ export default function Detail({ id }: { id: number }) {
 
   if (err) return <div className="page"><p className="error big">{err}</p></div>;
   if (!item) return <div className="page"><div className="spinner" /></div>;
+  if (item.kind === "artist" || item.kind === "album" || item.kind === "track") return <MusicDetail item={item} rid={rid} />;
 
   const playable = item.kind === "movie" || item.kind === "episode";
   const show = item.kind === "episode" ? item.ancestors.find((a) => a.kind === "show") : item.kind === "season" ? item.ancestors[0] : null;
@@ -78,18 +84,18 @@ export default function Detail({ id }: { id: number }) {
             {playable && !file && <p className="error">No file of this is available right now (drive offline or moved).</p>}
             <div className="button-row">
               {playable && file && pos > 0 && (
-                <button className="btn primary" data-autofocus data-fid="resume" onClick={() => nav.push({ name: "player", id, resume: true })}>
+                <button className="btn primary" data-autofocus data-fid="resume" onClick={() => nav.push({ name: "player", id, rid, resume: true })}>
                   <Icon name="play" size={30} /> Resume from {clock(pos)}
                 </button>
               )}
               {playable && file && (
                 <button className={`btn ${pos > 0 ? "" : "primary"}`} data-autofocus={pos > 0 ? undefined : true} data-fid="play"
-                  onClick={() => nav.push({ name: "player", id, resume: false })}>
+                  onClick={() => nav.push({ name: "player", id, rid, resume: false })}>
                   <Icon name={pos > 0 ? "restart" : "play"} size={30} /> {pos > 0 ? "From the start" : "Play"}
                 </button>
               )}
               {!playable && next && (
-                <button className="btn primary" data-autofocus data-fid="next" onClick={() => nav.push({ name: "player", id: next.id, resume: true })}>
+                <button className="btn primary" data-autofocus data-fid="next" onClick={() => nav.push({ name: "player", id: next.id, rid, resume: true })}>
                   <Icon name="play" size={30} /> {next.reason === "resume" ? "Resume" : "Play"} {sxe(next)}
                 </button>
               )}
@@ -117,7 +123,7 @@ export default function Detail({ id }: { id: number }) {
             {episodes.children.map((e, n) => {
               const p = progressOf(e);
               return (
-                <button key={e.id} className="episode" data-fid={`ep-${e.id}`} data-autofocus={(!next && n === 0) || undefined} onClick={() => nav.push({ name: "player", id: e.id, resume: true })}>
+                <button key={e.id} className="episode" data-fid={`ep-${e.id}`} data-autofocus={(!next && n === 0) || undefined} onClick={() => nav.push({ name: "player", id: e.id, rid, resume: true })}>
                   <div className="ep-still">
                     {e.still ? <img src={media(e.still) ?? undefined} alt="" loading="lazy" /> : <div className="no-art" />}
                     {p !== null && <div className="bar"><div style={{ width: `${p * 100}%` }} /></div>}
