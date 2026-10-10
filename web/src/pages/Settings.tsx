@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, LIBRARIES_CHANGED, type ServerLibrary, type ServerStatus } from "../api";
 import { useAuth } from "../auth";
+import AboutSettings from "../components/AboutSettings";
 import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
 import { HomeSettings } from "../components/HomeSettings";
+import { TvSettings } from "../components/TvSettings";
 import Icon from "../components/Icon";
 import { UnrecognizedFiles } from "../components/Identify";
 import MusicSettings from "../components/MusicSettings";
@@ -268,6 +270,13 @@ function AddLibrary({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
   );
 }
 
+/** For non-admins: which BAMS this is (updating is an admin's job, Settings -> About). */
+function ServerVersion() {
+  const [v, setV] = useState<string | null>(null);
+  useEffect(() => { api.get<ServerStatus>("/api/status").then((s) => setV(s.version)).catch(() => {}); }, []);
+  return v ? <p className="fine-print">BAMS {v}</p> : null;
+}
+
 export default function Settings() {
   const { user } = useAuth();
   if (!user.is_admin) {
@@ -275,8 +284,9 @@ export default function Settings() {
       <div className="page narrow">
         <div className="page-head"><h1>Settings</h1></div>
         <div className="section-head"><h2 className="section-title">Your account</h2></div>
-        <div className="lib-list"><AccountSettings /><HomeSettings /></div>
+        <div className="lib-list"><AccountSettings /><TvSettings /><HomeSettings /></div>
         <p className="muted">Libraries and server settings are managed by an admin.</p>
+        <ServerVersion />
       </div>
     );
   }
@@ -385,10 +395,13 @@ function AdminSettings() {
       <div className="lib-list"><HomeSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Accounts</h2></div>
-      <div className="lib-list"><AccountSettings /><UsersSettings /></div>
+      <div className="lib-list"><AccountSettings /><TvSettings /><UsersSettings /></div>
 
       <div className="section-head" id="security"><h2 className="section-title">Security</h2></div>
       <SecuritySettings />
+
+      <div className="section-head" id="about"><h2 className="section-title">About</h2></div>
+      <div className="lib-list"><AboutSettings /></div>
     </div>
   );
 }

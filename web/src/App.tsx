@@ -11,6 +11,7 @@ import { PlaylistPage } from "./pages/Music";
 import Player from "./pages/Player";
 import Search from "./pages/Search";
 import Settings from "./pages/Settings";
+import LinkTv from "./pages/LinkTv";
 import { useEffect } from "react";
 
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/playlist/:id" element={<PlaylistPage />} />
           <Route path="/search" element={<Search />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/link" element={<LinkTv />} />
           <Route path="*" element={<div className="page"><h1>Nothing here</h1></div>} />
         </Routes>
       </div>

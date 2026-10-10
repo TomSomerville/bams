@@ -676,7 +676,7 @@ def keyframes(path: Path, timeout: float = 900) -> list[float] | None:
 
 
 def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None, out_dir: Path,
-                 audio_index: int = 0, channels: int = 2, copy_audio: bool = False) -> list[str]:
+                 audio_index: int = 0, channels: int = 2, copy_audio: bool = False, ts: bool = False) -> list[str]:
     """The audio-only remux as HLS: video copied, audio -> AAC (or copied too: `copy_audio`, Dolby pass-through),
     one fMP4 segment per source keyframe (`{n}.m4s`, with `init_{segment}.mp4`), numbered from `segment`.
 
@@ -686,7 +686,9 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
     Like `hls_cmd`, timestamps are kept so runs line up (`frag_discont`: fMP4 fragments carry the real decode
     time instead of counting from 0 in every run). The cuts come from the source: a tiny hls_time makes the
     muxer cut at every keyframe, which are exactly the boundaries the playlist lists. fMP4 rather than
-    MPEG-TS so HEVC/AV1 copy cleanly for MSE."""
+    MPEG-TS so HEVC/AV1 copy cleanly for MSE. `ts`: MPEG-TS segments (`{n}.ts`, no init file) for players that
+    take no fMP4 HLS (Samsung's AVPlay); TS packets carry their own timestamps, so runs line up without
+    frag_discont."""
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -695,11 +697,15 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
         cmd += ["-ss", f"{seek:.3f}"]
     cmd += ["-copyts", "-start_at_zero", "-i", str(path), "-map", "0:v:0", "-map", f"0:a:{audio_index}?",
             "-c:v", "copy"]
-    if video_codec == "HEVC":
-        cmd += ["-tag:v", "hvc1"]
+    if video_codec == "HEVC" and not ts:
+        cmd += ["-tag:v", "hvc1"]  # the MP4 tag browsers expect; TS has no such tag
     cmd += [*_aac(channels, copy_audio), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",
-            "-max_muxing_queue_size", "1024",
-            "-f", "hls", "-hls_time", "0.1", "-hls_segment_type", "fmp4",
+            "-max_muxing_queue_size", "1024", "-f", "hls", "-hls_time", "0.1"]
+    if ts:
+        return [*cmd, "-hls_segment_type", "mpegts", "-hls_list_size", "0", "-hls_flags", "temp_file",
+                "-start_number", str(segment), "-hls_segment_filename", str(out_dir / "%d.ts"),
+                str(out_dir / f"ffmpeg_{segment}.m3u8")]
+    cmd += ["-hls_segment_type", "fmp4",
             "-hls_segment_options", "movflags=+frag_discont", "-hls_fmp4_init_filename",
             str(out_dir / f"init_{segment}.mp4"),  # absolute: a bare name lands in FFmpeg's working dir
             "-hls_list_size", "0", "-hls_flags", "temp_file",  # a segment appears under its name once complete

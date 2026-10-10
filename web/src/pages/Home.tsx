@@ -52,6 +52,17 @@ function Hero({ items }: { items: ItemSummary[] }) {
   );
 }
 
+/** A row whose items the server picks (newest first, random...): fetched on its own, so it isn't limited to the
+ *  items Home loads for the banner. Hidden while empty, or below `min` items. */
+function ItemsRow({ title, path, to, min = 1 }: { title: string; path: string; to?: string; min?: number }) {
+  const { data } = useApi<ItemSummary[]>(path);
+  if (!data || data.length < min) return null;
+  return <Row title={title} to={to}>{data.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
+}
+
+const ROW_SIZE = 30;
+const TOP_RATING = 7;  // "Top Rated" picks at random from titles rated at least this (TMDB, out of 10)
+
 export default function Home() {
   const { data: libs, error } = useApi<ServerLibrary[]>("/api/libraries");
   const { data: items } = useApi<ItemSummary[]>("/api/items?sort=added&limit=500");
@@ -68,7 +79,6 @@ export default function Home() {
     for (const i of items ?? []) for (const g of i.genres) n.set(g, (n.get(g) ?? 0) + 1);
     return [...n.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([g]) => g);
   }, [items]);
-  const rated = useMemo(() => (items ?? []).filter((i) => i.rating).sort((a, b) => b.rating! - a.rating!).slice(0, 20), [items]);
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   if (libs && !libs.length) {
@@ -103,12 +113,15 @@ export default function Home() {
           if (r.id === "recent") {
             return recent.length > 0 && <Row key={r.id} title={r.label}>{recent.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
           }
+          // Top Rated and the genres: a different random pick, in random order, each time Home opens
           if (r.id === "top_rated") {
-            return rated.length >= 4 && <Row key={r.id} title={r.label}>{rated.map((i) => <PosterCard key={i.id} item={i} />)}</Row>;
+            return <ItemsRow key={r.id} title={r.label} min={4}
+              path={`/api/items?sort=random&min_rating=${TOP_RATING}&limit=${ROW_SIZE}`} />;
           }
           if (r.id === "genres") {
             return topGenres.map((g) => (
-              <Row key={`genre:${g}`} title={g}>{items.filter((i) => i.genres.includes(g)).map((i) => <PosterCard key={i.id} item={i} />)}</Row>
+              <ItemsRow key={`genre:${g}`} title={g}
+                path={`/api/items?sort=random&genre=${encodeURIComponent(g)}&limit=${ROW_SIZE}`} />
             ));
           }
           const l = libs.find((x) => `lib:${x.id}` === r.id)!;
@@ -118,10 +131,9 @@ export default function Home() {
               <Row key={r.id} title={r.label} to={`/library/${l.id}`}>{la.map((a) => <AlbumCard key={a.id} item={a} />)}</Row>
             );
           }
-          const li = items.filter((i) => i.library_id === l.id).sort((a, b) => a.title.localeCompare(b.title));
-          return li.length > 0 && (
-            <Row key={r.id} title={r.label} to={`/library/${l.id}`}>{li.map((i) => <PosterCard key={i.id} item={i} />)}</Row>
-          );
+          // newest first; a show with new episodes counts as new again
+          return <ItemsRow key={r.id} title={r.label} to={`/library/${l.id}`}
+            path={`/api/libraries/${l.id}/items?sort=recent&limit=${ROW_SIZE}`} />;
         })}
       </div>
     </div>

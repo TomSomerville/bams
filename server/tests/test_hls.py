@@ -304,3 +304,11 @@ def test_transcoding_limit_setting(tmp_path):
     assert c.get("/api/settings").json()["max_transcodes"] == 3
     assert c.get("/api/status").json()["transcodes"] == {"running": 0, "limit": 3}
     assert c.put("/api/settings/transcoding", json={"max_transcodes": -1}).status_code == 422
+
+
+def test_copy_variant_in_mpeg_ts():
+    """The TV app's copy: TS segments, no fMP4 header (Samsung's player takes no fMP4 HLS)."""
+    c = hls.Variant(0, hls.copy_bounds([0.042, 2.0, 7.5]), 9.0, Path("d"), copy=True, ts=True)
+    pl = c.playlist()
+    assert "#EXT-X-MAP" not in pl and "#EXTINF:2.000,\n0.ts" in pl and "#EXT-X-VERSION:3" in pl
+    assert c.file(2) == Path("d") / "2.ts"

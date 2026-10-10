@@ -61,6 +61,24 @@ def test_mark_show_watched_and_unwatched(tv):
     assert lib_show["episodes"] == 5 and lib_show["unwatched"] == 1
 
 
+def test_home_row_sorts(tv):
+    """Home: a show with a newly added episode comes before newer shows ("recent"); random order; top rated."""
+    app, c, ep, show = tv
+    con = connect(app.state.paths.db)
+    con.execute("UPDATE items SET added_at=100")
+    con.execute("UPDATE items SET added_at=200 WHERE kind='show' AND title='Other'")
+    con.execute("UPDATE items SET added_at=300, rating=8.1 WHERE id=?", (ep[(2, 1)],))  # a new Show episode
+    con.execute("UPDATE items SET rating=7.5 WHERE kind='show' AND title='Other'")
+    con.execute("UPDATE items SET rating=6.0 WHERE id=?", (show,))
+    con.commit()
+    con.close()
+    lib = c.get("/api/libraries").json()[0]["id"]
+    assert [i["title"] for i in c.get(f"/api/libraries/{lib}/items?sort=recent").json()][:2] == ["Show", "Other"]
+    assert [i["title"] for i in c.get(f"/api/libraries/{lib}/items?sort=added").json()][0] == "Other"
+    assert {i["title"] for i in c.get("/api/items?sort=random&min_rating=7").json()} == {"Other"}  # shows/movies only
+    assert len(c.get("/api/items?sort=random&limit=1").json()) == 1
+
+
 def test_continue_watching(tv):
     app, c, ep, show = tv
     assert c.get("/api/continue").json() == []
@@ -162,3 +180,13 @@ def test_home_rows_pref(tv):
     kid = signed_in(app, "Kid", admin=False)
     assert kid.get("/api/auth/state").json()["user"]["prefs"]["home_rows"] == []
     assert c.put("/api/me/prefs", json={"home_rows": []}).json()["home_rows"] == []  # back to the default
+
+
+def test_an_episode_only_opened_doesnt_hide_the_show(tv):
+    """Opening the next episode for a few seconds (or a play that failed) leaves position 0: Continue Watching
+    still offers where you really were."""
+    app, c, ep, show = tv
+    c.put(f"/api/items/{ep[(1, 1)]}/progress", json={"position": 400, "duration": 1300})
+    c.put(f"/api/items/{ep[(1, 2)]}/progress", json={"position": 5, "duration": 1300})  # stored as 0
+    [r] = c.get("/api/continue").json()
+    assert r["id"] == ep[(1, 1)] and r["reason"] == "resume"

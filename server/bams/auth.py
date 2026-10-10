@@ -189,6 +189,9 @@ def _digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+digest = _digest  # what `sessions.token` stores for a token (media tickets name sessions by it)
+
+
 def new_session(con: sqlite3.Connection, user_id: int, user_agent: str | None = None) -> str:
     token = secrets.token_urlsafe(32)
     t = now()
@@ -204,7 +207,11 @@ def session_user(con: sqlite3.Connection, token: str | None) -> sqlite3.Row | No
     hourly, so a stream's many requests don't each write to the DB."""
     if not token or len(token) > 100:
         return None
-    d = _digest(token)
+    return session_user_by_digest(con, _digest(token))
+
+
+def session_user_by_digest(con: sqlite3.Connection, d: str) -> sqlite3.Row | None:
+    """session_user for a session named by its stored digest (a media ticket's)."""
     r = con.execute("""SELECT u.*, s.last_seen_at AS seen FROM sessions s JOIN users u ON u.id=s.user_id
                        WHERE s.token=?""", (d,)).fetchone()
     t = now()
