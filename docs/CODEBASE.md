@@ -81,7 +81,7 @@ bams/
 │       ├── settings.tsx       SettingsProvider: server TMDB status (configured/last4), serverError
 │       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
-│       ├── homeRows.ts        Home's rows: defaultRows(libs) (default order, labels) + homeRows(saved, libs) (user order merged with what exists)
+│       ├── homeRows.ts        Home's rows: defaultRows(libs, genres) (default order, labels; one `genre:<name>` row per genre) + homeRows(saved, libs, genres) (user order merged with what exists; an old `genres` entry expands in place)
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
@@ -109,7 +109,7 @@ bams/
 │       │   ├── TmdbSettings.tsx  TMDB key card (save = server-verified; test; replace; remove)
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
-│           ├── Home.tsx       Hero + rows (Continue Watching, Recently Added, libraries, Top Rated, genres) in the user's order (homeRows.ts)
+│           ├── Home.tsx       Hero + rows (Continue Watching, Recently Added, libraries, Top Rated, one row per genre from /api/genres) in the user's order (homeRows.ts)
 │           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id[?season=<season id>]: show (season tabs → episodes, watched toggles) or movie (Resume, TechInfo); music → MusicDetail
 │           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs), artist page, album page + TrackList, Fix match,
@@ -470,6 +470,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `POST /api/libraries/{id}/scan[?rematch=true]` → `{accepted, running, queued}` | queue a scan | Settings |
 | `GET /api/scans?library_id=` | current + history | — |
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
+| `GET /api/genres` | every show/movie genre `[{name, count}]`, most titles first | Home, HomeSettings (genre rows) |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
 | `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback; a movie's/episode's unprobed files are probed now) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |
 | `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback`, `start`/`end` (CUE) | Music pages, NowPlaying |

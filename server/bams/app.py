@@ -1127,6 +1127,15 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                            (*args, limit)).fetchall()
         return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
 
+    @app.get("/api/genres")
+    def all_genres(con=Depends(db)):
+        """Every genre of the shows/movies in any library, most titles first (Home's genre rows)."""
+        n: dict[str, int] = {}
+        for r in con.execute("SELECT genres FROM items WHERE kind IN ('show','movie') AND genres IS NOT NULL"):
+            for g in jload(r["genres"]) or []:
+                n[g] = n.get(g, 0) + 1
+        return [{"name": g, "count": c} for g, c in sorted(n.items(), key=lambda x: (-x[1], x[0].lower()))]
+
     @app.get("/api/items/{item_id}")
     def get_item(item_id: int, con=Depends(db), me=Depends(current_user)):
         r = con.execute(f"{ITEM_SELECT} WHERE id=?", (item_id,)).fetchone()

@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 268 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 269 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -161,7 +161,8 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   directly, or a rescan would undo what an admin entered (`files.manual`).
 - **The owner's :8484 is the installed Windows service** (`C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`), not
   this checkout: restarting it doesn't load repo changes; a new installer does, and running it needs the owner.
-- **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `recent`, `lib:<id>`, `top_rated`, `genres`).
+- **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `recent`, `lib:<id>`, `top_rated`, `genre:<name>`; older saves have one `genres`
+  entry, which `homeRows()` expands in place: keep that).
   Renaming an id silently resets that row for everyone who reordered; add new rows in `homeRows.ts` `defaultRows`.
 - **Security state lives in `security.db`, not `bams.db`** (no migration; `CREATE TABLE IF NOT EXISTS`). Login tests
   that fail a password and retry within a second get 429 (the per-account wait): advance the `clock` fixture

@@ -62,6 +62,12 @@
       "port": 8493
     },
     {
+      "name": "bams-test-8494",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\ec7fe8c6-b964-4d98-9c32-de649ccea85b\\scratchpad\\data", "serve", "--port", "8494"],
+      "port": 8494
+    },
+    {
       "name": "tv",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "tv", "run", "dev"],

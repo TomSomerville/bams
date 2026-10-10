@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { HomeRowPref, ServerLibrary } from "../api";
+import type { Genre, HomeRowPref, ServerLibrary } from "../api";
 import { useAuth } from "../auth";
 import { homeRows, type HomeRow } from "../homeRows";
 import { useApi } from "../useApi";
@@ -10,9 +10,10 @@ import { useReorder } from "./useReorder";
 export function HomeSettings() {
   const { prefs, setPrefs } = useAuth();
   const { data: libs } = useApi<ServerLibrary[]>("/api/libraries");
+  const { data: genres } = useApi<Genre[]>("/api/genres");
   const [rows, setRows] = useState<HomeRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { if (libs) setRows(homeRows(prefs.home_rows, libs)); }, [libs, prefs.home_rows]);
+  useEffect(() => { if (libs && genres) setRows(homeRows(prefs.home_rows, libs, genres)); }, [libs, genres, prefs.home_rows]);
 
   const save = (next: HomeRow[] | null) => {
     if (next) setRows(next);
@@ -62,7 +63,7 @@ export function HomeSettings() {
         </ol>
       )}
       <div className="key-row">
-        <span className="muted">Rows with nothing in them yet stay hidden. New libraries appear switched on.</span>
+        <span className="muted">Rows with nothing in them yet stay hidden. New libraries and genres appear switched on.</span>
         <span className="spacer" />
         <button className="btn small ghost" disabled={!prefs.home_rows.length} onClick={() => save(null)}>
           Reset to default
