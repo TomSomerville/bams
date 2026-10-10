@@ -3,6 +3,35 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.7.0 (2026-10-10)
+
+More than one BAMS server at a time, server names, and music on the TV.
+
+### New
+- **Connect to other BAMS servers.** The web app and the TV app are clients that can show several BAMS servers at
+  once, each with an account on that server. On the web: **Settings → Connect to a server** (next to Add library):
+  type an IP address or domain name and sign in with an account there. On the TV: **Settings → Other BAMS servers →
+  Add a server**: pick it from the network scan (or type it) and link it with a code, like the first one. Their
+  libraries appear in the sidebar / menu under the server's name. Each browser and each TV keeps its **own** list
+  (one TV can have six servers, another three). Libraries of other servers can be hidden (web and TV) and renamed (web),
+  for that browser or TV only. What you watch on another server counts for your account there.
+- **Home and Search combine every server.** Continue Watching (most recent first), Recently Added (newest first),
+  Top Rated and every genre row mix titles from all your servers; Search looks in all of them. The web and the TV
+  show exactly the same rows.
+- **Name your server**: **Settings → This server → Server name** (admins). By default it's "*first admin*'s BAM
+  Server". It's what TVs and other browsers list it as.
+- **Music on the Samsung TV app**: music libraries (Artists, Albums, Playlists), artist and album pages, playlists, a
+  music bar with previous / play-pause / next / stop, and the remote's media keys. Music keeps playing while you browse
+  and pauses when a video starts. Music is in the TV's Home and Search too.
+
+### Changed
+- The TV's "find your server" screen stops looking around the network as soon as you pick or type an address (a typed
+  address could time out behind the scan).
+
+Browsers and TVs talk to each server directly: each server must be reachable from them (on your home network it is).
+A BAMS page opened over https can't use a server that only has plain http. Update the TV app with the new
+`BAMS-SamsungTV-0.7.0.wgt` as in the README.
+
 ## 0.6.3 (2026-10-09)
 
 ### Changed

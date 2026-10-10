@@ -6,11 +6,13 @@ import AboutSettings from "../components/AboutSettings";
 import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
 import { HomeSettings } from "../components/HomeSettings";
+import { ConnectServer, RemoteServers } from "../components/RemoteSettings";
 import { TvSettings } from "../components/TvSettings";
 import Icon from "../components/Icon";
 import { UnrecognizedFiles } from "../components/Identify";
 import MusicSettings from "../components/MusicSettings";
 import SecuritySettings from "../components/SecuritySettings";
+import ServerNameSettings from "../components/ServerNameSettings";
 import TranscodeSettings from "../components/TranscodeSettings";
 import WatchSettings from "../components/WatchSettings";
 import TmdbSettings from "../components/TmdbSettings";
@@ -279,12 +281,22 @@ function ServerVersion() {
 
 export default function Settings() {
   const { user } = useAuth();
+  const [connecting, setConnecting] = useState(false);
   if (!user.is_admin) {
     return (
       <div className="page narrow">
         <div className="page-head"><h1>Settings</h1></div>
         <div className="section-head"><h2 className="section-title">Your account</h2></div>
         <div className="lib-list"><AccountSettings /><TvSettings /><HomeSettings /></div>
+        <div className="section-head" id="servers">
+          <h2 className="section-title">Other BAMS servers</h2>
+          {!connecting && <button className="btn primary small" onClick={() => setConnecting(true)}>
+            <Icon name="server" size={16} /> Connect to a server
+          </button>}
+        </div>
+        <p className="muted">Other BAMS servers this browser is connected to, each with an account there. Their libraries
+          show in your sidebar under the server's name. The list, names and which ones show are kept in this browser.</p>
+        <RemoteServers connecting={connecting} setConnecting={setConnecting} />
         <p className="muted">Libraries and server settings are managed by an admin.</p>
         <ServerVersion />
       </div>
@@ -298,6 +310,7 @@ function AdminSettings() {
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const wasBusy = useRef(false);
 
   const load = useCallback(async () => {
@@ -348,11 +361,19 @@ function AdminSettings() {
     <div className="page narrow">
       <div className="page-head"><h1>Settings</h1></div>
 
+      <div className="section-head"><h2 className="section-title">This server</h2></div>
+      <div className="lib-list"><ServerNameSettings /></div>
+
       <div className="section-head">
         <h2 className="section-title">Libraries</h2>
-        {!adding && <button className="btn primary small" onClick={() => setAdding(true)} disabled={!libs}>
-          <Icon name="plus" size={16} /> Add library
-        </button>}
+        <span className="head-actions">
+          {!adding && <button className="btn primary small" onClick={() => setAdding(true)} disabled={!libs}>
+            <Icon name="plus" size={16} /> Add library
+          </button>}
+          {!connecting && <button className="btn ghost small" onClick={() => setConnecting(true)}>
+            <Icon name="server" size={16} /> Connect to a server
+          </button>}
+        </span>
       </div>
       <p className="muted">
         Folders can be local drives or mounted network shares. On Windows, use UNC paths (<code>\\nas\media</code>) when
@@ -365,6 +386,10 @@ function AdminSettings() {
       )}
       <div className="lib-list">
         {adding && <AddLibrary onCancel={() => setAdding(false)} onDone={() => { setAdding(false); changed(); }} />}
+        {connecting && <ConnectServer onCancel={() => setConnecting(false)} onDone={() => {
+          setConnecting(false);
+          document.getElementById("servers")?.scrollIntoView({ behavior: "smooth" });
+        }} />}
         {err && <p className="key-msg bad">{err}</p>}
         {libs?.map((l, i) => {
           const move = (to: number) => () => {
@@ -377,6 +402,12 @@ function AdminSettings() {
         })}
         {libs && !libs.length && !adding && <p className="muted">No libraries yet. Add one to start indexing.</p>}
       </div>
+
+      <div className="section-head" id="servers"><h2 className="section-title">Other BAMS servers</h2></div>
+      <p className="muted">Other BAMS servers this browser is connected to, each with an account there. Their libraries show
+        in your sidebar under the server's name. The list, names and which ones show are kept in this browser (each
+        browser and TV has its own) and change nothing on the other server.</p>
+      <RemoteServers connecting={false} setConnecting={setConnecting} />
 
       <div className="section-head" id="unrecognized"><h2 className="section-title">Unrecognized files</h2></div>
       <p className="muted">Files the scan found but couldn't place from their names. Paste a TMDB or IMDb link, or say

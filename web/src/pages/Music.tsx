@@ -6,7 +6,7 @@ import { AlbumCard, ArtistCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import MusicFixMatch from "../components/MusicFixMatch";
 import { fmtClock, fmtLength, plural } from "../format";
-import { api } from "../api";
+import { useScope } from "../servers";
 import { useMusic } from "../music";
 import { useApi } from "../useApi";
 
@@ -18,6 +18,7 @@ const ARTIST_SORTS = { title: "Name", added: "Recently added" } as const;
 const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists" } as const;
 
 export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
+  const { libName } = useScope();
   const [tab, setTab] = useState<keyof typeof TABS>("artist");
   const [albumSort, setAlbumSort] = useState<keyof typeof ALBUM_SORTS>("artist");
   const [artistSort, setArtistSort] = useState<keyof typeof ARTIST_SORTS>("title");
@@ -34,7 +35,7 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>{lib.name}</h1>
+        <h1>{libName(lib.id, lib.name)}</h1>
         <div className="segmented" role="tablist">
           {(Object.keys(TABS) as (keyof typeof TABS)[]).map((k) => (
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""}
@@ -142,12 +143,13 @@ function Header({ item, kicker, sub, round, children }: {
 
 function Actions({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const music = useMusic();
+  const { rid, remote } = useScope();
   const [fixing, setFixing] = useState(false);
   return (
     <div className="actions">
-      <button className="btn primary" onClick={() => music.playItem(item.id)}><Icon name="play" /> Play</button>
-      <button className="btn ghost" onClick={() => music.playItem(item.id, { shuffle: true })}><Icon name="shuffle" /> Shuffle</button>
-      <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>
+      <button className="btn primary" onClick={() => music.playItem(item.id, { rid })}><Icon name="play" /> Play</button>
+      <button className="btn ghost" onClick={() => music.playItem(item.id, { shuffle: true, rid })}><Icon name="shuffle" /> Shuffle</button>
+      {(!remote || remote.is_admin) && <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>}
       {fixing && <MusicFixMatch item={item} onClose={(changed) => { setFixing(false); if (changed) reload(); }} />}
     </div>
   );
@@ -243,6 +245,7 @@ function formatNote(tracks: QueueTrack[]): string | null {
 }
 
 function AlbumView({ item, reload }: { item: ItemDetail; reload: () => void }) {
+  const { to } = useScope();
   const { data: tracks } = useApi<QueueTrack[]>(`/api/items/${item.id}/tracks`);
   const artist = item.ancestors[0];
   const note = tracks ? formatNote(tracks) : null;
@@ -250,7 +253,7 @@ function AlbumView({ item, reload }: { item: ItemDetail; reload: () => void }) {
     <div className="detail music-detail">
       <Header item={item} kicker={[item.extra.type ?? "Album", ...(item.extra.secondary_types ?? [])].join(" · ")}
         sub={<>
-          {artist && <Link to={`/title/${artist.id}`} className="music-artist-link">{artist.title}</Link>}
+          {artist && <Link to={to(`/title/${artist.id}`)} className="music-artist-link">{artist.title}</Link>}
           {item.year && <span>{item.year}</span>}
           <span>{plural(item.children.length, "track")}</span>
           {item.duration ? <span>{fmtLength(item.duration)}</span> : null}
@@ -285,13 +288,14 @@ function Mosaic({ covers, name }: { covers: string[]; name: string }) {
 
 function PlaylistCard({ p }: { p: PlaylistSummary }) {
   const music = useMusic();
+  const { call, to } = useScope();
   const play = async (e: React.MouseEvent) => {
     e.preventDefault();
-    const pl = await api.get<Playlist>(`/api/playlists/${p.id}`);
+    const pl = await call.get<Playlist>(`/api/playlists/${p.id}`);
     music.playTracks(pl.tracks);
   };
   return (
-    <Link to={`/playlist/${p.id}`} className="poster-card album-card">
+    <Link to={to(`/playlist/${p.id}`)} className="poster-card album-card">
       <div className="poster-frame square">
         <Mosaic covers={p.covers} name={p.name} />
         {p.track_count > 0 && (
@@ -310,6 +314,7 @@ function PlaylistCard({ p }: { p: PlaylistSummary }) {
 export function PlaylistPage() {
   const { id } = useParams();
   const music = useMusic();
+  const { to, libName } = useScope();
   const { data: p, error } = useApi<Playlist>(`/api/playlists/${id}`);
   if (error) return <div className="page"><h1>Playlist not found</h1><p className="muted">{error}</p></div>;
   if (!p) return <div className="page muted">Loading…</div>;
@@ -321,7 +326,7 @@ export function PlaylistPage() {
           <div className="hero-kicker">Playlist</div>
           <h1>{p.name}</h1>
           <div className="meta">
-            <Link to={`/library/${p.library_id}`} className="music-artist-link">{p.library_name}</Link>
+            <Link to={to(`/library/${p.library_id}`)} className="music-artist-link">{libName(p.library_id, p.library_name)}</Link>
             <span>{plural(p.track_count, "track")}</span>
             {p.duration ? <span>{fmtLength(p.duration)}</span> : null}
           </div>

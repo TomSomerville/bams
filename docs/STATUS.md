@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-08** (release 0.2.0).
+Last updated: **2026-10-10** (release 0.7.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -138,10 +138,16 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-09 | TV signs in by **link code** (`/link` page + QR) or name+password, getting an ordinary **session token** sent as `Authorization: Bearer`; media through **ticket paths** `/api/t/<ticket>/…` (HMAC over the session digest, 24 h, key per process, GET-only, files/hls/images only); CORS `*` without credentials | The packaged app runs from its own origin (no cookies); AVPlay and `<img>` can't send headers; a ticket in a URL can't sign anyone in and dies with the session |
 | 10-09 | On the TV **everything the TV decodes is played as copy-HLS in MPEG-TS** (`hls?remux&ts&passthrough`), not from the file | The owner's 2022 Frame (Tizen 6.5) **can't seek** in a progressively streamed file (AVPlay and `<video>` both: one `bytes=0-` request, then `PLAYER_ERROR_SEEK_FAILED`), so resume/skip froze; and it **rejects fMP4 HLS** (`NOT_SUPPORTED_FILE`). Copy-HLS in TS seeks fine and converts nothing (AC3/EAC3 copied) |
 | 10-09 | Continue Watching **ignores episodes opened but not really watched** (position 0, not watched) when deciding what a show offers | Opening the next episode for a few seconds (or a play that failed) hid a show the viewer was half-way through |
+| 10-10 | **The web app and the TV app are clients of any number of BAMS servers.** Each browser and each TV keeps its own list (localStorage) and talks to each server **directly** (bearer token from `/api/auth/token`, media through that server's tickets); servers store nothing about other servers | Owner: "just clients that front the servers' contents… 6 servers on one TV, 3 on another, 4 on the desktop". A first version kept connections per account on the home server and proxied everything through it; dropped for this. Cost: every device must reach every server itself (an https page can't use a plain-http server) |
+| 10-10 | Each server's **history stays with the account on that server**; libraries of other servers can be hidden (web + TV) and renamed (web) per device | What you watch where is that server's business; per-device lists mean per-device names |
+| 10-10 | **Home and Search combine every server, identically on web and TV** (`web/src/everywhere.ts`, imported by the TV): Continue Watching by `last_watched_at` (new field; older servers interleaved), Recently Added by `added_at`, Top Rated and genres interleaved, genres merged by name; a library's own row stays that library's (first server's libraries only, from its `home_rows`) | Owner: "Home and search should show a combined ALL servers content… TV and Web app should have a uniform view. Nothing different." One shared module so they can't drift |
+| 10-10 | A **ticket path accepts POST/DELETE with the session's own cookie/bearer** (a ticket alone still only reads media) | The web keeps another server's media links as ticket URLs; `hls_url` (POST) and closing a session (DELETE) are such links |
+| 10-10 | **Server name** = admin setting `server_name`, default "<oldest admin>'s BAM Server" (owner's wording), returned by `/api/hello` | Owner request; the hostname said nothing to people choosing a server |
+| 10-10 | **Music on the TV** with one HTML `<audio>` (not AVPlay), no gapless | AVPlay is the video player and owns the screen; `<audio>` plays MP3/AAC/FLAC and falls back to the server's conversion on an error |
 
 ## 4. Built so far
 
-### Server (`server/`, ~7,500 lines + 269 tests)
+
 - **Libraries:** create/rename/delete, add/remove folders, scan interval, order (`PUT /api/libraries/order`). Validation: folder must exist and be
   readable, can't overlap the data dir or another library. Removing a library never touches media.
 - **Read-only enforcement:** `readonly.py` (RO opener, walker, audit hook blocking ~25 write operations
@@ -254,6 +260,13 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   subtitles burned in), up-next countdown. Packaging: `npm run package` (`scripts/wgt.mjs`) signs with the Tizen
   Studio profile `BAMS`, `--install --run` puts it on the TV, `--release` copies `dist/BAMS-SamsungTV-<v>.wgt`.
 - Web: Settings → Your TVs (`TvSettings.tsx`) and `/link` (`LinkTv.tsx`).
+- More servers (0.7.0): Settings → Other BAMS servers (add with the find/link screens, link again, remove, show/hide
+  each library); their libraries in the menu under the server's name; Home and Search combined with the web's rows
+  (`web/src/everywhere.ts`). Music (0.7.0): music libraries, artist/album/playlist pages, a music bar, media keys.
+
+### More servers (0.7.0, web + TV)
+- Clients keep their own server lists: web `servers.tsx` (`bams.servers` in localStorage; `/r/<rid>/…` pages are the
+  same page components scoped to that server), TV `api.ts` extras. Server name setting (Settings → This server).
 
 ### Docs
 README.md, CLAUDE.md, docs/PLAN.md, docs/STATUS.md, docs/CODEBASE.md, docs/FORMATS.md, docs/READ-ONLY.md,
@@ -269,7 +282,8 @@ Roughly in priority order:
    editing playlists in BAMS (only imported today); `.cue` entries inside playlists.
 3. **ISO / DVD / Blu-ray folders** (phase 3).
 4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning).
-5. **TV app leftovers:** music on the TV; Samsung TVs other than the owner's 2022 Frame untested (codec table in
+5. **TV app leftovers:** the TV's music has no queue view/reorder and no gapless hand-over; renaming other servers'
+   libraries is web-only (the TV only hides them); Samsung TVs other than the owner's 2022 Frame untested (codec table in
    `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
    README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
 6. **UI redesign** from the owner's mockups.
@@ -308,6 +322,34 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-10: Several BAMS servers per client, server names, combined Home/Search, music on the TV (release 0.7.0)
+- **What / why:** owner: "I should be able to connect to and have more than 1 BAMS server", then "the webapp and tv
+  app should just be clients… 6 servers on the TV app, 3 on another, 4 on the desktop", "Home and search should show
+  a combined ALL servers content", "TV and Web app should have a uniform view", "music libraries don't show up on tv
+  app", "allow me to name my server". Web: Connect to a server (next to Add library), other servers' libraries in the
+  sidebar (rename/hide per browser), `/r/<rid>/…` pages; TV: Settings → Other BAMS servers (Connect/Link screens reused
+  with `adding`/`target`), the rail grouped by server; both: Home + Search across every server from the shared
+  `web/src/everywhere.ts`; TV music (library tabs, artist/album/playlist, `music.tsx` player, NowPlaying bar, media
+  keys, video pauses music); server name. A first design (connections stored per account on the server, a proxy
+  `/api/remote/<id>/…`) was built, then replaced before release at the owner's request (clients only).
+- **Files:** server `app.py` (LoginRequired: ticket paths take cookie/bearer for non-GET; `server_name`,
+  `PUT /api/settings/server-name`, `/api/hello` name, `/api/continue` `last_watched_at`), `watch.py`
+  (`continue_watching` returns when); web `servers.tsx`, `everywhere.ts`, `useApi.ts`, `components/RemoteSettings.tsx`,
+  `ServerNameSettings.tsx`, `Sidebar.tsx`, `Cards.tsx`, `pages/Home.tsx`, `Search.tsx`, `Player.tsx`, `Detail.tsx`,
+  `Library.tsx`, `Music.tsx`, `Settings.tsx`, `App.tsx`, `music.tsx`; TV `api.ts`, `App.tsx`, `Rail.tsx`, `Cards.tsx`,
+  `music.tsx`, `screens/Music.tsx`, `Home.tsx`, `Search.tsx`, `Library.tsx`, `Detail.tsx`, `Player.tsx`,
+  `Settings.tsx`, `Connect.tsx`, `Link.tsx`; tests `test_devices.py` (ticket non-GET, `test_server_name`),
+  `test_watch.py` (`last_watched_at`); CHANGELOG, `config.VERSION` 0.7.0.
+- **Verified:** 271 tests pass. Two scratch servers (:8495 copy of the dev DB, :8496 fresh): web connected to the
+  other (CORS + bearer + tickets), browsed, played EAC3 copy-HLS with a seek to 40 min, progress and session close
+  (204) on that server, music; the TV app in a browser added the server with a link code, played copy-HLS in TS with
+  subtitles, hid a library; web and TV Home showed the same 14 rows with the same counts; Search found a title on
+  both servers; TV music played album tracks from the other server, Next, video paused it. Installed on the owner's
+  Frame (`npm run package -- --install --run`).
+- **Left open:** library rows on Home only for the first server's libraries; a title on two servers shows twice;
+  Continue Watching from servers before 0.7.0 is interleaved (no `last_watched_at`); TV music: no queue view, no
+  gapless; renaming other servers' libraries on the TV.
 
 ### 2026-10-09: Every genre on Home, each one its own row in Settings (release 0.6.2)
 - **What / why:** owner saw genres in the library filters that Home didn't show. Home only counted the 500 newest

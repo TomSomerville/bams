@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { api, LIBRARIES_CHANGED, type ServerLibrary } from "../api";
 import { useAuth } from "../auth";
+import { useRemotes } from "../servers";
 import { useApi } from "../useApi";
 import { LIB_TYPES } from "../format";
 import Icon from "./Icon";
@@ -9,6 +10,7 @@ import { useReorder } from "./useReorder";
 
 export default function Sidebar() {
   const { user } = useAuth();
+  const { servers } = useRemotes();
   const { data, reload } = useApi<ServerLibrary[]>("/api/libraries");
   const [libs, setLibs] = useState<ServerLibrary[] | null>(null);
   useEffect(() => setLibs(data), [data]);
@@ -56,6 +58,26 @@ export default function Sidebar() {
             </div>
           ))}
         </div>
+        {/* other BAMS servers this account is connected to: their libraries, as named and chosen in Settings */}
+        {servers?.map((s) => {
+          const shown = s.libraries.filter((l) => l.show);
+          if (!shown.length) return null;
+          const state = !s.signed_in ? "signed out" : !s.online ? "offline" : null;
+          return (
+            <div key={s.id} className="nav-remote">
+              <div className="nav-label nav-server" title={`${s.name} (${s.url}), signed in as ${s.account}`}>
+                <span>{s.name}</span>
+                {state && <NavLink to="/settings#servers" className="nav-state" title={state === "signed out"
+                  ? "Sign in to this server again in Settings" : "Can't reach this server right now"}>{state}</NavLink>}
+              </div>
+              {shown.map((l) => (
+                <NavLink key={l.id} to={`/r/${s.id}/library/${l.id}`} className="nav-item">
+                  <Icon name={LIB_TYPES[l.type].icon} /> <span>{l.name}</span>
+                </NavLink>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       <div className="nav-group bottom">

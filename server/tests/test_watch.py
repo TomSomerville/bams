@@ -1,5 +1,7 @@
 """Watch state: resume positions, watched flags, Continue Watching, per user."""
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -98,6 +100,8 @@ def test_continue_watching(tv):
     c.put(f"/api/items/{ep[(1, 1)]}/progress", json={"position": 1200, "duration": 1300})  # finished
     [nxt] = c.get("/api/continue").json()
     assert nxt["id"] == ep[(1, 2)] and nxt["reason"] == "next" and nxt["show"]["title"] == "Show"
+    # when the activity it comes from happened: apps showing several servers merge their rows by it
+    assert abs(nxt["last_watched_at"] - time.time()) < 60
     c.put(f"/api/items/{ep[(1, 2)]}/watched", json={"watched": True})
     c.put(f"/api/items/{ep[(1, 3)]}/watched", json={"watched": True})
     c.put(f"/api/items/{ep[(1, 3)]}/progress", json={"position": 1290, "duration": 1300})

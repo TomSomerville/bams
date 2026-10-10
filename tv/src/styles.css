@@ -89,6 +89,12 @@ p { margin: 0; }
 .rail-item span { opacity: 0; transition: opacity 0.15s; }
 .rail:focus-within .rail-item span { opacity: 1; }
 .rail-item.active { color: var(--text); }
+/* another BAMS server's libraries start here: a line in the slim rail, the server's name when it opens */
+.rail-server { margin: 14px 20px 4px; padding-top: 12px; border-top: 2px solid rgba(255, 255, 255, 0.14);
+  font-size: 22px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-server span { opacity: 0; transition: opacity 0.15s; }
+.rail:focus-within .rail-server span { opacity: 1; }
 .rail-item.active .icon { color: var(--cyan); }
 .rail-item:focus { background: #fff; color: #10131a; }
 .rail-item:focus .icon { color: #10131a; }
@@ -215,3 +221,48 @@ p { margin: 0; }
 .menu-timing strong { min-width: 110px; text-align: center; font-variant-numeric: tabular-nums; }
 .home.no-hero { padding-top: 50px; }
 .chips.genres { flex-wrap: nowrap; overflow: hidden; padding: 8px 4px; margin-bottom: 34px; }
+/* Settings: another server on this TV */
+.extra-server { padding: 10px 0 24px; margin-bottom: 20px; border-bottom: 2px solid rgba(255, 255, 255, 0.08); }
+
+/* ---------- music */
+.card.square { width: 260px; height: auto; background: none; overflow: visible; text-align: left; }
+.square-art { width: 252px; height: 252px; border-radius: 10px; overflow: hidden; background: var(--surface); }
+.card.square.round-art .square-art { border-radius: 50%; }
+.card.square:focus { transform: scale(1.06); }
+.card.square:focus .square-art { box-shadow: 0 0 0 4px var(--focus); }
+.card.square { border: none; }
+.square-title { margin-top: 12px; font-size: 24px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.square-sub { font-size: 20px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid.squares { grid-template-columns: repeat(6, 260px); gap: 40px 44px; }
+.music-detail .detail-top { min-height: 0; margin-bottom: 50px; }
+.music-cover { flex: none; width: 360px; height: 360px; border-radius: 14px; object-fit: cover; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6); }
+.music-cover.round-art { border-radius: 50%; }
+.music-cover.no-art { display: flex; align-items: center; justify-content: center; }
+.credit { margin-top: 14px; font-size: 20px; color: var(--muted); }
+.tracks { display: flex; flex-direction: column; gap: 6px; max-width: 1500px; }
+.disc-head { font-size: 26px; font-weight: 700; color: var(--cyan); margin: 26px 0 8px; }
+.track { display: flex; align-items: center; gap: 28px; width: 100%; padding: 16px 24px; border-radius: 12px;
+  border: 3px solid transparent; background: rgba(22, 26, 33, 0.7); text-align: left; scroll-margin: 200px; }
+.track:focus { border-color: var(--focus); background: rgba(40, 46, 58, 0.95); }
+.track.on { color: var(--cyan); }
+.track:disabled { opacity: 0.45; }
+.track-num { width: 50px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track.on .track-num { color: var(--cyan); }
+.track-title { flex: 1; font-size: 26px; font-weight: 600; }
+.track-title small { display: block; font-size: 20px; font-weight: 400; color: var(--muted); }
+.track-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* the music bar: over the bottom of every screen but the video player */
+.now-playing { position: fixed; z-index: 15; left: var(--rail); right: 0; bottom: 0; height: 120px; display: flex; align-items: center;
+  gap: 26px; padding: 0 var(--gutter); background: rgba(12, 14, 18, 0.96); border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.np-cover { width: 84px; height: 84px; border-radius: 8px; object-fit: cover; flex: none; }
+.np-text { flex: 1; min-width: 0; }
+.np-title { font-size: 26px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-sub { font-size: 20px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np-bar { margin-top: 10px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.np-bar div { height: 100%; background: var(--brand-gradient); }
+.np-time { font-size: 22px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.now-playing .round { width: 72px; height: 72px; }
+.now-playing .round:focus { border-color: var(--focus); background: #fff; color: #10131a; }
+.has-np .page, .has-np .home { padding-bottom: 240px; }
+.search-section { margin-bottom: 50px; }
+.search-section h2 { font-size: 34px; margin-bottom: 18px; }

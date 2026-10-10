@@ -1,9 +1,10 @@
 import type Hls from "hls.js"; // loaded on demand (it's most of the bundle), only when a video goes over HLS
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api, ApiError, type ItemDetail, type Probe } from "../api";
+import { ApiError, type ItemDetail, type Probe } from "../api";
 import Icon from "../components/Icon";
 import { fmtClock, PLAY_LABEL, sxe } from "../format";
+import { useScope, type Call } from "../servers";
 import { useApi } from "../useApi";
 
 // Three ways a file reaches <video>, chosen by the server (file.playback.mode) and the viewer's choices:
@@ -85,9 +86,10 @@ function storedQuality(): Quality {
   return q === "auto" ? "auto" : Number(q) || null;
 }
 
-/** Close an HLS session (FFmpeg stops, segments are deleted). keepalive: also works while the page unloads. */
-function closeSession(id: string) {
-  fetch(`/api/hls/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
+/** Close an HLS session (FFmpeg stops, segments are deleted). keepalive: also works while the page unloads.
+ *  `playlist` is the session's playlist URL and `call` its server's (this one or another, servers.tsx). */
+function closeSession(call: Call, playlist: string) {
+  call.send("DELETE", playlist.replace(/\/index\.m3u8$/, ""), undefined, true).catch(() => {});
 }
 
 /** A pop-up list of choices in the control bar (quality, sound, subtitles). */
@@ -119,6 +121,7 @@ export default function PlayerPage() {
 
 function Player({ id }: { id: string }) {
   const nav = useNavigate();
+  const { call, media, to, rid } = useScope();  // this server, or another one (/r/:rid/play/:id)
   const [search] = useSearchParams();
   const { data: item, error } = useApi<ItemDetail>(`/api/items/${id}`);
   const video = useRef<HTMLVideoElement>(null);
@@ -195,7 +198,7 @@ function Player({ id }: { id: string }) {
   if (passthrough) liveParams.set("passthrough", "true");
   if (mode === "transcode" && height) liveParams.set("h", String(height));
   if (mode === "transcode" && burn !== null) liveParams.set("sub", burn);
-  const liveUrl = mode === "transcode" ? pb?.transcode_url : file && `/api/files/${file.id}/remux`;
+  const liveUrl = mode === "transcode" ? pb?.transcode_url : file && media(`/api/files/${file.id}/remux`);
   const src = !ready || useHls || !pb ? undefined : live ? `${liveUrl}?${liveParams}` : pb.url;
   const watchable = item?.kind === "movie" || item?.kind === "episode";
 
@@ -222,7 +225,7 @@ function Player({ id }: { id: string }) {
   useEffect(() => {
     if (!live || mode !== "remux" || !file || !reqT) return;
     let gone = false;
-    api.get<{ t: number }>(`/api/files/${file.id}/seek?t=${reqT}`).then((r) => { if (!gone) setOffset(r.t); }).catch(() => {});
+    call.get<{ t: number }>(`/api/files/${file.id}/seek?t=${reqT}`).then((r) => { if (!gone) setOffset(r.t); }).catch(() => {});
     return () => { gone = true; };
   }, [live, mode, file?.id, reqT]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -231,9 +234,9 @@ function Player({ id }: { id: string }) {
     const v = video.current;
     if (!ready || !useHls || !file?.playback.hls_url || !v) return;
     let hls: Hls | null = null;
-    let sid: string | null = null;
+    let sid: string | null = null;  // the session's playlist URL
     let gone = false;
-    const unload = () => { if (sid) closeSession(sid); };
+    const unload = () => { if (sid) closeSession(call, sid); };
     window.addEventListener("pagehide", unload);
     setProblem(null);
     const remux = mode === "remux";
@@ -250,11 +253,11 @@ function Player({ id }: { id: string }) {
       continueAt(posRef.current);
       setPassFailed(true);
     };
-    Promise.all([api.post<{ id: string; playlist: string }>(file.playback.hls_url, body),
+    Promise.all([call.post<{ id: string; playlist: string }>(file.playback.hls_url, body),
                  withMse ? import("hls.js").then((m) => m.default) : null])
       .then(([s, HlsJs]) => {
-        if (gone) return closeSession(s.id);
-        sid = s.id;
+        if (gone) return closeSession(call, s.playlist);
+        sid = s.playlist;
         const at = startAt.current;
         if (HlsJs) {
           hls = new HlsJs({
@@ -341,11 +344,9 @@ function Player({ id }: { id: string }) {
   totalRef.current = total;
   const report = (position: number, keepalive = false) => {
     if (!watchable || !played.current) return;
-    fetch(`/api/items/${id}/progress`, {
-      method: "PUT", keepalive, headers: { "content-type": "application/json" },
-      // no duration yet (a file the scan hasn't probed): the position is still worth keeping
-      body: JSON.stringify({ position: Math.max(0, position), duration: totalRef.current || null }),
-    }).catch(() => {});
+    // no duration yet (a file the scan hasn't probed): the position is still worth keeping
+    call.send("PUT", `/api/items/${id}/progress`,
+      { position: Math.max(0, position), duration: totalRef.current || null }, keepalive).catch(() => {});
   };
   const reportRef = useRef(report);
   reportRef.current = report;
@@ -477,7 +478,7 @@ function Player({ id }: { id: string }) {
   const goNext = (done: boolean) => {
     if (!item?.next_id) return;
     finished.current = done;  // the report on leaving says where this one ended
-    nav(`/play/${item.next_id}`, { replace: true });
+    nav(to(`/play/${item.next_id}`), { replace: true });
   };
   const fullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -546,6 +547,8 @@ function Player({ id }: { id: string }) {
           key={useHls ? `hls-${hlsKey}` : live ? "live" : "direct"}
           ref={video}
           className="player-video"
+          // another server's subtitle <track>s are cross-origin: they load only in CORS mode (BAMS allows any origin)
+          crossOrigin={rid === null ? undefined : "anonymous"}
           src={src}
           autoPlay
           playsInline

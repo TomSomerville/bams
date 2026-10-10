@@ -287,6 +287,24 @@ class TokenLoginIn(LoginIn):
     device: str = Field("TV", max_length=100)  # shown in Settings → Your TVs
 
 
+class ServerNameIn(BaseModel):
+    name: str = Field(max_length=60)  # "" = the default
+
+
+def default_server_name(con: sqlite3.Connection) -> str:
+    """"<first admin>'s BAM Server": named after the oldest admin account (the one made at setup, unless it was
+    removed since); the computer's name until there is one."""
+    r = con.execute("SELECT name FROM users WHERE is_admin=1 ORDER BY created_at, id LIMIT 1").fetchone()
+    return f"{r['name']}'s BAM Server" if r else socket.gethostname()
+
+
+def server_name(con: sqlite3.Connection) -> dict:
+    """{name, default, custom}: the admin's name for this server (settings.server_name), else the default."""
+    default = default_server_name(con)
+    custom = get_setting(con, "server_name")
+    return {"name": custom or default, "default": default, "custom": bool(custom)}
+
+
 class LinkStartIn(BaseModel):
     name: str = Field("TV", max_length=100)
 
@@ -384,11 +402,15 @@ class LoginRequired:
             return await self.app(scope, receive, send)
         req = Request(scope)
         digest, cookie = None, False
-        if tp := devices.split_ticket_path(path):
-            if scope.get("method") in ("GET", "HEAD"):
-                digest = self.tickets.check(tp[0])
+        tp = devices.split_ticket_path(path)
+        if tp:
             # the route sees the real path; the traffic log too (the Gate reads this same scope afterwards)
             scope["path"], scope["raw_path"] = tp[1], tp[1].encode()
+        if tp and scope.get("method") in ("GET", "HEAD"):
+            digest = self.tickets.check(tp[0])
+        # anything else needs the session itself, ticket path or not: a client that keeps a server's media links
+        # as ticket URLs (another server's, in the web app) can POST/DELETE them with its token (opening or
+        # closing an HLS session); a ticket alone never changes anything
         elif token := req.cookies.get(auth.COOKIE):
             digest, cookie = auth.digest(token) if len(token) <= 100 else None, True
         elif token := bearer_token(req):
@@ -669,7 +691,11 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     @app.get("/api/hello")
     def hello():
         """Public: tells an app looking around the network that this is a BAMS server, and which."""
-        return {"app": "bams", "version": VERSION, "name": socket.gethostname()}
+        con = connect(paths.db)
+        try:
+            return {"app": "bams", "version": VERSION, "name": server_name(con)["name"]}
+        finally:
+            con.close()
 
     @app.post("/api/devices/link")
     def link_start(body: LinkStartIn):
@@ -923,7 +949,15 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         return {"tmdb": _tmdb_status(con), "language": get_setting(con, "language", "en-US"),
                 "music_lookup": music_lookup_enabled(con), "music_output": music_output(con),
                 "max_transcodes": int(get_setting(con, "max_transcodes", "0") or 0),
-                "max_transcodes_auto": auto_transcode_limit(), "watch": watch.thresholds(con)}
+                "max_transcodes_auto": auto_transcode_limit(), "watch": watch.thresholds(con),
+                "server_name": server_name(con)}
+
+    @app.put("/api/settings/server-name", dependencies=ADMIN)
+    def put_server_name(body: ServerNameIn, con=Depends(db)):
+        """What this server is called where apps list servers (the TV's server list, other browsers' sidebars).
+        An empty name goes back to the default."""
+        set_setting(con, "server_name", " ".join(body.name.split()) or None)
+        return server_name(con)
 
     @app.put("/api/settings/transcoding", dependencies=ADMIN)
     def put_transcoding(body: TranscodingIn, con=Depends(db)):
@@ -1193,12 +1227,13 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         watched episode was finished ("next"). Episodes carry their show's title and art."""
         picks = watch.continue_watching(con, me["id"], limit)
         out = []
-        for item_id, why in picks:
+        for item_id, why, at in picks:
             r = con.execute(f"{ITEM_SELECT} WHERE id=?", (item_id,)).fetchone()
             if not r:
                 continue
             d = item_summary(r)
             d["reason"] = why
+            d["last_watched_at"] = at  # when, for apps that merge several servers' rows (web/src/everywhere.ts)
             if r["kind"] == "episode":
                 show = con.execute("""SELECT sh.id, sh.title, sh.poster, sh.backdrop FROM items s
                                       JOIN items sh ON sh.id=s.parent_id WHERE s.id=?""", (r["parent_id"],)).fetchone()

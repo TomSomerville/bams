@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
-import { api, ApiError, getServer, setSession, type User } from "../api";
+import { api, ApiError, getServer, publicPostTo, setSession, type User } from "../api";
 import { focusFirst } from "../nav";
 import { deviceName } from "../tizen";
 
@@ -8,8 +8,12 @@ type Start = { code: string; secret: string; expires_in: number };
 type Poll = { status: "waiting" | "expired" | "linked"; token?: string; user?: User };
 
 /** Sign this TV in: show a code to enter on a phone or computer (with a QR code that opens the page), or type a
- *  name and password with the remote. Server side: devices.py, /api/devices/link. */
-export default function Link({ onLinked, onChangeServer }: { onLinked: () => void; onChangeServer: () => void }) {
+ *  name and password with the remote. Server side: devices.py, /api/devices/link. `target`: another server being
+ *  added to this TV (its token is handed back; the TV's first server and session stay as they are). */
+export default function Link({ onLinked, onChangeServer, target }: {
+  onLinked: () => void; onChangeServer: () => void;
+  target?: { url: string; name: string; onDone: (token: string, user: User | null) => void };
+}) {
   const [code, setCode] = useState<Start | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [withPassword, setWithPassword] = useState(false);
@@ -19,7 +23,10 @@ export default function Link({ onLinked, onChangeServer }: { onLinked: () => voi
   const alive = useRef(true);
   const linked = useRef(onLinked);  // App passes a new function every render: don't restart the code for that
   linked.current = onLinked;
-  const server = getServer() ?? "";
+  const server = target?.url ?? getServer() ?? "";
+  const post = <T,>(p: string, b: unknown) => (target ? publicPostTo<T>(target.url, p, b) : api.publicPost<T>(p, b));
+  const done = useRef((t: string, u: User | null) => { setSession(t, u); linked.current(); });
+  if (target) done.current = target.onDone;
 
   // a code, then a poll every 3 s; a fresh code when it runs out
   useEffect(() => {
@@ -27,7 +34,7 @@ export default function Link({ onLinked, onChangeServer }: { onLinked: () => voi
     let timer: ReturnType<typeof setTimeout>;
     const begin = async () => {
       try {
-        const s = await api.publicPost<Start>("/api/devices/link", { name: deviceName() });
+        const s = await post<Start>("/api/devices/link", { name: deviceName() });
         if (!alive.current) return;
         setCode(s);
         setErr(null);
@@ -41,11 +48,10 @@ export default function Link({ onLinked, onChangeServer }: { onLinked: () => voi
     const poll = (s: Start) => {
       timer = setTimeout(async () => {
         try {
-          const r = await api.publicPost<Poll>("/api/devices/link/poll", { secret: s.secret });
+          const r = await post<Poll>("/api/devices/link/poll", { secret: s.secret });
           if (!alive.current) return;
           if (r.status === "linked" && r.token) {
-            setSession(r.token, r.user ?? null);
-            linked.current();
+            done.current(r.token, r.user ?? null);
           } else if (r.status === "expired") void begin();
           else poll(s);
         } catch {
@@ -68,9 +74,8 @@ export default function Link({ onLinked, onChangeServer }: { onLinked: () => voi
     setBusy(true);
     setErr(null);
     try {
-      const r = await api.publicPost<{ token: string; user: User }>("/api/auth/token", { name, password, device: deviceName() });
-      setSession(r.token, r.user);
-      onLinked();
+      const r = await post<{ token: string; user: User }>("/api/auth/token", { name, password, device: deviceName() });
+      done.current(r.token, r.user);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Couldn't sign in.");
     } finally {
@@ -100,7 +105,7 @@ export default function Link({ onLinked, onChangeServer }: { onLinked: () => voi
   return (
     <div className="center-screen link">
       <img className="wordmark" src="bams-wordmark.png" alt="BAMS" />
-      <h1>Link this TV to your BAMS account</h1>
+      <h1>{target ? `Link this TV to ${target.name}` : "Link this TV to your BAMS account"}</h1>
       <div className="link-body">
         <div className="link-steps">
           <p>On your phone, scan the code. Or on any computer, open</p>
@@ -114,7 +119,7 @@ export default function Link({ onLinked, onChangeServer }: { onLinked: () => voi
       {err && <p className="error">{err}</p>}
       <div className="button-row">
         <button className="btn" data-autofocus onClick={() => { setErr(null); setWithPassword(true); }}>Sign in with name and password</button>
-        <button className="btn ghost" onClick={onChangeServer}>Change server</button>
+        <button className="btn ghost" onClick={onChangeServer}>{target ? "Pick another server" : "Change server"}</button>
       </div>
     </div>
   );

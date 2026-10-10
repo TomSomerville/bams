@@ -13,11 +13,12 @@ import Search from "./pages/Search";
 import Settings from "./pages/Settings";
 import LinkTv from "./pages/LinkTv";
 import { useEffect } from "react";
+import { RemoteScope } from "./servers";
 
 export default function App() {
   const { pathname } = useLocation();
   const music = useMusic();
-  const watching = pathname.startsWith("/play/");
+  const watching = /^(\/r\/\d+)?\/play\//.test(pathname);  // this server's /play/:id or another's /r/:rid/play/:id
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
@@ -32,6 +33,7 @@ export default function App() {
     return (
       <Routes>
         <Route path="/play/:id" element={<Player />} />
+        <Route path="/r/:rid" element={<RemoteScope />}><Route path="play/:id" element={<Player />} /></Route>
       </Routes>
     );
   }
@@ -47,6 +49,12 @@ export default function App() {
           <Route path="/library/:id" element={<Library />} />
           <Route path="/title/:id" element={<Detail />} />
           <Route path="/playlist/:id" element={<PlaylistPage />} />
+          {/* another BAMS server's pages (servers.tsx): the same pages, talking to that server */}
+          <Route path="/r/:rid" element={<RemoteScope />}>
+            <Route path="library/:id" element={<Library />} />
+            <Route path="title/:id" element={<Detail />} />
+            <Route path="playlist/:id" element={<PlaylistPage />} />
+          </Route>
           <Route path="/search" element={<Search />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/link" element={<LinkTv />} />

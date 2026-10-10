@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type ItemDetail, type TmdbResult } from "../api";
+import { type ItemDetail, type TmdbResult } from "../api";
+import { useScope } from "../servers";
 import Icon from "./Icon";
 
 /** Search TMDB and pin a show/movie to the right title. */
 export default function FixMatch({ item, onClose }: { item: ItemDetail; onClose: () => void }) {
   const nav = useNavigate();
+  const { call, to } = useScope();  // this server, or another one's title (servers.tsx)
   const kind = item.kind === "show" ? "show" : "movie";
   const [q, setQ] = useState(item.parsed_title || item.title);
   const [results, setResults] = useState<TmdbResult[] | null>(null);
@@ -16,7 +18,7 @@ export default function FixMatch({ item, onClose }: { item: ItemDetail; onClose:
     setBusy("search");
     setErr(null);
     try {
-      setResults(await api.get<TmdbResult[]>(`/api/tmdb/search?kind=${kind}&q=${encodeURIComponent(q)}`));
+      setResults(await call.get<TmdbResult[]>(`/api/tmdb/search?kind=${kind}&q=${encodeURIComponent(q)}`));
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -28,9 +30,9 @@ export default function FixMatch({ item, onClose }: { item: ItemDetail; onClose:
     setBusy(r.tmdb_id);
     setErr(null);
     try {
-      const d = await api.post<ItemDetail>(`/api/items/${item.id}/match`, { tmdb_id: r.tmdb_id });
+      const d = await call.post<ItemDetail>(`/api/items/${item.id}/match`, { tmdb_id: r.tmdb_id });
       onClose();
-      nav(`/title/${d.id}`, { replace: true });
+      nav(to(`/title/${d.id}`), { replace: true });
       if (d.id === item.id) window.location.reload();
     } catch (e) {
       setErr((e as Error).message);

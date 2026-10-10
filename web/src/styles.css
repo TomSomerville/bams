@@ -59,6 +59,11 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
   background: linear-gradient(var(--cyan), var(--violet), var(--orange));
 }
 .nav-item.disabled { opacity: 0.45; cursor: not-allowed; }
+.nav-remote { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.nav-server { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nav-server > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-state { margin-left: auto; flex: none; font-size: 10px; letter-spacing: 0.06em; color: var(--orange);
+  border: 1px solid currentColor; padding: 0 6px; border-radius: 20px; }
 .soon { margin-left: auto; font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; border: 1px solid var(--border); padding: 1px 6px; border-radius: 20px; }
 
 .topbar {
@@ -278,6 +283,12 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .lib-foot .btn { margin-left: auto; }
 .section-head { display: flex; align-items: center; gap: 14px; margin: 32px 0 12px; }
 .section-head .btn { margin-left: auto; }
+.section-head .head-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.section-head .head-actions .btn { margin-left: 0; }
+.remote-libs { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 4px; }
+.remote-lib { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 38px; padding: 2px 0; }
+.remote-lib-name { font-weight: 600; }
+.remote-lib-show { margin-left: auto; }
 .section-title { font-size: 20px; margin: 0; }
 .lib-card p a { color: var(--cyan); }
 .lib-card p a:hover { text-decoration: underline; }
