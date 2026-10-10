@@ -43,7 +43,7 @@ metadata item (Movie | Show > Season > Episode)   ← what it IS (title, plot, p
 | R2 | Identify content correctly, with posters, backdrops and descriptions, "using IMDb and other databases like Plex" | 1 | TMDB for data and images. IMDb ID stored and shown. See §5 for why we can't pull data from IMDb directly. |
 | R3 | Understand `Show Name - Season 00 - S00E01 - Episode name` style names | 1 | Season 00 = Specials (same as Plex). Unit-test the parser against a corpus of real names. |
 | R4 | Auto refresh every X hours, plus on demand | 1 | Configurable per library; "Scan now" button and `POST /api/libraries/{id}/scan` |
-| R5 | Download content | 2 | Download the original file (resumable HTTP range) or an "optimized" transcoded copy for phones/laptops |
+| R5 | Download content | 2 | Download the original file (resumable HTTP range) or an "optimized" transcoded copy for phones/laptops. **Dropped in 0.9.2:** the owner had downloads removed completely |
 | R6 | Formats: **H.264, H.265/HEVC, MKV, MP4, AVI, MP3**, **ISO** if possible | 1 (ISO: 3) | See §6 |
 
 ---

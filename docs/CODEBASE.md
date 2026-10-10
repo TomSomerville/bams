@@ -291,7 +291,10 @@ runs on the file-name guess with no duration (no HLS, no timeline, no saved posi
     `transcode_cmd` → fragmented MP4 on stdout, a keyframe every 2 s. Re-encoding makes the seek exact, so the player
     just restarts at `?t=` (no `/seek`).
 - `video_encoder()` test-encodes a tiny clip with each of `ENCODERS` (NVENC, QSV, AMF, VAAPI on Linux, libx264,
-  Media Foundation on Windows) once per FFmpeg and caches the first that works; `BAMS_VIDEO_ENCODER` forces one.
+  Media Foundation on Windows) once per FFmpeg, **with its real options** (`_encoder_args`), and caches the first that
+  works; `BAMS_VIDEO_ENCODER` forces one (still test-run, to learn the next point). A VAAPI driver that refuses a
+  bitrate (Ubuntu's free Intel driver: CQP only) is retried at constant QP (`-rc_mode CQP -qp VAAPI_QP`), remembered
+  in `_vaapi_cqp`, and `_encoder_args` then uses CQP for it.
   The app warms it in a thread at startup; `/api/status.video_encoder` reports it. `has_libplacebo()` likewise
   test-runs libplacebo once (it needs Vulkan).
 - HEVC/AV1/VP9 are pass-through on the server (only the browser knows if it decodes them). `Player.tsx`
@@ -310,8 +313,8 @@ runs on the file-name guess with no duration (no HLS, no timeline, no saved posi
   says so; they need `sar`/`field_order` in the probe (`app._video` reads them with `probe.video_geometry` for older
   probes). Interlaced on AMF and unknown scan type on QSV → hybrid. A failed HLS run sets `Variant.gpu=False`, retries
   on the hybrid path, and `stream.gpu_failed()` remembers that encoder + codec/profile/bit depth until restart
-  (`_gpu_broken`). The live `/transcode` uses only NVIDIA's all-GPU path (it can't retry). QSV/AMF/VAAPI untested on
-  real hardware.
+  (`_gpu_broken`). The live `/transcode` uses only NVIDIA's all-GPU path (it can't retry). QSV/AMF untested on
+  real hardware; VAAPI works on an Intel HD 630 (Ubuntu 24.04, constant QP).
 - **Dolby pass-through:** `Player.tsx` `canPassThrough()` asks `MediaSource.isTypeSupported('audio/mp4;
   codecs="ac-3"|"ec-3"')`; if yes (and `bams.passthrough` isn't "0") a remux sends `passthrough` →
   `app._copy_audio` (track codec in `stream.PASSTHROUGH_AUDIO` = AC3/EAC3) → `-c:a copy` in `remux_cmd` /
@@ -326,7 +329,9 @@ FFmpeg, `bounds` (segment start times), `wanted`, `job_start`:
   `capLevelToPlayerSize`); `burn` (track id or embedded stream number → `app._burn`) → `stream._transcode_parts(burn=)`;
 - `remux` → one **copy** variant (`ts`: MPEG-TS segments `{k}.ts`, no `init.mp4`; the TV app asks for it, Samsung's AVPlay
   plays no fMP4 HLS): bounds = every keyframe (`Keyframes.get` → `stream.keyframes`, cached as
-  `data/cache/keyframes/{file}-{size}-{mtime}.json`), segments `{k}.m4s` + `init.mp4`, made by `hls_copy_cmd`. Before
+  `data/cache/keyframes/{file}-{size}-{mtime}.json`), segments `{k}.m4s` + `init.mp4`, made by `hls_copy_cmd` (its init
+  file name is bare and every run starts in the variant's folder, `spawn(cwd=)`: FFmpeg ≤ 6.1 prefixes the playlist's
+  folder even to an absolute name, newer FFmpeg uses the working dir). Before
   each run `_restart` dry-runs the seek (`remux_start(zero=True)`) and numbers from where it lands. Copy sessions don't
   count against the limit. `passthrough` (AC3/EAC3 track) → `Session.copy_audio`: audio copied too.
 `GET /api/hls/{sid}/index.m3u8` = master playlist (one `STREAM-INF` per variant) → `/{v}/index.m3u8` (VOD, every
@@ -515,7 +520,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/me/prefs {home_hero?, home_rows?: [{id, show}]}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`); only sent fields change | auth.tsx, HomeSettings |
 | `PUT /api/settings/watch {watched_percent 50–100, resume_after 0–600}` (admin; state in `GET /api/settings` → `watch`) | when titles count as watched / started | WatchSettings |
 | `GET /api/tmdb/search?kind=&q=` · `POST /api/items/{id}/match {tmdb_id}` | Fix match | FixMatch |
-| `GET /api/files/{id}/stream` · `/download` | original bytes (Range) / attachment | Player, Detail |
+| `GET /api/files/{id}/stream` | original bytes (Range), for playing; no file name sent (BAMS has no downloads since 0.9.2) | Player |
 | `GET /api/files/{id}/remux?t=&audio=&ch=&passthrough=` · `/seek?t=` | audio-converting live stream (fallback; `passthrough`: AC3/EAC3 copied) / its real start | Player |
 | `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video → H.264 + audio → AAC (fMP4), starting exactly at `t` (fallback; 503 at the limit). `sub` = picture track id or embedded stream number | Player |
 | `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, passthrough?, start?}` → `{id, playlist, variants, copy, channels, passthrough}` | open an HLS session (503 at the limit, 409 if not probed / no keyframes, 422 unknown `burn` track) | Player |
@@ -566,9 +571,9 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_parse.py` | real-world names: scene packs, nested packs (megapack/show/S03/release/…), Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, extras with the season in their name, Series-N folders, movies; `guess()` cases (and where it gives up) |
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
-| `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration |
-| `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file, the live remux's audio starting at the keyframe (correlation with the original), an unprobed file probed when its episode is opened, and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
-| `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
+| `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration, files are streamed but never offered for download (no route, no `download_url`, no file name) |
+| `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache; the test uses the real options, VAAPI falls back to constant QP), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file, the live remux's audio starting at the keyframe (correlation with the original), an unprobed file probed when its episode is opened, and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
+| `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run + runs start in the variant folder, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
 | `test_music_extras.py` | cue parsing, CUE image split / sheet edited or removed, queue `start`/`end`, real FLAC with an embedded sheet; playlist parsing, import, follow-the-file; a cover/artist image added later vs CAA/Commons; album merge + rescan + best file, unsure matches not merged; refresh; FLAC command + API |
 | `test_music_match.py` | identification against fake MusicBrainz/CAA/Wikimedia (`httpx.MockTransport`): matching, tag ids, unmatched/ambiguous, rescans keep data, local art wins, service down, settings toggle + Fix match API |

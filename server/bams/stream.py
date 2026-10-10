@@ -197,6 +197,8 @@ _detected: dict[str, str | None] = {}  # ffmpeg path -> encoder
 _works: dict[tuple[str, str], bool] = {}  # (ffmpeg path, encoder) -> test encode passed
 _preferred: str | None = None          # the admin's choice (Settings → Playback, settings.video_encoder); None = automatic
 _filters: dict[str, set[str]] = {}     # ffmpeg path -> filter names
+_vaapi_cqp: set[str] = set()           # ffmpeg paths whose VAAPI driver encodes at a constant QP only
+VAAPI_QP = 23
 
 
 def vaapi_device() -> str:
@@ -212,15 +214,27 @@ def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess | None:
 
 
 def _encoder_works(exe: str, enc: str) -> bool:
+    """Test-encode two frames with the options conversions really use: a driver can take the encoder but not
+    its rate control (Ubuntu's free Intel driver encodes at a constant QP only, and refuses a bitrate). VAAPI
+    then falls back to constant QP (`_vaapi_cqp`)."""
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin"]
     vf = "format=yuv420p"
     if enc == "h264_vaapi":
         cmd += ["-vaapi_device", vaapi_device()]
         vf = "format=nv12,hwupload"
-    cmd += ["-f", "lavfi", "-i", "color=black:size=256x256:rate=25:duration=0.2",
-            "-vf", vf, "-frames:v", "2", "-c:v", enc, "-f", "null", "-"]
-    r = _run(cmd, timeout=15)
-    return r is not None and r.returncode == 0
+    cmd += ["-f", "lavfi", "-i", "color=black:size=256x256:rate=25:duration=0.2", "-vf", vf, "-frames:v", "2"]
+
+    def ok(args: list[str]) -> bool:
+        r = _run([*cmd, *args, "-f", "null", "-"], timeout=15)
+        return r is not None and r.returncode == 0
+
+    if ok(_encoder_args(enc, 2500, cqp=False)):
+        return True
+    if enc == "h264_vaapi" and ok(_encoder_args(enc, 2500, cqp=True)):
+        log.info("VAAPI: this driver encodes at a constant QP only (no bitrate cap)")
+        _vaapi_cqp.add(exe)
+        return True
+    return False
 
 
 def _tested(exe: str, enc: str) -> bool:
@@ -269,6 +283,7 @@ def video_encoder() -> str | None:
         forced = os.environ.get("BAMS_VIDEO_ENCODER")
         if forced in ENCODERS:
             found = forced
+            _tested(exe, found)  # used either way; the test finds how it encodes here (VAAPI: constant QP only?)
         else:
             if forced:
                 log.warning("BAMS_VIDEO_ENCODER=%r is not one of %s; detecting instead", forced, ", ".join(ENCODERS))
@@ -370,7 +385,8 @@ def quality_bitrate(video: dict | None, encoder: str, max_height: int | None) ->
     return _max_bitrate(int(w * fit), int(h * fit))
 
 
-def _encoder_args(enc: str, kbps: int) -> list[str]:
+def _encoder_args(enc: str, kbps: int, cqp: bool | None = None) -> list[str]:
+    """`cqp` (VAAPI): constant QP instead of a capped bitrate; None = what the encoder test found here."""
     cap = ["-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k"]
     target = ["-b:v", f"{kbps * 6 // 10}k"]
     if enc == "h264_nvenc":
@@ -382,6 +398,10 @@ def _encoder_args(enc: str, kbps: int) -> list[str]:
         return ["-c:v", enc, "-usage", "transcoding", "-quality", "speed", "-rc", "vbr_peak", *target, *cap,
                 "-profile:v", "high"]
     if enc == "h264_vaapi":
+        if cqp is None:
+            cqp = ffmpeg_path() in _vaapi_cqp
+        if cqp:
+            return ["-c:v", enc, "-rc_mode", "CQP", "-qp", str(VAAPI_QP), "-profile:v", "high"]
         return ["-c:v", enc, *target, *cap, "-profile:v", "high"]
     if enc == "libx264":
         return ["-c:v", enc, "-preset", "veryfast", "-crf", "22", *cap, "-profile:v", "high", "-sc_threshold", "0"]
@@ -705,9 +725,10 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
         return [*cmd, "-hls_segment_type", "mpegts", "-hls_list_size", "0", "-hls_flags", "temp_file",
                 "-start_number", str(segment), "-hls_segment_filename", str(out_dir / "%d.ts"),
                 str(out_dir / f"ffmpeg_{segment}.m3u8")]
+    # The init file name is bare and FFmpeg runs in out_dir (`spawn(cwd=)`): FFmpeg 6.1 and older put the
+    # playlist's folder in front of it (an absolute name doubled the path: ENOENT), newer ones use the working dir.
     cmd += ["-hls_segment_type", "fmp4",
-            "-hls_segment_options", "movflags=+frag_discont", "-hls_fmp4_init_filename",
-            str(out_dir / f"init_{segment}.mp4"),  # absolute: a bare name lands in FFmpeg's working dir
+            "-hls_segment_options", "movflags=+frag_discont", "-hls_fmp4_init_filename", f"init_{segment}.mp4",
             "-hls_list_size", "0", "-hls_flags", "temp_file",  # a segment appears under its name once complete
             "-start_number", str(segment), "-hls_segment_filename", str(out_dir / "%d.m4s"),
             str(out_dir / f"ffmpeg_{segment}.m3u8")]
@@ -777,8 +798,8 @@ def audio_cmd(path: Path, start: float, audio: dict | None = None, output: str =
     return cmd
 
 
-def spawn(cmd: list[str]) -> subprocess.Popen:
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+def spawn(cmd: list[str], cwd: Path | None = None) -> subprocess.Popen:
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, cwd=cwd,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0)
     threading.Thread(target=_log_stderr, args=(proc,), name="ffmpeg-stderr", daemon=True).start()
     return proc

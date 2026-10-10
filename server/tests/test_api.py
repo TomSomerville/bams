@@ -55,6 +55,26 @@ def test_movie_in_tv_library_is_flagged(tmp_path):
         readonly.set_protected_roots([])
 
 
+def test_files_play_but_are_never_offered_for_download(tmp_path):
+    """Owner's decision: BAMS has no downloads. A file is streamed for playing only, with no name to save it under."""
+    from bams import jobs
+    media = tmp_path / "media"
+    make_tree(media, ["Film (2001)/Film (2001).mkv"])
+    paths = Paths(tmp_path / "data")
+    c = signed_in(create_app(paths, start_scheduler=False))
+    try:
+        lib = c.post("/api/libraries", json={"name": "Films", "type": "movie", "paths": [str(media)]}).json()
+        jobs.run_scan(paths, lib["id"], do_match=False)
+        item = c.get(f"/api/libraries/{lib['id']}/items").json()[0]
+        f = c.get(f"/api/items/{item['id']}").json()["files"][0]
+        assert "download_url" not in f
+        assert c.get(f"/api/files/{f['id']}/download").status_code == 404
+        r = c.get(f["stream_url"])
+        assert r.status_code == 200 and "content-disposition" not in r.headers
+    finally:
+        readonly.set_protected_roots([])
+
+
 def test_fs_browse(tmp_path):
     (tmp_path / "media" / "TV").mkdir(parents=True)
     (tmp_path / "media" / ".hidden").mkdir()

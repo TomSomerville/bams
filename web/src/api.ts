@@ -219,7 +219,6 @@ export type FileInfo = {
     duration: number | null;
   };
   stream_url: string;
-  download_url: string;
   /** video files */
   audio_tracks?: AudioTrack[];
   /** video files, on a movie's/episode's own page */
@@ -308,7 +307,6 @@ export type QueueTrack = {
   end: number | null;
   available: boolean;
   playback: FileInfo["playback"];
-  download_url: string;
 };
 
 /** A playlist imported from a .m3u/.m3u8/.pls file in a music library. */

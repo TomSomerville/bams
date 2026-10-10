@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -58,6 +59,7 @@ def fake_ffmpeg(monkeypatch):
     monkeypatch.setattr(stream, "_detected", {})
     monkeypatch.setattr(stream, "_works", {})
     monkeypatch.setattr(stream, "_preferred", None)
+    monkeypatch.setattr(stream, "_vaapi_cqp", set())
     monkeypatch.setattr(stream, "_encoder_works", lambda exe, enc: tried.append(enc) or enc in works)
     monkeypatch.delenv("BAMS_VIDEO_ENCODER", raising=False)
     return works, tried
@@ -123,6 +125,35 @@ def test_encoder_detection_platform_and_override(fake_ffmpeg, monkeypatch):
     monkeypatch.setenv("BAMS_VIDEO_ENCODER", "bogus")  # ignored, detection runs
     monkeypatch.setattr(stream.sys, "platform", "linux")
     assert stream.video_encoder() == "h264_vaapi"
+
+
+def test_encoder_test_uses_the_real_options_and_vaapi_falls_back_to_constant_qp(monkeypatch):
+    """Ubuntu's free Intel driver (owner's HD 630) takes h264_vaapi at a constant QP only: with a bitrate every
+    conversion failed ("Driver does not support any RC mode"), while a test without one passed."""
+    monkeypatch.setattr(stream, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(stream, "_vaapi_cqp", set())
+    cqp_only = [True]
+    runs = []
+
+    def run(cmd, timeout):
+        runs.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0 if "-rc_mode" in cmd or not cqp_only[0] else 1)
+
+    monkeypatch.setattr(stream, "_run", run)
+    assert stream._encoder_works("ffmpeg", "h264_vaapi")
+    assert "-maxrate" in runs[0] and runs[1][runs[1].index("-rc_mode") + 1] == "CQP"
+    args = stream._encoder_args("h264_vaapi", 5000)
+    assert args[args.index("-qp") + 1] == str(stream.VAAPI_QP) and "-maxrate" not in args and "-b:v" not in args
+
+    stream._vaapi_cqp.clear()
+    cqp_only[0] = False  # a driver with bitrate modes keeps the cap
+    runs.clear()
+    assert stream._encoder_works("ffmpeg", "h264_vaapi") and len(runs) == 1
+    assert "-maxrate" in stream._encoder_args("h264_vaapi", 5000)
+
+    cqp_only[0] = True  # other encoders are tested with their real options too, and have no fallback
+    runs.clear()
+    assert not stream._encoder_works("ffmpeg", "h264_qsv") and len(runs) == 1 and "-maxrate" in runs[0]
 
 
 def test_transcode_filters():
@@ -403,7 +434,9 @@ def test_hls_copy_cmd(monkeypatch, tmp_path):
     assert cmd[cmd.index("-hls_segment_options") + 1] == "movflags=+frag_discont"  # real times in every run
     assert cmd[cmd.index("-c:v") + 1] == "copy" and cmd[cmd.index("-tag:v") + 1] == "hvc1"
     assert cmd[cmd.index("-hls_segment_type") + 1] == "fmp4" and cmd[cmd.index("-start_number") + 1] == "40"
-    assert cmd[cmd.index("-hls_fmp4_init_filename") + 1] == str(out / "init_40.mp4")  # in the data dir
+    # bare: FFmpeg 6.1 (Ubuntu 24.04) puts the playlist's folder in front of an absolute name too (ENOENT);
+    # the run starts in `out` (hls.Transcodes), where newer FFmpeg puts a bare name
+    assert cmd[cmd.index("-hls_fmp4_init_filename") + 1] == "init_40.mp4"
     assert cmd[cmd.index("-hls_segment_filename") + 1] == str(out / "%d.m4s")
     assert "0:a:1?" in cmd and cmd[cmd.index("-ac") + 1] == "6"
     assert cmd[cmd.index("-hls_flags") + 1] == "temp_file"  # a half-written segment is never served
@@ -515,7 +548,10 @@ def test_remux_over_hls_lines_up_across_runs(tmp_path):
         sess = c.post(f["playback"]["hls_url"], json={"remux": True, "channels": 6, "start": 9}).json()
         assert sess["copy"] and sess["channels"] == 6
         pl = c.get(f"/api/hls/{sess['id']}/0/index.m3u8").text
-        assert pl.count("#EXTINF:2.000,") == 10 and '#EXT-X-MAP:URI="init.mp4"' in pl  # a keyframe every 2 s
+        # a keyframe every 2 s (FFmpeg 6.1's MKV starts at -0.006 s, AC3 priming: the first and last are 6 ms off)
+        durations = [float(d) for d in re.findall(r"#EXTINF:([\d.]+),", pl)]
+        assert len(durations) == 10 and all(abs(d - 2) < 0.01 for d in durations)
+        assert '#EXT-X-MAP:URI="init.mp4"' in pl
         base = f"/api/hls/{sess['id']}/0"
         init = c.get(f"{base}/init.mp4")
         assert init.status_code == 200

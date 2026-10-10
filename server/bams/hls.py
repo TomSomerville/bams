@@ -400,7 +400,7 @@ class Transcodes:
             v.seek = v.bounds[k] + 0.001 if k > 0 else 0.0
             if k > 0:
                 k = min(k, v.at(self._copy_start(s.path, v.seek, zero=True)))
-        v.proc = self._spawn(self._cmd(s, v, k))
+        v.proc = self._spawn(self._cmd(s, v, k), cwd=v.dir)  # the copy's init file is a bare name (hls_copy_cmd)
         v.job_start, v.killed = k, False
         log.debug("HLS %s/%d: FFmpeg from segment %d", s.id, v.index, k)
 

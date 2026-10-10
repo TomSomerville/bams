@@ -61,7 +61,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 298 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 300 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -131,8 +131,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   must pass `me`. New admin-only routes get `dependencies=ADMIN`; new public ones go in `PUBLIC_API` (think twice).
 - **Copy-HLS (remux) alignment:** FFmpeg's MKV seek lands on the index point *before* the target, so a run is
   numbered from where a dry run of the **same** `-ss` lands (`remux_start(zero=True)`); fMP4 needs
-  `movflags=+frag_discont` or every run's decode times start at 0; the init file name must be absolute or it lands
-  in FFmpeg's working dir; serve `init.mp4` only once a segment exists (it's written gradually). ffprobe applies the
+  `movflags=+frag_discont` or every run's decode times start at 0; the init file name is **bare and FFmpeg runs in the
+  variant's folder** (`spawn(cwd=)`): FFmpeg ≤ 6.1 (Debian/Ubuntu) prefixes the playlist's folder even to an absolute
+  name (ENOENT, every Ubuntu copy-HLS failed), FFmpeg 9 puts a bare name in the working dir; serve `init.mp4` only once a segment exists (it's written gradually). ffprobe applies the
   edit list, so compare segments by video packet pts or `tfdt`, not "first packet".
 - **Burned-in subtitles** must be read with a lead (second input, `SUB_LEAD`) or a run starting mid-line loses it.
   Hand-made subtitle streams get their times rebased to their first packet when muxed: start test PGS with an empty
@@ -155,12 +156,19 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   that walked inside `BEGIN IMMEDIATE` locked every other writer out for minutes: logins 500'd with "database is
   locked". Read first, then write in short batches (`scanner.py`; `test_scan_does_not_hold_the_write_lock…`).
 - **Encoder tests must reset the caches:** `stream.video_encoder()` honours the admin's choice (`_preferred`) and a
-  per-encoder test cache (`_works`) besides `_detected`; the `fake_ffmpeg` fixture resets all three. A test that sets a
-  choice and leaks it changes every later conversion test.
+  per-encoder test cache (`_works`) besides `_detected`, and VAAPI's constant-QP memory (`_vaapi_cqp`); the
+  `fake_ffmpeg` fixture resets all four. A test that sets a choice and leaks it changes every later conversion test.
+- **The encoder test must use the options conversions really use** (`_encoder_works` → `_encoder_args`): Ubuntu's free
+  Intel driver (owner's HD 630) takes `h264_vaapi` at constant QP only, so an option-less test passed and every real
+  conversion failed ("Driver does not support any RC mode"). VAAPI falls back to `-rc_mode CQP`; keep that fallback.
 - **Hand identifications win over file names:** the scanner goes through `identify.parsed_for`, never `parse.parse`
   directly, or a rescan would undo what an admin entered (`files.manual`).
-- **The owner's :8484 is the installed Windows service** (`C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`), not
-  this checkout: restarting it doesn't load repo changes; a new installer does, and running it needs the owner.
+- **The owner's server is a remote Ubuntu 24.04 machine** (since 2026-10-10; before that the Windows service in
+  `C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`, unreadable without admin). `ssh bams-server` (key
+  `~/.ssh/bams_claude`, user `beached` = the account BAMS runs as, in `render`) reads `/var/lib/bams/logs/bams.log`,
+  the DB (open it `?mode=ro`, or `sqlite3` backup into `/tmp`) and runs FFmpeg/VAAPI tests; write only to `/tmp` and
+  clean up, change nothing else there without asking. It runs the released `.deb`, not this checkout: a fix reaches it
+  with a new release, and installing needs the owner's sudo. Docs: STATUS.md §6.
 - **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `recent`, `lib:<id>`, `top_rated`, `genre:<name>`; older saves have one `genres`
   entry, which `homeRows()` expands in place: keep that).
   Renaming an id silently resets that row for everyone who reordered; add new rows in `homeRows.ts` `defaultRows`.
@@ -173,16 +181,18 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   ("Cannot write moov atom before AC3 packets"). The HLS fMP4 muxer copes by itself.
 - **Live burn-in keeps the file's clock** (`-copyts -start_at_zero`, `-output_ts_offset -t`), like HLS. `-itsoffset`
   on the subtitle input lost a line already on screen. VobSub `.idx` inputs have no start time: no offset needed.
-- **All-GPU paths other than NVIDIA are untested on hardware** (QSV, VAAPI, AMF: the owner's PC has only NVIDIA;
-  `scale_d3d11` can't create textures on the NVIDIA driver, VAAPI didn't work through WSL/Docker). Keep the hybrid
+- **All-GPU paths other than NVIDIA and VAAPI are untested on hardware** (QSV, AMF: the owner's PC has only NVIDIA;
+  `scale_d3d11` can't create textures on the NVIDIA driver). VAAPI works on the owner's Ubuntu server (Intel HD 630). Keep the hybrid
   fallback and `stream.gpu_failed` memory; tests that touch `gpu_filters` reset `stream._gpu_broken`.
 - **The show is named by the folder above the season folder**, not the top folder (`parse._show_dir`): packs hold
   several shows ("Megapack/Star.Trek.DS9/S03/…"). A file with a season in its name but no episode, under a season
   folder, is an unnumbered extra. Years that follow "Series N" in a folder are the season's. New layout? Add the real
   path to `test_parse.py` and dry-run the parser over a DB **copy** of the owner's library before shipping.
 - **Changing matching rules?** Bump `matcher.MATCHER_VERSION` or titles that failed once are never retried (scans only try `pending` titles otherwise). Parser bumps retry them by themselves.
-- **Two `test_stream.py` encoder tests fail on a machine with NVENC** (`test_encoder_choice_api`,
-  `test_remux_over_hls_lines_up_across_runs`); they expect a CPU-only box. Not a regression.
+- **Linux test runs** (Docker `ubuntu:24.04`, FFmpeg 6.1): `test_encoder_choice_api` fails there (it fakes
+  `sys.platform = "win32"`, which breaks `shutil.which`). Not a regression; the rest of `test_stream.py`/`test_hls.py`
+  passes there (the whole suite hasn't been run on Linux). Run the real-FFmpeg HLS tests there after touching FFmpeg
+  commands, since Debian/Ubuntu ship older FFmpeg than Windows.
 - **The live remux (`stream.remux_cmd`) needs `-noaccurate_seek`:** the copied video starts at the keyframe before `-ss`,
   but FFmpeg trims converted audio to the exact `-ss` and both start at 0, so the picture ran seconds behind the sound.
   A tone or mostly-silent test clip doesn't show it; `test_live_remux_keeps_sound_with_picture_after_a_seek` uses noise.

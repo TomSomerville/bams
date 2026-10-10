@@ -277,7 +277,7 @@ export function UsersSettings() {
         {!adding && <button className="btn small primary push" onClick={() => setAdding(true)}><Icon name="plus" size={16} /> Add account</button>}
       </div>
       <p className="muted">Everyone who watches gets their own account, so each person has their own Continue
-        Watching and watched list. Viewers can watch and download; admins can also change libraries, settings and
+        Watching and watched list. Viewers can watch; admins can also change libraries, settings and
         accounts.</p>
       {adding && (
         <form className="key-row" onSubmit={add}>

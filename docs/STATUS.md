@@ -40,7 +40,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 |---|---|---|
 | F1 | TV Shows / Movies / Music libraries, identified correctly, with posters and descriptions (IMDb and other databases, like Plex) | TV ✅ Movies ✅ Music ✅ (MusicBrainz, Cover Art Archive, Wikipedia bios) |
 | F2 | Works from mounted folders; understands `Show Name - Season 00 - 'S00E01-Episode name'` | ✅ (tested, including the quoted form) |
-| F3 | Download content | ✅ original-file download (`/api/files/{id}/download`) |
+| F3 | Download content | ❌ removed in 0.9.2 at the owner's request ("remove the ability to download the files from the server completely"): files are only streamed for playing |
 | F4 | Auto refresh every X hours | ✅ |
 | F5 | H.264, H.265, MKV, MP4, MP3, AVI; ISO if possible | H.264/HEVC/MKV/MP4 ✅ play; MP3 ✅ (music libraries); AVI/Xvid ✅ (transcoded to H.264); ISO 🔜 phase 3 |
 
@@ -147,6 +147,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-10 | **Two-step sign-in = TOTP** (RFC 6238, SHA-1/6 digits/30 s) in stdlib, secret in `users.totp_secret` (plain, like the rest of `bams.db`), ±1 step, each step once (`totp_last`); no recovery codes: an admin or `bams user 2fa-off` turns it off | Owner asked for Google Authenticator. No new server dependency. A wrong code counts toward the same waits/lockout; the right password alone neither counts nor resets them (else codes could be tried forever) |
 | 10-10 | **Music on the TV** with one HTML `<audio>` (not AVPlay), no gapless | AVPlay is the video player and owns the screen; `<audio>` plays MP3/AAC/FLAC and falls back to the server's conversion on an error |
 | 10-10 | **Auto fill** (`parse.guess`, setting `autofill`, on by default): files the naming rules can't place are **placed automatically** by a best guess (show from the folder, season from "Season/Volume/Level" folders, number from "Part 3"/"Lesson 12"/"01 - Name", no number = extra, a film in its show's folder = Specials), marked `parse.guessed` and listed for review (Keep / Change / Don't place). Replaces the 10-08 "loose in a show folder stays unrecognised" rule while it's on. Still not guessed: a loose top-level file with no number, a movie in its own folder in a TV library | Owner asked for a best-guess parser and chose automatic placing over a pre-filled form. A wrong guess is one click to fix; turning the setting off takes every guess out at once |
+| 10-10 | **No downloads** (0.9.2): no `/api/files/{id}/download`, no `download_url`, no Download buttons; `/stream` sends no file name; right-click on the player's video is blocked | Owner: "remove the ability to download the files from the server completely. across the entire application". Playing still sends the file's bytes (direct play, copy-HLS), so a technical viewer could save a stream; stopping that would mean converting everything |
+| 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
 
 ## 4. Built so far
 
@@ -191,7 +193,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   albums/artists refreshed after ~4 months (50 per scan).
 - **Playback:** `stream.plan()` picks Direct Play / Direct Stream (file) / Direct Stream (remux) / Transcode.
   `/stream` (Range), `/remux?t=` (FFmpeg: copy video + AAC audio, fragmented MP4), `/seek?t=` (real
-  keyframe start via a dry run), `/download`.
+  keyframe start via a dry run). No downloads (removed in 0.9.2).
 - **Video transcoding:** `/transcode?t=` converts video browsers can't decode (Xvid/DivX, MPEG-1/2, VC-1, Theora,
   ProRes, 10-bit/4:2:2/4:4:4 H.264…, and HEVC/AV1/VP9 for browsers without them) to H.264 + AAC on the best working
   encoder (NVENC/QSV/AMF/VAAPI, else x264). Deinterlaces, squares anamorphic pixels, caps the size, tone-maps HDR
@@ -229,7 +231,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 
 ### Web (`web/`, React 19 + Vite + TS, ~2,600 lines + 530 lines CSS)
 - Pages: Home (hero, Recently Added, per-library rows, Top Rated, genre rows; each user picks which rows show and their order), Library grid (sort, genre
-  filter), Title page (show: season tabs + episodes; movie: tech info + Download), Player (real `<video>`,
+  filter), Title page (show: season tabs + episodes; movie: tech info), Player (real `<video>`,
   remux-aware seeking, converted video over HLS (hls.js, loaded on demand), switches to the conversion when the
   browser can't decode the video, quality menu, keyboard shortcuts), Search, Settings (libraries with folder picker,
   scan status; Unrecognized files (identify by hand: link or fields with suggestions); TMDB key card; Playback card:
@@ -283,7 +285,9 @@ docs/INSTALL.md, deploy/README.md, server/README.md.
 ## 5. Not built yet / next
 
 Roughly in priority order:
-1. **Playback leftovers (minor):** all-GPU filters on real Intel/AMD/VAAPI hardware (built, untested); Dolby
+1. **Playback leftovers (minor):** all-GPU filters on real Quick Sync/AMD hardware (built, untested; VAAPI works on the
+   owner's Intel HD 630 under Ubuntu 24.04); a copy-HLS session first reads every keyframe of the file (~8 s for a
+   Family Guy episode on the owner's NAS, cached afterwards); Dolby
    pass-through on a real Dolby device (tested only with a faked "supported"); Dolby Vision profile 5 without
    libplacebo/Vulkan fails to convert (zscale can't read it); text MicroDVD `.sub` sidecars (no `.idx`) aren't listed.
 2. **Music leftovers (minor):** sample-perfect gapless (Media Source Extensions); un-merging an album; making and
@@ -306,6 +310,7 @@ Roughly in priority order:
 | Node | 23 (`web/`) |
 | FFmpeg | winget `Gyan.FFmpeg` (found automatically, even without PATH) |
 | Server data dir | `C:\Users\Beached\bams\data` (gitignored): DB, image cache, logs |
+| Owner's server (since 10-10) | Ubuntu 24.04 at `192.168.1.253` (Intel HD 630, FFmpeg 6.1.1), the `.deb`, running as `beached`; data `/var/lib/bams`, log `/var/lib/bams/logs/bams.log`, media on `/mnt/nas/jellyfin-media`. Read-only access for agents: `ssh bams-server` (key `~/.ssh/bams_claude` on the owner's PC; `beached` is in `render`, so FFmpeg/VAAPI tests run there). Installing a package needs the owner's sudo |
 | Ports | 8484 = the owner's server · 8485 = scratch test instances (`.claude/launch.json` → `bams-test`, data dir in the session scratchpad: edit the path) · 5173 = Vite dev |
 | Test media | `C:\Users\Beached\Shows` (TV: Bob's Burgers, Family Guy, Simpsons, Burn Notice, South Park…) · `C:\Users\Beached\Movies` (2 movies) · `C:\Users\Beached\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) · `C:\Users\Beached\TestMedia` (Jellyfin DV profile 5 clip + its SDR version, CC BY-SA 4.0, `CREDITS.txt`) |
 | Libraries on the owner's server | 1 = "TV Shows" (`…\Shows`), 2 = "Movies" (`…\Movies`); the owner adds "Music" (`…\MyMusic`) when testing |
@@ -330,6 +335,37 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-10: Converted playback on Ubuntu fixed (FFmpeg 6.1 init file, VAAPI constant QP), downloads removed (release 0.9.2)
+- **What / why:** owner: Family Guy episodes (HEVC + AC3 MP4) didn't play on their new Ubuntu 24.04 server: a long
+  wait, then "The converted stream stopped". The server log (read over SSH) had two failures, each retried by the
+  player: (1) copy-HLS: FFmpeg 6.1 joins the playlist's folder to `-hls_fmp4_init_filename` even when it's absolute
+  (strace: `…/0//var/lib/bams/…/0/init_0.mp4`, ENOENT), while FFmpeg 9 on Windows takes it as given and puts a bare
+  name in the working dir. Now the name is bare and `hls.Transcodes._restart` starts FFmpeg with `cwd=` the variant's
+  folder (`stream.spawn(cwd=)`): right under both. (2) Full conversion: `h264_vaapi` on the HD 630 with Ubuntu's
+  free iHD driver supports only CQP ("Driver does not support any RC mode… supported modes: CQP"); the startup test
+  encoded without a bitrate, so it passed. `_encoder_works` now tests every encoder with `_encoder_args` (its real
+  options); VAAPI retries with `-rc_mode CQP -qp 23` and remembers it per FFmpeg (`_vaapi_cqp`); a forced
+  `BAMS_VIDEO_ENCODER` is tested too, to learn that. Also, owner request: "remove the ability to download the files
+  from the server completely": `/api/files/{id}/download` and `download_url` (files, music tracks) gone, `/stream` sends
+  no file name, Download buttons gone (Detail, player bar, player error), "You can download it" dropped from player
+  messages, right-click on the video blocked, Accounts text no longer says viewers can download.
+- **Files:** `server/bams/stream.py` (`_encoder_works`, `_encoder_args(cqp=)`, `_vaapi_cqp`, `VAAPI_QP`, `hls_copy_cmd`,
+  `spawn(cwd=)`, `video_encoder` forced path), `hls.py` (`_restart`), `app.py` (download route, `download_url`, `/stream`);
+  tests `test_stream.py` (VAAPI fallback test, bare init name, copy-HLS playlist check tolerant of FFmpeg 6.1's -6 ms
+  MKV start), `test_hls.py` (runs start in the variant's folder), `test_api.py` (no download); `web/src/api.ts`,
+  `pages/Detail.tsx`, `pages/Player.tsx`, `components/AccountSettings.tsx`; CHANGELOG, VERSION 0.9.2.
+- **Verified:** 300 server tests on Windows (FFmpeg 9.0.2). Docker `ubuntu:24.04` (FFmpeg 6.1.1): the old code gives the
+  server's exact error (`Failed to open segment …/init_3.mp4`, 500), the new one passes the real copy-HLS test (one
+  unrelated Linux-only failure, see Left open). On the owner's server with the patched code and its own Python/FFmpeg:
+  copy-HLS of Family Guy S01E01 made `init_0.mp4` + 29 segments in 6 s (HEVC + AAC); raw FFmpeg on the HD 630:
+  bitrate options fail, CQP works; patched detection picks VAAPI in CQP mode and converts S01E01 at ~14× real time
+  all-GPU, ~11× hybrid (H.264 720×552 + AAC). Test server :8497 (preview browser): H.264+AC3 film and HEVC+AC3 episode
+  play over copy-HLS, no Download anywhere, no stray `init_*.mp4` in the server's working dir, right-click blocked.
+- **Left open:** `test_encoder_choice_api` fails on Linux (it fakes `sys.platform = "win32"`, which breaks
+  `shutil.which`); copy-HLS sessions read every keyframe first (~8 s per episode on the NAS, cached); with CQP the
+  quality menu lowers the size but there's no bitrate cap; `intel-media-va-driver-non-free` would give the HD 630
+  bitrate modes (not tried).
 
 ### 2026-10-10: Best guess button, a show's films go to its Specials (release 0.9.1, parser v8)
 - **What / why:** owner, after 0.9.0 on the real library: no way to run the guess on one file by hand; "feature length

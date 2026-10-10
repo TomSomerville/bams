@@ -84,7 +84,7 @@ settings or accounts (and Fix match, folder browsing) are for admins.
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` | say what a file is (kept across rescans) / forget it |
 | `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` | a TMDB/IMDb link → those fields; names already in a library (suggestions) |
 | `GET /api/tmdb/search?kind=show\|movie&q=` · `POST /api/items/{id}/match {tmdb_id}` | fix match |
-| `GET /api/files/{id}/stream` · `/download` | original file, Range-capable |
+| `GET /api/files/{id}/stream` | original file, Range-capable, for playing (no downloads) |
 | `GET /api/files/{id}/remux?t=&audio=&ch=` · `/seek?t=` | video copied + audio converted to AAC (fragmented MP4) for browsers; `/seek` says where a stream started at `t` really begins |
 | `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video converted to H.264 too (fragmented MP4) |
 | `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, start?}` · `GET /api/hls/{sid}/index.m3u8` | HLS: the remux or a conversion, segments made on demand |
