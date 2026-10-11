@@ -160,10 +160,32 @@ def next_episode(con: sqlite3.Connection, episode_id: int) -> int | None:
     return r["id"] if r else None
 
 
+def hide_continue(con: sqlite3.Connection, user_id: int, item_id: int) -> bool:
+    """Take a title out of the user's Continue Watching: the movie, or the whole show of an episode/season. It comes
+    back once the user watches it again (any activity after now). False when it's none of those."""
+    r = con.execute("""SELECT i.kind, i.parent_id, (SELECT s.parent_id FROM items s WHERE s.id=i.parent_id) AS show
+                       FROM items i WHERE i.id=?""", (item_id,)).fetchone()
+    if not r or r["kind"] not in (*PLAYABLE, "season", "show"):
+        return False
+    title = {"movie": item_id, "show": item_id, "season": r["parent_id"], "episode": r["show"]}[r["kind"]]
+    with Tx(con):
+        con.execute("""INSERT INTO continue_hidden(user_id, item_id, hidden_at) VALUES (?,?,?)
+                       ON CONFLICT(user_id, item_id) DO UPDATE SET hidden_at=excluded.hidden_at""",
+                    (user_id, title, now()))
+    return True
+
+
 def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) -> list[tuple[int, str, float]]:
     """(item id, why, when) most recent first: titles stopped part-way ("resume"), and for shows whose last
     watched episode was finished, the next unwatched one ("next"). `when` = the activity it comes from (apps that
-    show several servers' rows as one order them by it)."""
+    show several servers' rows as one order them by it). Titles the user took out (`hide_continue`) are left out
+    unless that activity came after."""
+    hidden = {r["item_id"]: r["hidden_at"]
+              for r in con.execute("SELECT item_id, hidden_at FROM continue_hidden WHERE user_id=?", (user_id,))}
+
+    def taken_out(title: int, at: float) -> bool:
+        return title in hidden and at <= hidden[title]
+
     recent = con.execute("""
         SELECT w.item_id, w.position, w.watched, w.updated_at, i.kind,
                (SELECT s.parent_id FROM items s WHERE s.id=i.parent_id) AS show
@@ -176,7 +198,7 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
         if len(out) >= limit:
             break
         if r["kind"] == "movie":
-            if not r["watched"] and r["position"] >= min_resume:
+            if not r["watched"] and r["position"] >= min_resume and not taken_out(r["item_id"], r["updated_at"]):
                 out.append((r["item_id"], "resume", r["updated_at"]))
             continue
         show = r["show"]
@@ -185,6 +207,8 @@ def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) ->
         if not r["watched"] and r["position"] < min_resume:
             continue  # opened but not really watched (or a play that failed): says nothing about where you are
         shows_done.add(show)  # only the most recent activity of a show decides what it offers
+        if taken_out(show, r["updated_at"]):
+            continue
         if not r["watched"] and r["position"] >= min_resume:
             out.append((r["item_id"], "resume", r["updated_at"]))
             continue

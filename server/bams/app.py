@@ -1437,6 +1437,14 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             out.append(d)
         return watch.annotate(con, me["id"], out)
 
+    @app.delete("/api/continue/{item_id}")
+    def hide_continue(item_id: int, con=Depends(db), me=Depends(current_user)):
+        """Take a card out of Continue Watching: the movie, or the episode's whole show. It comes back once it's
+        watched again."""
+        if not watch.hide_continue(con, me["id"], item_id):
+            raise HTTPException(404, "not a movie, episode, season or show")
+        return {"hidden": True}
+
     @app.get("/api/items/{item_id}/tracks")
     def item_tracks(item_id: int, con=Depends(db)):
         """Every playable track of an artist, album or track, in play order: what a music queue needs."""

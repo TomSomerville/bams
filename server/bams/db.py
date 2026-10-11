@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -324,7 +324,17 @@ def _v10(con: sqlite3.Connection) -> None:
         UNIQUE (file_id, provider, ext_id))""")
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10}  # target version -> step
+def _v11(con: sqlite3.Connection) -> None:
+    """v11: titles a user took out of Continue Watching (watch.hide_continue). A movie or a show stays out until
+    it's watched again (activity after `hidden_at`)."""
+    con.execute("""CREATE TABLE continue_hidden (
+        user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        item_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,  -- a movie or a show
+        hidden_at REAL NOT NULL,
+        PRIMARY KEY (user_id, item_id))""")
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { addExtra, api, checkExtras, extras, getServer, getToken, hello, refreshTicket, savedUser, setSession, SIGNED_OUT, type Extra, type User } from "./api";
 import type { ServerLibrary } from "../../web/src/api";
+import { okDown, okUp } from "./hold";
 import { keyHandler } from "./keys";
 import { currentFid, move, settleFocus, type Dir } from "./nav";
 import { exitApp, isBack, KEY, registerKeys } from "./tizen";
@@ -205,6 +206,10 @@ export default function App() {
         return;
       }
       if (e.keyCode === KEY.ENTER) {
+        if (okDown(e)) {  // a card that can be held (hold.ts): pressed or held, it's decided there
+          e.preventDefault();
+          return;
+        }
         const el = document.activeElement as HTMLElement | null;
         // OK presses the focused button ourselves (the same on every TV firmware; native activation is cancelled)
         if (el && (el.tagName === "BUTTON" || (el.tagName !== "INPUT" && el.hasAttribute("data-focus")))) {
@@ -216,6 +221,14 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [nav, phase, adding, music]);
+
+  useEffect(() => {
+    const up = (e: KeyboardEvent) => {
+      if (e.keyCode === KEY.ENTER) okUp();
+    };
+    window.addEventListener("keyup", up);
+    return () => window.removeEventListener("keyup", up);
+  }, []);
 
   if (fatal) {
     return (

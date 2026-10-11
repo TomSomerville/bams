@@ -1,8 +1,9 @@
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ContinueItem, ItemSummary, PlayMethod } from "../api";
 import { fmtRuntime, PLAY_LABEL, plural, subLabel, sxe } from "../format";
 import { useMusic } from "../music";
-import { useItemServer } from "../servers";
+import { callFor, useItemServer } from "../servers";
 import { Poster } from "./Art";
 import Icon from "./Icon";
 
@@ -46,10 +47,61 @@ export function PosterCard({ item }: { item: ItemSummary }) {
   );
 }
 
+const LONG_PRESS = 500;  // ms held before a press counts as a long press
+
+/** A long press (touch or mouse, held still) or a right-click on an element calls `onLong`; the click that ends a
+ *  long press is swallowed so it doesn't also open the link under it. Presses inside `ignore` don't count. */
+function useLongPress(onLong: () => void, ignore: string) {
+  const timer = useRef(0);
+  const from = useRef<{ x: number; y: number } | null>(null);
+  const fired = useRef(false);
+  const stop = () => {
+    window.clearTimeout(timer.current);
+    from.current = null;
+  };
+  const inside = (e: React.SyntheticEvent) => !!(e.target as Element).closest(ignore);
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      fired.current = false;
+      if (e.button !== 0 || inside(e)) return;
+      from.current = { x: e.clientX, y: e.clientY };
+      timer.current = window.setTimeout(() => {
+        fired.current = true;
+        from.current = null;
+        onLong();
+      }, LONG_PRESS);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const f = from.current;
+      if (f && Math.hypot(e.clientX - f.x, e.clientY - f.y) > 10) stop();  // scrolling the row, not holding
+    },
+    onPointerUp: stop,
+    onPointerCancel: stop,
+    onPointerLeave: stop,
+    onContextMenu: (e: React.MouseEvent) => {
+      if (inside(e)) return;
+      e.preventDefault();
+      if (from.current) fired.current = true;  // a touch browser's own long press: swallow its click too
+      stop();
+      onLong();
+    },
+    onClickCapture: (e: React.MouseEvent) => {
+      if (!fired.current) return;
+      fired.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+  };
+}
+
 /** Continue Watching: a wide still with the progress bar. The picture plays straight away; the show's name opens
- *  the show, the episode line opens its season (the show page on that season's tab). */
-export function ContinueCard({ item }: { item: ContinueItem }) {
-  const { to } = useItemServer(item);
+ *  the show, the episode line opens its season (the show page on that season's tab). A long press (or right-click)
+ *  offers to take it out of the row: the movie, or the whole show, until it's watched again (`onRemoved` once the
+ *  server has done it). */
+export function ContinueCard({ item, onRemoved }: { item: ContinueItem; onRemoved?: () => void }) {
+  const { to, rid } = useItemServer(item);
+  const [menu, setMenu] = useState(false);
+  const press = useLongPress(() => setMenu(true), ".continue-menu");
   const pct = progressOf(item);
   const img = item.still || item.show?.backdrop || item.backdrop || item.show?.poster || item.poster;
   const title = item.show?.title ?? item.title;
@@ -62,14 +114,64 @@ export function ContinueCard({ item }: { item: ContinueItem }) {
   const page = to(item.show ? `/title/${item.show.id}` : `/title/${item.id}`);
   const seasonPage = item.season_id ? `${page}?season=${item.season_id}` : page;
   return (
-    <div className="continue-card">
+    <div className="continue-card" {...(onRemoved ? press : {})}>
       <Link to={to(`/play/${item.id}`)} className="continue-frame" aria-label={`Play ${title}${item.show ? ` ${item.title}` : ""}`}>
-        {img ? <img className="continue-img" src={img} alt="" loading="lazy" /> : <Poster src={null} title={title} />}
+        {img ? <img className="continue-img" src={img} alt="" loading="lazy" draggable={false} /> : <Poster src={null} title={title} />}
         <div className="continue-play"><span className="round-btn"><Icon name="play" size={18} /></span></div>
         {pct !== null && <div className="progress"><div style={{ width: `${pct * 100}%` }} /></div>}
       </Link>
       <Link to={page} className="poster-title">{title}</Link>
       <Link to={seasonPage} className="poster-sub">{sub}</Link>
+      {menu && onRemoved && (
+        <ContinueMenu path={`/api/continue/${item.id}`} rid={rid} onClose={() => setMenu(false)} onRemoved={onRemoved} />
+      )}
+    </div>
+  );
+}
+
+/** Over a Continue Watching card after a long press: take it out of the row, or not. Escape or a press anywhere
+ *  else closes it. */
+function ContinueMenu({ path, rid, onClose, onRemoved }: {
+  path: string; rid: number | null; onClose: () => void; onRemoved: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    ref.current?.querySelector("button")?.focus();
+    const away = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) close.current();
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close.current();
+    };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, []);
+  const remove = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await callFor(rid).del(path);
+      onRemoved();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="continue-menu" ref={ref}>
+      {err && <p className="continue-menu-err">{err}</p>}
+      <button className="btn small primary" onClick={() => void remove()} disabled={busy}>
+        <Icon name="close" size={14} /> Remove from Continue Watching
+      </button>
+      <button className="btn small ghost" onClick={onClose}>Cancel</button>
     </div>
   );
 }
