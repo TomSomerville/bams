@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { api, LIBRARIES_CHANGED, type ServerLibrary } from "../api";
+import { api, LIBRARIES_CHANGED, SERVER_RENAMED, type RemoteServer, type ServerLibrary } from "../api";
 import { useAuth } from "../auth";
-import { useRemotes } from "../servers";
+import { setLibraryOrder, useRemotes } from "../servers";
 import { useApi } from "../useApi";
 import { LIB_TYPES } from "../format";
 import Icon from "./Icon";
@@ -18,6 +18,13 @@ export default function Sidebar() {
     window.addEventListener(LIBRARIES_CHANGED, reload);
     return () => window.removeEventListener(LIBRARIES_CHANGED, reload);
   }, [reload]);
+  // this server's own libraries go under its name (Settings → Server name), like other servers' do
+  const hello = useApi<{ name: string }>("/api/hello");
+  const reloadName = hello.reload;
+  useEffect(() => {
+    window.addEventListener(SERVER_RENAMED, reloadName);
+    return () => window.removeEventListener(SERVER_RENAMED, reloadName);
+  }, [reloadName]);
 
   // admins arrange the libraries by dragging (or the arrow keys); everyone sees that order
   const move = (from: number, to: number) => {
@@ -43,7 +50,9 @@ export default function Sidebar() {
         <NavLink to="/" end className="nav-item">
           <Icon name="home" /> <span>Home</span>
         </NavLink>
-        {!!libs?.length && <div className="nav-label">Libraries</div>}
+        {!!libs?.length && (
+          <div className="nav-label nav-server" title={hello.data?.name}><span>{hello.data?.name ?? " "}</span></div>
+        )}
         <div ref={listRef} className={`nav-libs ${dragging ? "dragging" : ""}`}>
           {libs?.map((l, i) => (
             <div key={l.id} className={`nav-row ${rowClass(i)}`}>
@@ -59,25 +68,7 @@ export default function Sidebar() {
           ))}
         </div>
         {/* other BAMS servers this account is connected to: their libraries, as named and chosen in Settings */}
-        {servers?.map((s) => {
-          const shown = s.libraries.filter((l) => l.show);
-          if (!shown.length) return null;
-          const state = !s.signed_in ? "signed out" : !s.online ? "offline" : null;
-          return (
-            <div key={s.id} className="nav-remote">
-              <div className="nav-label nav-server" title={`${s.name} (${s.url}), signed in as ${s.account}`}>
-                <span>{s.name}</span>
-                {state && <NavLink to="/settings#servers" className="nav-state" title={state === "signed out"
-                  ? "Sign in to this server again in Settings" : "Can't reach this server right now"}>{state}</NavLink>}
-              </div>
-              {shown.map((l) => (
-                <NavLink key={l.id} to={`/r/${s.id}/library/${l.id}`} className="nav-item">
-                  <Icon name={LIB_TYPES[l.type].icon} /> <span>{l.name}</span>
-                </NavLink>
-              ))}
-            </div>
-          );
-        })}
+        {servers?.map((s) => <RemoteLibraries key={s.id} s={s} />)}
       </div>
 
       <div className="nav-group bottom">
@@ -86,5 +77,43 @@ export default function Sidebar() {
         </NavLink>
       </div>
     </nav>
+  );
+}
+
+/** Another server's libraries, the ones shown here. Anyone can drag them into order: it's kept in this browser
+ *  (servers.tsx), like their names, so it needs no admin rights there and changes nothing for others. */
+function RemoteLibraries({ s }: { s: RemoteServer }) {
+  const shown = s.libraries.filter((l) => l.show);
+  const move = (from: number, to: number) => {
+    const next = [...shown];
+    next.splice(to, 0, ...next.splice(from, 1));
+    let k = 0;  // hidden libraries keep their places in the order; the shown ones swap theirs
+    setLibraryOrder(s.id, s.libraries.map((l) => (l.show ? next[k++].id : l.id)));
+  };
+  const { listRef, dragging, handle, rowClass } = useReorder<HTMLDivElement>(shown.length, move);
+  if (!shown.length) return null;
+  const state = !s.signed_in ? "signed out" : !s.online ? "offline" : null;
+  return (
+    <div className="nav-remote">
+      <div className="nav-label nav-server" title={`${s.name} (${s.url}), signed in as ${s.account}`}>
+        <span>{s.name}</span>
+        {state && <NavLink to="/settings#servers" className="nav-state" title={state === "signed out"
+          ? "Sign in to this server again in Settings" : "Can't reach this server right now"}>{state}</NavLink>}
+      </div>
+      <div ref={listRef} className={`nav-libs ${dragging ? "dragging" : ""}`}>
+        {shown.map((l, i) => (
+          <div key={l.id} className={`nav-row ${rowClass(i)}`}>
+            <NavLink to={`/r/${s.id}/library/${l.id}`} className="nav-item">
+              <Icon name={LIB_TYPES[l.type].icon} /> <span>{l.name}</span>
+            </NavLink>
+            {shown.length > 1 && (
+              <button type="button" className="reorder-handle nav-handle" aria-label={`Move ${l.name}`} {...handle(i)}>
+                <Icon name="grip" size={16} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

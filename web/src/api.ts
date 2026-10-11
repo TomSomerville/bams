@@ -37,6 +37,9 @@ export const SIGNED_OUT = "bams:signed-out";
 /** Window event: libraries were added, renamed, removed or reordered (the sidebar reloads its list). */
 export const LIBRARIES_CHANGED = "bams:libraries";
 
+/** Window event: an admin renamed this server (the sidebar shows its name over this server's libraries). */
+export const SERVER_RENAMED = "bams:server-name";
+
 export const api = {
   get: <T>(p: string) => call<T>("GET", p),
   post: <T>(p: string, b?: unknown) => call<T>("POST", p, b ?? {}),

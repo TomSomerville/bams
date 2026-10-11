@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-11** (release 0.11.0).
+Last updated: **2026-10-11** (release 0.11.1).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -154,6 +154,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | OpenSubtitles is searched by the title's **TMDB id** (show id + season/episode for episodes), else IMDb, plus the file's **moviehash** (BAMS's `quick_hash` is their hash); by name only when that finds nothing | Their advice; the hash puts subtitles made for the exact file first ("made for this file") |
 | 10-11 | **Sleep mode** = this episode **and 2 more**, then stop (a movie: stop at its end); toggled in the player, per viewing, not saved | Tester request ("finish the current episode, play 2 more, and then stop"). Carried to the next episode in the navigation state |
 | 10-11 | **Hyphenated words in names are read whole** (`parse._read`): when guessit's title cuts through one, it's read again with the hyphen protected. In file names "Show-01" stays episode 1 and an all-lowercase "grp-title.2010" keeps its group; a movie folder's name wins when the file's lost its front | Tester: "Catch-22" was "Catch" (guessit read "-22" as the episode; "Ant-" in "Ant-Man.2015" as a release group). Dry run over the owner's 4,391 real paths: nothing else changed |
+| 10-11 | **Another server's library order is kept per browser** (dragged in the sidebar, `bams.servers` → `order`), by anyone; this server's own order stays the admin's, shared by everyone. This server's libraries sit under its **name** in the sidebar, like other servers' | Owner: "allow me to drag and re-arrange the library order on other servers" and "This should say your server name, not Libraries". Kept where that browser's names and hidden flags for the server already are: no admin rights needed there, nothing changes for its other users |
 | 10-11 | **Fix match lists the title's folders** (shows: the folder above the season folders, as the parser picks it, with file counts; movies: their files), admins only | Tester request: check the right folder is being fixed. Server paths are admin information (`/api/status` hides them from viewers too) |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
 
@@ -250,7 +251,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   encoder in use + conversion limit; Watched and Continue Watching thresholds). Library pages have an Unrecognized
   tab for admins. Player: speed 0.1x–3x. Music queue: drag (or arrow keys) to reorder. Show-password buttons,
   confirm-new-password. Settings → Home page (per person): banner on/off, rows on/off and order (drag, arrow keys, ▲▼), reset. Playback card: encoder choice (CPU/GPU). Library cards:
-  live scan progress (N of M, size, time left, bar) and ▲▼ order buttons. Sidebar: admins drag libraries into order.
+  live scan progress (N of M, size, time left, bar) and ▲▼ order buttons. Sidebar: this server's libraries under its
+  name; admins drag them into order; anyone drags another server's libraries into order (kept in the browser).
 - Music: library page (Artists/Albums/Playlists tabs, sort, genres), artist page (bio, photo credit, albums), album page
   (tracklist by disc, format note, Wikipedia/MusicBrainz links), playlist page (`/playlist/:id`, cover mosaic, missing
   entries), Fix match (goes to the kept album after a merge), a now-playing bar with queue that keeps playing across
@@ -292,6 +294,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 ### More servers (0.7.0, web + TV)
 - Clients keep their own server lists: web `servers.tsx` (`bams.servers` in localStorage; `/r/<rid>/…` pages are the
   same page components scoped to that server), TV `api.ts` extras. Server name setting (Settings → This server).
+  Web: another server's libraries can be renamed, hidden and put in order per browser (0.11.1).
 
 ### Docs
 README.md, CLAUDE.md, docs/PLAN.md, docs/STATUS.md, docs/CODEBASE.md, docs/FORMATS.md, docs/READ-ONLY.md,
@@ -353,6 +356,31 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-11: Server name over its own libraries, other servers' libraries in any order (release 0.11.1)
+- **What / why:** owner: "Your server's Libraries are categorized under the word 'Libraries' instead of the server
+  name… This should say your server name", then "allow me to drag and re-arrange the library order on other servers.
+  Currently I can only do this on mine". Web only. The sidebar's "Libraries" heading is now the server's name
+  (`GET /api/hello` → `name`, the Server name setting), cut with "…" when long (full name on hover); saving a new
+  name in Settings fires `SERVER_RENAMED` (`bams:server-name`) and the sidebar reloads it. Another server's shown
+  libraries get the same drag handle (and arrow keys) as this server's (`RemoteLibraries` in `Sidebar.tsx`, on
+  `useReorder`); the order is stored per browser with that server's other choices (`Stored.order` in
+  `bams.servers`, `setLibraryOrder`), `describe()` applies it (libraries not in it follow in the server's order),
+  so Settings → Other BAMS servers lists them in that order too. Hidden libraries keep their place: the shown ones
+  swap places among themselves. Signing in to the server again keeps the order. Anyone can do it (no admin rights
+  there needed); the other server and its other users see nothing of it.
+- **Files:** web `components/Sidebar.tsx`, `servers.tsx`, `api.ts` (`SERVER_RENAMED`),
+  `components/ServerNameSettings.tsx`, `styles.css` (comment); CHANGELOG, VERSION 0.11.1. TV app unchanged (0.11.0).
+- **Verified:** web `tsc` + build; 321 server tests in the release worktree. Scratch server (:8501, copy of the
+  local DB, own admin account): heading read "Beached's BAM Server" (fits uncut at 1280 px); renaming it to "Living
+  Room Test Server" in Settings changed the heading without a reload (one `/api/hello`), "Use the default" changed it
+  back. Same server connected to itself as an "other server": a real mouse drag moved Music below Movies (no
+  navigation), arrow keys on a handle moved a library, a hidden library kept its place while the others were
+  reordered and came back there, Settings listed the same order, the order survived a reload, one shown library
+  showed no handle, this server's own list didn't move.
+- **Left open:** the TV app's rail still shows this server's libraries without a heading (other servers' have their
+  names) and can't reorder; offered to the owner. Released alone while another session's Fire TV app and "Keep" for
+  hand identifications stay uncommitted.
 
 ### 2026-10-11: Remove from Continue Watching (release 0.11.0)
 - **What / why:** owner: "Long press on a video card in the Continue Watching category to remove it from continue

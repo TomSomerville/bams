@@ -84,19 +84,19 @@ bams/
 │       ├── settings.tsx       SettingsProvider: server TMDB status (configured/last4), serverError
 │       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
-│       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search)
+│       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search); this browser's names, hidden flags and order for each server's libraries (`setLibrary`, `setLibraryOrder`; `describe` applies the order)
 │       ├── everywhere.ts      Home rows (`homeSpecs`) and Search across every server, and how answers merge (newest, interleave, Continue Watching by `last_watched_at`, genres); SHARED with the TV app (no React/router)
 │       ├── subtitleLangs.ts   OpenSubtitles' language list, names, the default pick; SHARED with the TV app (no React/storage)
 │       ├── homeRows.ts        Home's rows: defaultRows(libs, genres) (default order, labels; one `genre:<name>` row per genre) + homeRows(saved, libs, genres) (user order merged with what exists; an old `genres` entry expands in place)
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
-│       │   ├── Sidebar.tsx    Logo, Home, one link per library in the admin's order (admins drag to reorder), each other server's shown libraries under its name, Settings
+│       │   ├── Sidebar.tsx    Logo, Home, this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Settings
 │       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
 │       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out) + admins' "Who can sign in" (users CRUD)
 │       │   ├── RemoteSettings.tsx  Settings → Other BAMS servers: connect form, per-server card (rename/hide libraries, sign in again, disconnect)
-│       │   ├── ServerNameSettings.tsx  Settings → This server → Server name (admins)
+│       │   ├── ServerNameSettings.tsx  Settings → This server → Server name (admins; saving fires `SERVER_RENAMED` for the sidebar)
 │       │   ├── HomeSettings.tsx  Your Home page: banner pref + rows on/off and order (drag/arrow keys/▲▼), reset → `home_rows` pref
 │       │   ├── PasswordInput.tsx  Password field with a show/hide button (sign-in, setup, accounts)
 │       │   ├── WatchSettings.tsx  Playback card: "started after" seconds and "watched at" %
@@ -520,7 +520,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 |---|---|---|
 | `POST /api/auth/2fa/setup` → `{secret, uri}` · `POST /api/auth/2fa {secret, code, password}` · `POST /api/auth/2fa/off {password}` · `DELETE /api/users/{id}/2fa` (admin) | two-step sign-in on/off | AccountSettings |
 | `GET /api/auth/state` · `POST /api/auth/login {name,password,code?}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
-| `GET /api/hello` (public) → `{app, version, name}` · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx |
+| `GET /api/hello` (public) → `{app, version, name}` · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx, Sidebar (this server's name) |
 | `PUT /api/settings/server-name {name}` (admin; `""` = default) → `{name, default, custom}` (also in `GET /api/settings` → `server_name`) | what the server is called in apps' lists; default "<oldest admin>'s BAM Server" (`app.default_server_name`) | ServerNameSettings |
 | `POST /api/devices/link {name}` (public) → `{code, secret, expires_in}` · `POST /api/devices/link/poll {secret}` (public) → `{status}` or `{status: linked, token, user}` · `POST /api/devices/approve {code}` · `GET /api/devices` · `DELETE /api/devices/{id}` | TV link codes; your linked TVs, sign one out | tv, TvSettings, LinkTv |
 | `GET /api/media-ticket` → `{prefix, expires_in}` | `/api/t/<ticket>`: media URLs for players and `<img>` that can't send headers | tv |
@@ -640,7 +640,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Add a page | `web/src/pages/*.tsx` + route in `App.tsx` (+ Sidebar link) |
 | Change playback rules or codecs | `stream.plan` / `stream.video_copyable` (+ `test_stream.py`, FORMATS.md) |
 | Tune transcode quality / size / encoders | `stream._encoder_args`, `_max_bitrate`, `_box`, `QUALITIES`, `ENCODERS`, `transcode_filters` |
-| Change how libraries are ordered | `library.ORDER` / `listed` / `reorder`; UI `Sidebar.tsx`, Settings ▲▼ |
+| Change how libraries are ordered | `library.ORDER` / `listed` / `reorder`; UI `Sidebar.tsx`, Settings ▲▼. Other servers' libraries (per browser): `servers.tsx` `setLibraryOrder` / `describe`, `Sidebar.tsx` `RemoteLibraries` |
 | Add a scan step to the progress display | call `progress(step, done, total, bytes_done, bytes_total)`; units per step in `unitOf()` (`Settings.tsx`) |
 | Tune HLS segment length | `stream.SEGMENT` (conversions; copies follow the file's keyframes) |
 | Which codecs the browser is asked about | `canDecode()` in `web/src/pages/Player.tsx` |

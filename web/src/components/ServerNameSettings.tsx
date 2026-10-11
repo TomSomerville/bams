@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ServerName } from "../api";
+import { api, SERVER_RENAMED, type ServerName } from "../api";
 
 /** Settings (admins): what this server is called where apps list servers (TVs, other browsers' sidebars). */
 export default function ServerNameSettings() {
@@ -22,6 +22,7 @@ export default function ServerNameSettings() {
       setCur(r);
       setName(r.custom ? r.name : "");
       setSaved(true);
+      window.dispatchEvent(new Event(SERVER_RENAMED));
     } catch (e) {
       setErr((e as Error).message);
     }
