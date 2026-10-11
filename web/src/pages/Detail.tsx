@@ -1,8 +1,8 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
 import { Backdrop, Poster } from "../components/Art";
-import { PlayBadge, PosterCard, progressOf } from "../components/Cards";
+import { ListToggle, PlayBadge, PosterCard, progressOf } from "../components/Cards";
 import FixMatch from "../components/FixMatch";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
@@ -66,9 +66,15 @@ function WatchedButton({ item, watched, done, small }: { item: ItemSummary; watc
   );
 }
 
-function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => void }) {
+/** A season's episodes. `picked`: an episode to point out (opened from the watch list), scrolled to once. */
+function Episodes({ season, picked, onChange }: { season: ItemSummary; picked: number | null; onChange: () => void }) {
   const { to } = useScope();
   const { data, reload } = useApi<ItemDetail>(`/api/items/${season.id}`);
+  const pickedRef = useRef<HTMLLIElement>(null);
+  const loaded = !!data;
+  useEffect(() => {
+    if (loaded) pickedRef.current?.scrollIntoView({ block: "center" });
+  }, [loaded]);
   if (!data) return <p className="muted">Loading episodes…</p>;
   const changed = () => { reload(); onChange(); };
   return (
@@ -76,11 +82,12 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
       <div className="season-bar">
         {data.overview && <p className="muted season-overview">{data.overview}</p>}
         {!!data.episodes && <WatchedButton item={data} watched={data.unwatched === 0} done={changed} />}
+        <ListToggle big item={data} what=" season" />
       </div>
       <ol className="episodes">
         {data.children.map((e) => (
-          <li key={e.id}>
-            <Link to={to(`/play/${e.id}`)} className={`episode ${e.progress?.watched ? "seen" : ""}`}>
+          <li key={e.id} ref={e.id === picked ? pickedRef : undefined}>
+            <Link to={to(`/play/${e.id}`)} className={`episode ${e.progress?.watched ? "seen" : ""} ${e.id === picked ? "picked" : ""}`}>
               <span className="ep-num">{e.episode_number ?? "·"}</span>
               <div className="ep-thumb">
                 {e.still ? <img className="ep-img" src={e.still} alt="" loading="lazy" />
@@ -93,6 +100,7 @@ function Episodes({ season, onChange }: { season: ItemSummary; onChange: () => v
                 {e.overview && <p>{e.overview}</p>}
               </div>
               <span className="ep-time">{[e.air_date?.slice(0, 4), e.runtime ? `${e.runtime}m` : null].filter(Boolean).join(" · ")}</span>
+              <ListToggle small item={e} />
               <WatchedButton small item={e} watched={!!e.progress?.watched} done={reload} />
             </Link>
           </li>
@@ -107,6 +115,7 @@ export default function Detail() {
   const { to, remote } = useScope();
   const [search] = useSearchParams();
   const wantSeason = Number(search.get("season")) || null;  // ?season=<season id> (Continue Watching's episode line)
+  const pickedEpisode = Number(search.get("episode")) || null;  // &episode=<id>: pointed out (from the watch list)
   const { data: item, error, reload } = useApi<ItemDetail>(`/api/items/${id}`);
   const [seasonIdx, setSeasonIdx] = useState<number | null>(null);
   const [fixing, setFixing] = useState(false);
@@ -165,6 +174,7 @@ export default function Detail() {
             {resumeAt > 0 && <Link to={to(`/play/${item.id}?start=0`)} className="btn ghost"><Icon name="refresh" /> Start over</Link>}
             {item.kind === "movie" && <WatchedButton item={item} watched={!!item.progress?.watched} done={reload} />}
             {item.kind === "show" && !!item.episodes && <WatchedButton item={item} watched={item.unwatched === 0} done={reload} />}
+            <ListToggle big item={item} />
             {(!remote || remote.is_admin) && (  // another server's titles: only its admins can fix them
               <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>)}
             {item.ids.imdb && (
@@ -184,7 +194,8 @@ export default function Detail() {
               </button>
             ))}
           </div>
-          {season && <Episodes key={season.id} season={season} onChange={reload} />}
+          {season && <Episodes key={season.id} season={season} onChange={reload}
+            picked={season.id === wantSeason ? pickedEpisode : null} />}
         </section>
       )}
 

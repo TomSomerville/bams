@@ -6,11 +6,17 @@ export type HomeRow = { id: string; label: string; show: boolean };
 /** The genre a "genre:<name>" row shows, or null for other rows. */
 export const rowGenre = (id: string) => (id.startsWith("genre:") ? id.slice(6) : null);
 
-/** Home's rows in their default order: Continue Watching, Recently Added, each TV/movie library's newest titles,
- *  each music library's new albums, Top Rated, then one row per genre (most titles first). */
-export function defaultRows(libs: ServerLibrary[], genres: Genre[]): Omit<HomeRow, "show">[] {
+/** The watch list's name until the user gives it one (prefs.watchlist_name ""). */
+export const WATCHLIST_NAME = "My Watch List";
+export const listName = (saved?: string | null) => saved?.trim() || WATCHLIST_NAME;
+
+/** Home's rows in their default order: Continue Watching, the watch list (called `list` by the user), Recently
+ *  Added, each TV/movie library's newest titles, each music library's new albums, Top Rated, then one row per genre
+ *  (most titles first). */
+export function defaultRows(libs: ServerLibrary[], genres: Genre[], list = ""): Omit<HomeRow, "show">[] {
   return [
     { id: "continue", label: "Continue Watching" },
+    { id: "watchlist", label: listName(list) },
     { id: "recent", label: "Recently Added" },
     ...libs.filter((l) => l.type !== "music").map((l) => ({ id: `lib:${l.id}`, label: `Recently Added ${l.name}` })),
     ...libs.filter((l) => l.type === "music").map((l) => ({ id: `lib:${l.id}`, label: `Recently Added ${l.name}` })),
@@ -22,8 +28,8 @@ export function defaultRows(libs: ServerLibrary[], genres: Genre[]): Omit<HomeRo
 /** The user's saved order applied to the rows that exist now. Saved rows that no longer exist (a removed library)
  *  are dropped; rows the user hasn't placed yet (a new library or genre) are shown, after the row they follow by
  *  default. An older save's single "genres" entry stands for every genre row it doesn't place itself. */
-export function homeRows(saved: HomeRowPref[], libs: ServerLibrary[], genres: Genre[]): HomeRow[] {
-  const all = defaultRows(libs, genres);
+export function homeRows(saved: HomeRowPref[], libs: ServerLibrary[], genres: Genre[], list = ""): HomeRow[] {
+  const all = defaultRows(libs, genres, list);
   const byId = new Map(all.map((r) => [r.id, r]));
   const placed = new Set(saved.map((s) => s.id));
   const expanded = saved.flatMap((s) => s.id !== "genres" ? [s]

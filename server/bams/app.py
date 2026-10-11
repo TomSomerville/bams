@@ -275,6 +275,7 @@ class HomeRowIn(BaseModel):
 class PrefsIn(BaseModel):
     home_hero: bool | None = None
     home_rows: list[HomeRowIn] | None = Field(None, max_length=auth.MAX_HOME_ROWS)  # Home's rows, in order
+    watchlist_name: str | None = Field(None, max_length=auth.MAX_LIST_NAME)  # "" = the default name
 
 
 class HlsIn(BaseModel):
@@ -1444,6 +1445,49 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if not watch.hide_continue(con, me["id"], item_id):
             raise HTTPException(404, "not a movie, episode, season or show")
         return {"hidden": True}
+
+    # -- the watch list (per user; apps that show several servers put every server's list together)
+    @app.get("/api/watchlist")
+    def get_watchlist(limit: int = Query(500, ge=1, le=5000), con=Depends(db), me=Depends(current_user)):
+        """The signed-in user's watch list, most recently added first: movies, shows, seasons and episodes, each
+        with `listed_at` (when it was added: apps merge several servers' lists by it). Seasons and episodes carry
+        their show's title and art (`show`), episodes their season (`season_id`)."""
+        shows: dict[int, dict] = {}
+
+        def show_of(show_id: int) -> dict:
+            if show_id not in shows:
+                s = con.execute("SELECT id, title, poster, backdrop FROM items WHERE id=?", (show_id,)).fetchone()
+                shows[show_id] = {"id": s["id"], "title": s["title"], "poster": _img(s["poster"]),
+                                  "backdrop": _img(s["backdrop"])}
+            return shows[show_id]
+
+        out = []
+        for item_id, at in watch.watch_list(con, me["id"], limit):
+            r = con.execute(f"{ITEM_SELECT} WHERE id=?", (item_id,)).fetchone()
+            if not r:
+                continue
+            d = item_summary(r)
+            d["listed_at"] = at
+            if r["kind"] == "season":
+                d["show"] = show_of(r["parent_id"])
+            elif r["kind"] == "episode":
+                d["show"] = show_of(con.execute("SELECT parent_id FROM items WHERE id=?", (r["parent_id"],)).fetchone()[0])
+                d["season_id"] = r["parent_id"]
+            out.append(d)
+        return watch.annotate(con, me["id"], out)
+
+    @app.put("/api/watchlist/{item_id}")
+    def add_to_watchlist(item_id: int, con=Depends(db), me=Depends(current_user)):
+        """Put a movie, show, season or episode on your watch list (already there: nothing changes)."""
+        at = watch.add_to_list(con, me["id"], item_id)
+        if at is None:
+            raise HTTPException(404, "Only movies, shows, seasons and episodes can go on a watch list.")
+        return {"watchlist": True, "listed_at": at}
+
+    @app.delete("/api/watchlist/{item_id}")
+    def remove_from_watchlist(item_id: int, con=Depends(db), me=Depends(current_user)):
+        """Take an item off your watch list (not on it: nothing changes)."""
+        return {"watchlist": False, "removed": watch.remove_from_list(con, me["id"], item_id)}
 
     @app.get("/api/items/{item_id}/tracks")
     def item_tracks(item_id: int, con=Depends(db)):

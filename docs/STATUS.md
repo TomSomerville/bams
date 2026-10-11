@@ -159,6 +159,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **The Fire TV app is the Samsung TV app** (`tv/`, built page bundled as APK assets) in a full-screen WebView, with **ExoPlayer** drawing under the see-through page and the device's decoders read from Android (`Caps.kt`), not a table. Fire OS 6+ only (not Vega OS) | One app to keep in step with the web/TV look (owner wants web and TV to show the same). ExoPlayer seeks inside a streamed file (AVPlay can't), so files the device decodes play from `/stream`; Fire TV models differ too much for a codec table |
 | 10-11 | **Fire TV releases are signed with a release key** made for BAMS (`C:\Users\Beached\bams-firetv.jks`, passwords in git-ignored `firetv/keystore.properties`); debug builds use this PC's debug key | Owner's choice at release 0.12.0. Android installs an update only over an app signed with the same key: losing it means every Fire TV uninstalls, reinstalls and signs in again |
 | 10-11 | **Quality menu: sizes up to the file's own** (the 16:9 box it fills: 1920×800 counts as 1080p), 4K/1440p only on a GPU encoder (`/api/status.video_encoder.hardware`); a size picked in this player applies even at the file's own size (converted), one **remembered** from another video only shrinks bigger files | Owner: "add a 1080P and 4k option". The CPU encoder stops at 1080p (`stream._box`), so 4K there was a 1080p picture. Remembering "1080p" from one workaround must not convert every 1080p file afterwards |
+| 10-11 | **One watch list across every server, stored on the servers**: each server keeps the watch list entries of its own items per account (table `watchlist`, schema v12); the web and TV apps put every connected server's part into one list (newest added first, `everywhere.listedOrder`). It sits under Home in the sidebar/rail, above the first library, and is a Home row (`watchlist`, after Continue Watching) | Owner: "a universal watch list, where episodes from EVERY server can be added… stored server side so all clients sync it". Keeping each item on its own server honours the 10-10 rule that servers store nothing about other servers; any device signed in to those servers shows the same list. A device not connected to a server doesn't see that server's entries (it couldn't play them either) |
+| 10-11 | The watch list holds **movies, shows, seasons and episodes** (not music); watching something **doesn't** take it off; its **name** is a per-account pref (`watchlist_name`, "" = "My Watch List") on the client's first server, renamed on the web list page | Owner: "ALL files I should be able to add… 'My Watch List' will be its default name". A watch list is for video; removal stays the person's choice (Netflix-style), with the watched tick shown on the card |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
 
 ## 4. Built so far
@@ -275,6 +277,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   quality Original / Auto / sizes up to the file's own (4K on a GPU server, 0.12.0), remux over HLS with fallback to
   the live remux. Sleep mode (bed button: this
   episode + 2 more, a movie to its end), "Check OpenSubtitles…" in the subtitles menu (`FindSubtitles.tsx`).
+- Watch list (0.13.0): "My Watch List" under Home in the sidebar (`/watchlist`: every server's entries, sort, kind
+  chips, rename), a Home row, a "+ My Watch List" button on title pages (show, movie, season), a bookmark on episode
+  rows and on posters (hover), episode entries open their season with the episode picked out.
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
 
@@ -294,6 +299,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - More servers (0.7.0): Settings → Other BAMS servers (add with the find/link screens, link again, remove, show/hide
   each library); their libraries in the menu under the server's name; Home and Search combined with the web's rows
   (`web/src/everywhere.ts`). Music (0.7.0): music libraries, artist/album/playlist pages, a music bar, media keys.
+- Watch list (0.13.0): rail entry under Home (`screens/Watchlist.tsx`, every server's entries; hold OK: take one
+  off), the Home row, a watch list button on detail screens, hold OK on an episode to add/remove it (`ListMenu.tsx`).
 
 ### Fire TV app (`firetv/`, 0.12.0, Android shell around `tv/`)
 - Fire OS 6+ (Fire TV Stick 4K / 4K Max / Lite / 3rd gen, Cube, Fire TV TVs). The `tv/` page in a full-screen WebView
@@ -336,7 +343,9 @@ Roughly in priority order:
    README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
    Fire TV: video playback not yet tried on a real device (sign-in, Home, navigation, search and the keyboard were,
    on a Fire TV in the owner's home); no Amazon Appstore build; Vega OS sticks (2025+) would need a separate app.
-7. **UI redesign** from the owner's mockups.
+7. **Watch list leftovers:** no music on it; renamed on the web only (the TV's rail picks a new name up at its next
+   start, its Home at once); posters' bookmark needs a mouse (touch screens use the title page's button).
+8. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
 
@@ -373,6 +382,32 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-11: Watch list across every server (release 0.13.0)
+- **What / why:** owner: "implement a watchlist feature. ALL files I should be able to add… 'My Watch List' will be its
+  default name… like a library in the library list under Home but above the first library… a universal watch list,
+  where episodes from EVERY server can be added… stored server side so all clients sync it". Each server keeps its own
+  items' entries per account (schema v12 `watchlist (user_id, item_id, added_at)`); web and TV merge every connected
+  server's list into one, newest added first (decisions log). Movies, shows, seasons, episodes; music can't go on it.
+  Every item list/page carries `watchlist` (in `watch.annotate`), so buttons show their state; merges move entries
+  (`items._move_watchlist`). The name is the pref `watchlist_name`.
+- **Files:** server `db.py` (v12), `watch.py` (`LISTABLE`, `add_to_list`, `remove_from_list`, `watch_list`,
+  `annotate`), `items.py`, `auth.py` (pref), `app.py` (`GET /api/watchlist`, `PUT`/`DELETE /api/watchlist/{id}`,
+  `PrefsIn`), `tests/test_watchlist.py` (9), `test_watch.py`/`test_auth.py` (prefs dict, v12). Shared
+  `web/src/everywhere.ts` (`listedOrder`, `listedLook`, `WATCHLIST_PATH`, Home spec `watchlist`), `homeRows.ts`
+  (`watchlist` row, `listName`). Web `pages/Watchlist.tsx`, `components/Cards.tsx` (`ListToggle`, `ListedCard`,
+  `listedPage`, bookmark on `PosterCard`), `Sidebar.tsx`, `Home.tsx`, `Detail.tsx` (buttons, `&episode=` picked),
+  `HomeSettings.tsx`, `Icon.tsx` (bookmark), `styles.css`. TV `screens/Watchlist.tsx`, `ListMenu.tsx`, `Rail.tsx`,
+  `App.tsx`, `Cards.tsx` (`Poster` `look`/`onHold`), `screens/Home.tsx`, `screens/Detail.tsx`, `styles.css`.
+- **Verified:** 9 new server tests (add/list/remove, video kinds only, flags on every list and page, per account,
+  401, merges, deleted items, name pref, v12 migration); full suite 330; web + TV `tsc`; TV tests 37/37. Two scratch
+  servers (:8503, :8504, copies of the dev DB) with this browser connected to both: entries seeded on :8504 and added
+  on :8503 from a show page (show, season, episode bookmark) showed as one list of 6, newest first, posters through
+  :8504's tickets; rename changed the page, sidebar and pref; :8504's episode entry opened its season with the episode
+  picked out and in view; taking it off there removed it from Home's row; a poster's bookmark added Burn Notice without
+  opening it. TV page (Vite, signed in to :8503): rail "Weekend picks" under Home, Home row, list screen (focus on the
+  first poster), detail button "Remove from…", hold on an episode → menu → added, badge shown, focus back on it.
+- **Left open:** see §5 "Watch list leftovers"; not tried on the real TV/Fire TV.
 
 ### 2026-10-11: Fire TV app (release 0.12.0)
 - **What / why:** owner asked for a FireTV/Firestick app (a separate session built it; released by the session that

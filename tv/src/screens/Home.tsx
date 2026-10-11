@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiFor, mediaFor, ridOf, sources, type ContinueItem, type ItemSummary, type User } from "../api";
+import { api, apiFor, mediaFor, ridOf, sources, type ContinueItem, type ItemSummary, type User, type WatchlistItem } from "../api";
 import type { Genre, HomeRowPref } from "../../../web/src/api";
 import {
-  askAll, heroItems, heroPath, homeSpecs, keyOf, mergeGenres, mergeRow, type HomeRowSpec, type Tagged,
+  askAll, heroItems, heroPath, homeSpecs, keyOf, listedLook, mergeGenres, mergeRow, type HomeRowSpec, type Tagged,
 } from "../../../web/src/everywhere";
 import { useFocusOnReady, useNav } from "../App";
+import { ListMenu } from "../ListMenu";
 import { Poster, Shelf, Square, Wide } from "../Cards";
 import { metaLine, progressOf, sxe } from "../format";
 import { setKeyHandler } from "../keys";
@@ -55,14 +56,14 @@ export default function Home() {
     const genreLists: Genre[][] = [];
     const newestLists: Item[][] = [];
     Promise.all([
-      api.get<{ user: (User & { prefs?: { home_hero: boolean; home_rows: HomeRowPref[] } }) | null }>("/api/auth/state"),
+      api.get<{ user: (User & { prefs?: { home_hero: boolean; home_rows: HomeRowPref[]; watchlist_name?: string } }) | null }>("/api/auth/state"),
       askAll<Genre>(sources(), "/api/genres", (_r, l) => { genreLists.push(l); }),
       askAll<ItemSummary>(sources(), heroPath, (_r, l) => { newestLists.push(l); }),
     ]).then(([st]) => {
-      const prefs = st.user?.prefs ?? { home_hero: true, home_rows: [] };
+      const prefs = st.user?.prefs ?? { home_hero: true, home_rows: [], watchlist_name: "" };
       setShowHero(prefs.home_hero);
       setNewest(newestLists);
-      setSpecs(homeSpecs(prefs.home_rows, nav.libraries, mergeGenres(genreLists)));
+      setSpecs(homeSpecs(prefs.home_rows, nav.libraries, mergeGenres(genreLists), prefs.watchlist_name));
     }).catch((e) => setErr((e as Error).message));
   }, [nav.libraries, nav.servers.length]);
 
@@ -104,19 +105,21 @@ export default function Home() {
 }
 
 /** One row of Home: the web's HomeRow, with the TV's cards. Holding OK on a Continue Watching card offers to take it
- *  out of the row (ContinueMenu), like a long press on the web. */
+ *  out of the row (ContinueMenu), like a long press on the web; on a watch list entry, to take it off the list. */
 function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) => void }) {
   const nav = useNav();
   const row = useRow(spec);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ item: Tagged<ContinueItem>; fid: string } | null>(null);
+  const [listMenu, setListMenu] = useState<{ item: Tagged<WatchlistItem>; fid: string } | null>(null);
   const items = useMemo(() => row?.filter((i) => !removed.has(keyOf(i))) ?? null, [row, removed]);
   if (!items || items.length < spec.min) return null;
   const fidOf = (i: Item) => `${spec.id}-${keyOf(i)}`;
 
   const closeMenu = () => {
-    const back = menu?.fid;
+    const back = menu?.fid ?? listMenu?.fid;
     setMenu(null);
+    setListMenu(null);
     setTimeout(() => focusId(back));
   };
   const removedOne = (c: Item) => {
@@ -124,6 +127,7 @@ function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) =>
     const next = items[i + 1] ?? items[i - 1];  // the focus goes to the card beside it
     setRemoved((s) => new Set(s).add(keyOf(c)));
     setMenu(null);
+    setListMenu(null);
     setTimeout(() => {
       if (!(next && focusId(fidOf(next)))) focusFirst(document.querySelector("main") ?? document);
     });
@@ -146,6 +150,14 @@ function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) =>
                 onHold={() => setMenu({ item: c, fid })} />
             );
           }
+          if (spec.kind === "watchlist") {
+            const w = it as Tagged<WatchlistItem>;
+            return (
+              <Poster key={keyOf(w)} item={w} rid={rid} fid={fid} look={listedLook(w)} onFocus={() => onFocus(w)}
+                onPress={() => nav.push({ name: "detail", id: w.id, rid })}
+                onHold={() => setListMenu({ item: w, fid })} />
+            );
+          }
           if (spec.kind === "albums") {
             return (
               <Square key={keyOf(it)} fid={fid} rid={rid} img={it.poster} title={it.title}
@@ -160,6 +172,10 @@ function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) =>
         })}
       </Shelf>
       {menu && <ContinueMenu item={menu.item} onClose={closeMenu} onRemoved={() => removedOne(menu.item)} />}
+      {listMenu && (
+        <ListMenu id={listMenu.item.id} rid={ridOf(listMenu.item.rid)} on title={listedLook(listMenu.item).title}
+          sub={listedLook(listMenu.item).sub} onClose={closeMenu} onDone={() => removedOne(listMenu.item)} />
+      )}
     </>
   );
 }

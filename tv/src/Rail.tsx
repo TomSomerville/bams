@@ -1,13 +1,15 @@
 import { Fragment } from "react";
 import { useNav } from "./App";
 import Icon, { type IconName } from "./Icon";
+import { useListName } from "./ListMenu";
 
 type Item = { id: string; label: string; icon: IconName; active: boolean; go: () => void };
 
-/** The menu down the left: Home, each video library (this server's, then each connected server's under its name),
- *  Search, Settings. Slim until it has the focus. */
+/** The menu down the left: Home, the watch list (every server's titles), each library (this server's, then each
+ *  connected server's under its name), Search, Settings. Slim until it has the focus. */
 export default function Rail() {
   const nav = useNav();
+  const listName = useListName();
   const r = nav.root;  // a title opened from a library still has that library lit (and Left lands on it)
   const libItem = (rid: number | undefined, l: { id: number; name: string; type: string }): Item => ({
     id: rid === undefined ? `lib${l.id}` : `r${rid}-lib${l.id}`, label: l.name, icon: (l.type === "show" ? "tv" : l.type === "music" ? "music" : "film") as IconName,
@@ -16,6 +18,7 @@ export default function Rail() {
   });
   const top: Item[] = [
     { id: "home", label: "Home", icon: "home", active: r.name === "home", go: () => nav.reset({ name: "home" }) },
+    { id: "watchlist", label: listName, icon: "bookmark", active: r.name === "watchlist", go: () => nav.reset({ name: "watchlist" }) },
     ...nav.libraries.map((l) => libItem(undefined, l)),
   ];
   // this TV's other servers' libraries, the ones it shows (Settings)

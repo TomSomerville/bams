@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ContinueItem, Genre, ItemSummary, ServerLibrary } from "../api";
+import type { ContinueItem, Genre, ItemSummary, ServerLibrary, WatchlistItem } from "../api";
 import { Backdrop } from "../components/Art";
-import { AlbumCard, ContinueCard, PosterCard } from "../components/Cards";
+import { AlbumCard, ContinueCard, ListedCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { heroItems, heroPath, homeSpecs, keyOf, mergeGenres, mergeRow, type HomeRowSpec, type Tagged } from "../everywhere";
@@ -62,7 +62,8 @@ function HomeRow({ spec }: { spec: HomeRowSpec }) {
   const all = useSources();
   const sources = useMemo(() => (spec.everywhere ? all : all.filter((s) => s.rid === null)), [all, spec.everywhere]);
   const { lists } = useEverywhere<ItemSummary>(sources, spec.path);
-  const [removed, setRemoved] = useState<Set<string>>(new Set());  // Continue Watching cards taken out (long press)
+  // Continue Watching cards taken out (long press), watch list entries taken off (their bookmark)
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
   const items = useMemo(() => mergeRow(spec, lists).filter((i) => !removed.has(keyOf(i))), [spec, lists, removed]);
   if (items.length < spec.min) return null;
   const to = spec.library !== undefined ? `/library/${spec.library}` : undefined;
@@ -71,6 +72,16 @@ function HomeRow({ spec }: { spec: HomeRowSpec }) {
       <Row title={spec.title}>
         {items.map((i) => (
           <ContinueCard key={keyOf(i)} item={i as Tagged<ContinueItem>}
+            onRemoved={() => setRemoved((s) => new Set(s).add(keyOf(i)))} />
+        ))}
+      </Row>
+    );
+  }
+  if (spec.kind === "watchlist") {
+    return (
+      <Row title={spec.title} to="/watchlist">
+        {items.map((i) => (
+          <ListedCard key={keyOf(i)} item={i as Tagged<WatchlistItem>}
             onRemoved={() => setRemoved((s) => new Set(s).add(keyOf(i)))} />
         ))}
       </Row>
@@ -89,7 +100,8 @@ export default function Home() {
 
   const genres = useMemo(() => mergeGenres(genreLists), [genreLists]);
   const hero = useMemo(() => (prefs.home_hero ? heroItems(newest) : []), [newest, prefs.home_hero]);
-  const specs = useMemo(() => (libs ? homeSpecs(prefs.home_rows, libs, genres) : null), [libs, prefs.home_rows, genres]);
+  const specs = useMemo(() => (libs ? homeSpecs(prefs.home_rows, libs, genres, prefs.watchlist_name) : null),
+    [libs, prefs.home_rows, genres, prefs.watchlist_name]);
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   if (libs && !libs.length && sources.length === 1) {

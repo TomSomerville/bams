@@ -1,20 +1,26 @@
 import { mediaFor, type ItemSummary } from "./api";
 import { progressOf } from "./format";
 
-/** Poster (2:3) for shows and movies. `rid`: the item is from another of this TV's servers (api.ts). */
-export function Poster({ item, fid, onPress, onFocus, autoFocus, rid }: {
-  item: ItemSummary; fid: string; onPress: () => void; onFocus?: () => void; autoFocus?: boolean; rid?: number;
+/** Poster (2:3) for shows and movies. `rid`: the item is from another of this TV's servers (api.ts). `look`: shown
+ *  instead of the item's own poster and title, with a line over the bottom of the poster (a watch list's season or
+ *  episode under its show, everywhere.ts listedLook). `onHold`: holding OK on it (hold.ts). */
+export function Poster({ item, fid, onPress, onFocus, onHold, autoFocus, rid, look }: {
+  item: ItemSummary; fid: string; onPress: () => void; onFocus?: () => void; onHold?: () => void; autoFocus?: boolean;
+  rid?: number; look?: { poster: string | null; title: string; sub: string | null };
 }) {
   const p = progressOf(item);
-  const src = mediaFor(rid)(item.poster);
-  const watched = item.progress?.watched || (item.kind === "show" && item.episodes && item.unwatched === 0);
+  const src = mediaFor(rid)(look ? look.poster : item.poster);
+  const title = look?.title ?? item.title;
+  const watched = item.progress?.watched || ((item.kind === "show" || item.kind === "season") && item.episodes && item.unwatched === 0);
   return (
-    <button className="card poster" data-fid={fid} onClick={onPress} onFocus={onFocus} data-autofocus={autoFocus || undefined}>
-      {src ? <img src={src} alt="" loading="lazy" /> : <div className="no-art"><span>{item.title}</span></div>}
+    <button className="card poster" data-fid={fid} onClick={onPress} onFocus={onFocus} data-autofocus={autoFocus || undefined}
+      data-hold={onHold ? "" : undefined} onContextMenu={onHold ? (e) => { e.preventDefault(); onHold(); } : undefined}>
+      {src ? <img src={src} alt="" loading="lazy" /> : <div className="no-art"><span>{title}</span></div>}
+      {look?.sub && <div className="poster-sub">{look.sub}</div>}
       {!!item.unwatched && item.kind === "show" && <span className="badge">{item.unwatched}</span>}
       {watched && <span className="badge done">✓</span>}
       {p !== null && <div className="bar"><div style={{ width: `${p * 100}%` }} /></div>}
-      <div className="card-title">{item.title}</div>
+      <div className="card-title">{title}</div>
     </button>
   );
 }

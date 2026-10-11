@@ -108,6 +108,7 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
     con.execute("UPDATE item_keys SET item_id=? WHERE item_id=?", (keep, drop))
     # taken out of someone's Continue Watching: stays out (where both were, the kept title's time wins)
     con.execute("UPDATE OR IGNORE continue_hidden SET item_id=? WHERE item_id=?", (keep, drop))
+    _move_watchlist(con, drop, keep)
     if kind == "movie":
         con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (keep, drop))
         _move_watch_state(con, drop, keep)
@@ -118,6 +119,7 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
             if not target:
                 con.execute("UPDATE items SET parent_id=? WHERE id=?", (keep, s["id"]))
                 continue
+            _move_watchlist(con, s["id"], target["id"])
             for e in con.execute("SELECT id, episode_number, title_key FROM items WHERE parent_id=? AND kind='episode'",
                                  (s["id"],)).fetchall():
                 te = con.execute("""SELECT id FROM items WHERE parent_id=? AND kind='episode' AND (episode_number=?
@@ -126,6 +128,7 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
                 if te:
                     con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (te["id"], e["id"]))
                     _move_watch_state(con, e["id"], te["id"])
+                    _move_watchlist(con, e["id"], te["id"])
                 else:
                     con.execute("UPDATE items SET parent_id=? WHERE id=?", (target["id"], e["id"]))
     con.execute("DELETE FROM items WHERE id=?", (drop,))
@@ -135,3 +138,9 @@ def _move_watch_state(con: sqlite3.Connection, src: int, dest: int) -> None:
     """A merged-away movie/episode is deleted: its viewers' progress moves to the one that's kept
     (where a viewer has progress on both, the kept item's wins)."""
     con.execute("UPDATE OR IGNORE watch_state SET item_id=? WHERE item_id=?", (dest, src))
+
+
+def _move_watchlist(con: sqlite3.Connection, src: int, dest: int) -> None:
+    """A merged-away title, season or episode stays on its users' watch lists as the one that's kept (where both
+    were on a list, the kept one's date wins)."""
+    con.execute("UPDATE OR IGNORE watchlist SET item_id=? WHERE item_id=?", (dest, src))

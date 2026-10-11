@@ -3,6 +3,26 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.13.0 (2026-10-11)
+
+### New
+- **My Watch List.** Keep a list of what you mean to watch: movies, shows, single seasons and single episodes. It's
+  in the sidebar right under Home (on the TV, in the menu under Home), and it's also a row on Home after Continue
+  Watching (turn it off or move it in **Settings → Home page**).
+  - **Add things** with the **+ My Watch List** button on a show's or movie's page, the **(season)** button above a
+    season's episodes, or the bookmark beside each episode. Pointing at any poster shows a bookmark too. On the TV, use
+    the button on a title's page, or **hold OK** on an episode.
+  - **One list for every server.** Titles from every BAMS server you're connected to go on the same list, newest
+    first. Each server remembers its own titles for your account, so the list is the same on every browser and TV
+    signed in to those servers.
+  - Opening an episode from the list takes you to its season with the episode picked out. Watching something doesn't
+    take it off; use the bookmark (or hold OK on the TV) when you're done with it.
+  - **Rename it** with the pencil next to its name on the list page.
+
+Update the server with the new installer, and install the new TV apps (`BAMS-SamsungTV-0.13.0.wgt`,
+`BAMS-FireTV-0.13.0.apk`) to get the watch list on the TV. Other servers you connect to need 0.13.0 too before their
+titles can go on the list.
+
 ## 0.12.0 (2026-10-11)
 
 ### New

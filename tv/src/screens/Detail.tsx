@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { apiFor, mediaFor, type ContinueItem, type ItemDetail, type ItemSummary } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import Icon from "../Icon";
+import { ListMenu, setListed, useListName } from "../ListMenu";
 import { clock, metaLine, progressOf, runtime, sxe } from "../format";
+import { focusId } from "../nav";
 import { pickAudio, pickFile, plan } from "../plan";
 import { MusicDetail } from "./Music";
 
-/** A movie, show, season or episode: art, text, Play / Resume, and for shows the seasons and their episodes.
- *  `rid`: of another of this TV's servers (api.ts). */
+/** A movie, show, season or episode: art, text, Play / Resume, on/off the watch list, and for shows the seasons and
+ *  their episodes (holding OK on one puts it on the watch list or takes it off). `rid`: of another of this TV's
+ *  servers (api.ts). */
 export default function Detail({ id, rid }: { id: number; rid?: number }) {
   const api = apiFor(rid);      // this item's server
   const media = mediaFor(rid);
@@ -19,6 +22,9 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
   const [season, setSeason] = useState<number | null>(null);
   const [episodes, setEpisodes] = useState<ItemDetail | null>(null);
   const [reload, setReload] = useState(0);
+  const listName = useListName();
+  const [listBusy, setListBusy] = useState(false);
+  const [epMenu, setEpMenu] = useState<ItemSummary | null>(null);
 
   useEffect(() => {
     api.get<ItemDetail>(`/api/items/${id}`).then((d) => {
@@ -53,6 +59,27 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
   const pos = item.progress?.position ?? 0;
   const file = playable ? pickFile(item.files) : null;
   const how = file ? plan(file, pickAudio(file), null) : null;
+
+  const toggleListed = async () => {
+    if (listBusy) return;
+    setListBusy(true);
+    const on = !item.watchlist;
+    try {
+      await setListed(item.id, rid, on);
+      setItem((d) => (d ? { ...d, watchlist: on } : d));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setListBusy(false);
+    }
+  };
+  const episodeListed = (ep: ItemSummary, on: boolean) => {
+    const mark = (d: ItemDetail | null) => (d ? { ...d, children: d.children.map((c) => (c.id === ep.id ? { ...c, watchlist: on } : c)) } : d);
+    setEpisodes(mark);
+    if (item.kind === "season") setItem(mark);  // a season's own page shows the item's episodes
+    setEpMenu(null);
+    setTimeout(() => focusId(`ep-${ep.id}`));
+  };
 
   const markWatched = async (target: ItemSummary, watched: boolean) => {
     await api.put(`/api/items/${target.id}/watched`, { watched }).catch(() => undefined);
@@ -105,6 +132,12 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
                   {(playable ? item.progress?.watched : item.unwatched === 0) ? "Mark unwatched" : "Mark watched"}
                 </button>
               )}
+              {item.watchlist !== undefined && (
+                <button className="btn" data-fid="watchlist" onClick={() => void toggleListed()}>
+                  <Icon name={item.watchlist ? "bookmarkOn" : "bookmark"} size={30} />
+                  {item.watchlist ? `Remove from ${listName}` : `Add to ${listName}`}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -123,11 +156,15 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
             {episodes.children.map((e, n) => {
               const p = progressOf(e);
               return (
-                <button key={e.id} className="episode" data-fid={`ep-${e.id}`} data-autofocus={(!next && n === 0) || undefined} onClick={() => nav.push({ name: "player", id: e.id, rid, resume: true })}>
+                <button key={e.id} className="episode" data-fid={`ep-${e.id}`} data-autofocus={(!next && n === 0) || undefined}
+                  onClick={() => nav.push({ name: "player", id: e.id, rid, resume: true })}
+                  data-hold={e.watchlist !== undefined ? "" : undefined}
+                  onContextMenu={e.watchlist !== undefined ? (ev) => { ev.preventDefault(); setEpMenu(e); } : undefined}>
                   <div className="ep-still">
                     {e.still ? <img src={media(e.still) ?? undefined} alt="" loading="lazy" /> : <div className="no-art" />}
                     {p !== null && <div className="bar"><div style={{ width: `${p * 100}%` }} /></div>}
                     {e.progress?.watched && <span className="badge done">✓</span>}
+                    {e.watchlist && <span className="badge listed" title={`On ${listName}`}><Icon name="bookmarkOn" size={24} /></span>}
                   </div>
                   <div className="ep-text">
                     <div className="ep-title">{e.episode_number ? `${e.episode_number}. ` : ""}{e.title}</div>
@@ -138,7 +175,15 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
               );
             })}
             {!episodes.children.length && <p className="muted">No episodes in this season.</p>}
+            {episodes.children.some((e) => e.watchlist !== undefined) && (
+              <p className="muted hint">Hold OK on an episode to put it on {listName} or take it off.</p>
+            )}
           </div>
+        )}
+        {epMenu && (
+          <ListMenu id={epMenu.id} rid={rid} on={!!epMenu.watchlist} title={show?.title ?? item.title}
+            sub={`${sxe(epMenu)} · ${epMenu.title}`} onClose={() => { const id = epMenu.id; setEpMenu(null); setTimeout(() => focusId(`ep-${id}`)); }}
+            onDone={(on) => episodeListed(epMenu, on)} />
         )}
       </div>
     </div>

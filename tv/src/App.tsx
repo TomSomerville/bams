@@ -13,12 +13,14 @@ import Detail from "./screens/Detail";
 import Player from "./screens/Player";
 import Search from "./screens/Search";
 import Settings from "./screens/Settings";
+import Watchlist from "./screens/Watchlist";
 import Rail from "./Rail";
 import { useMusic } from "./music";
 import { NowPlaying, PlaylistScreen } from "./screens/Music";
 
 export type Route =
   | { name: "home" }
+  | { name: "watchlist" }
   | { name: "library"; id: number; rid?: number }
   | { name: "detail"; id: number; rid?: number }
   // sleep: sleep mode's count of episodes still to play after this one (Player.tsx), carried to the next episode
@@ -269,6 +271,7 @@ export default function App() {
             <Rail />
             <main className="content" data-scroll>
               {r.name === "home" && <Home />}
+              {r.name === "watchlist" && <Watchlist />}
               {r.name === "library" && <Library key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} />}
               {r.name === "detail" && <Detail id={r.id} rid={r.rid} />}
               {r.name === "search" && <Search />}

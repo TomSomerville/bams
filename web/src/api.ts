@@ -95,12 +95,13 @@ export type ServerName = { name: string; default: string; custom: boolean };
 export type BrowseResult = { path: string | null; parent: string | null; dirs: { name: string; path: string }[] };
 
 /** Each account's own display preferences (server: auth.PREFS). */
-/** A row of Home in the user's order: "continue", "recent", "lib:<id>", "top_rated", "genre:<name>"
+/** A row of Home in the user's order: "continue", "watchlist", "recent", "lib:<id>", "top_rated", "genre:<name>"
  *  (older saves have one "genres" entry for all of them). */
 export type HomeRowPref = { id: string; show: boolean };
 /** GET /api/genres: every show/movie genre, most titles first. */
 export type Genre = { name: string; count: number };
-export type Prefs = { home_hero: boolean; home_rows: HomeRowPref[] };
+/** watchlist_name: what the user calls their watch list ("" = "My Watch List", homeRows.ts listName) */
+export type Prefs = { home_hero: boolean; home_rows: HomeRowPref[]; watchlist_name: string };
 export type User = {
   id: number; name: string; is_admin: boolean; created_at?: number; last_login_at?: number | null; prefs?: Prefs;
   /** an admin asked them to set a new password: until they do, the app shows only that */
@@ -156,6 +157,8 @@ export type ItemSummary = {
   /** shows/seasons: how many episodes, and how many of them aren't watched */
   episodes?: number;
   unwatched?: number;
+  /** movies, shows, seasons, episodes: on the signed-in user's watch list (absent: music, or an older server) */
+  watchlist?: boolean;
 };
 
 /** Continue Watching: stopped part-way ("resume") or the next episode of a show ("next"). */
@@ -165,6 +168,14 @@ export type ContinueItem = ItemSummary & {
   season_id?: number;  // episodes: their season (the card's episode line opens it)
   /** when the activity it comes from happened (newer servers): merging several servers' rows */
   last_watched_at?: number;
+};
+
+/** GET /api/watchlist: an item on the user's watch list. Seasons and episodes carry their show; episodes their season. */
+export type WatchlistItem = ItemSummary & {
+  /** when it was added (several servers' lists are merged by it) */
+  listed_at: number;
+  show?: { id: number; title: string; poster: string | null; backdrop: string | null };
+  season_id?: number;
 };
 
 export type AudioTrack = { index: number; label: string; language: string | null; codec: string | null;

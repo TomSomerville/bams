@@ -5,11 +5,12 @@ import { useAuth } from "../auth";
 import { setLibraryOrder, useRemotes } from "../servers";
 import { useApi } from "../useApi";
 import { LIB_TYPES } from "../format";
+import { listName } from "../homeRows";
 import Icon from "./Icon";
 import { useReorder } from "./useReorder";
 
 export default function Sidebar() {
-  const { user } = useAuth();
+  const { user, prefs } = useAuth();
   const { servers } = useRemotes();
   const { data, reload } = useApi<ServerLibrary[]>("/api/libraries");
   const [libs, setLibs] = useState<ServerLibrary[] | null>(null);
@@ -49,6 +50,10 @@ export default function Sidebar() {
       <div className="nav-group">
         <NavLink to="/" end className="nav-item">
           <Icon name="home" /> <span>Home</span>
+        </NavLink>
+        {/* the watch list: like a library, above the first one; it holds titles from every server */}
+        <NavLink to="/watchlist" className="nav-item">
+          <Icon name="bookmark" /> <span>{listName(prefs.watchlist_name)}</span>
         </NavLink>
         {!!libs?.length && (
           <div className="nav-label nav-server" title={hello.data?.name}><span>{hello.data?.name ?? " "}</span></div>
