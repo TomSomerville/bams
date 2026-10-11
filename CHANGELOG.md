@@ -3,6 +3,19 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.11.1 (2026-10-11)
+
+### Changed
+- **Your server's libraries are listed under its name** in the sidebar instead of under "Libraries", the same way
+  other servers' libraries are. The name is the one an admin sets in **Settings → This server → Server name**; the
+  sidebar shows a new name as soon as it's saved there.
+- **Put another server's libraries in any order.** Drag them by the handle that shows when you point at one (or
+  focus it and use the arrow keys), like your own server's. The order is kept in this browser, like the names you
+  give them, so you don't need to be an admin there and nothing changes for that server's other users.
+
+Update the server with the new installer. The Samsung TV app is unchanged: `BAMS-SamsungTV-0.11.0.wgt` from the
+0.11.0 release is still current.
+
 ## 0.11.0 (2026-10-11)
 
 ### New

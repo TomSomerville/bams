@@ -17,7 +17,7 @@ import { Outlet, useParams } from "react-router-dom";
 import { api, ApiError, type RemoteServer } from "./api";
 import { askAll, type Source, type Tagged } from "./everywhere";
 
-/** Window event: a server was added, signed in again, removed, renamed/hidden a library, or signed out. */
+/** Window event: a server was added, signed in again, removed, renamed/hid/reordered a library, or signed out. */
 export const REMOTES_CHANGED = "bams:remotes";
 
 const STORE = "bams.servers";
@@ -38,6 +38,8 @@ type Stored = {
   libraries: { id: number; name: string; type: "movie" | "show" | "music" }[];
   /** this browser's names and choices per library id */
   prefs: Record<string, { name?: string; show?: boolean }>;
+  /** this browser's order of its libraries (ids, dragged in the sidebar); ones not in it follow, in its own order */
+  order?: number[];
 };
 
 function load(): Stored[] {
@@ -239,7 +241,7 @@ export async function connectServer(address: string, name: string, password: str
   const entry: Stored = {
     id: old?.id ?? Math.max(0, ...list.map((s) => s.id)) + 1, url: base, name: String(hi.name || base).slice(0, 100),
     account: data.user.name, is_admin: !!data.user.is_admin, token: data.token,
-    libraries: old?.libraries ?? [], prefs: old?.prefs ?? {},
+    libraries: old?.libraries ?? [], prefs: old?.prefs ?? {}, order: old?.order,
   };
   if (old?.token && old.token !== data.token) void raw(old, "POST", "/api/auth/logout").catch(() => undefined);
   tickets.delete(entry.id);
@@ -268,10 +270,18 @@ export function setLibrary(id: number, libraryId: number, change: { name?: strin
   });
 }
 
+/** Put a server's libraries in this order here (all its library ids). Its own order, and other browsers', stay. */
+export function setLibraryOrder(id: number, ids: number[]) {
+  update(id, (s) => ({ ...s, order: ids }));
+}
+
 function describe(s: Stored, online: boolean, error: string | null): RemoteServer {
+  const order = s.order ?? [];
+  const placed = order.flatMap((id) => s.libraries.filter((l) => l.id === id));
+  const libraries = [...placed, ...s.libraries.filter((l) => !order.includes(l.id))];
   return {
     id: s.id, name: s.name, url: s.url, account: s.account, is_admin: s.is_admin, signed_in: !!s.token, online, error,
-    libraries: s.libraries.map((l) => ({
+    libraries: libraries.map((l) => ({
       id: l.id, type: l.type, own_name: l.name,
       name: s.prefs[l.id]?.name || l.name, show: s.prefs[l.id]?.show ?? true,
     })),

@@ -698,7 +698,7 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .scan-progress .progress.inline { margin-top: 0; }
 .scan-progress .progress.inline > div { transition: width 0.6s ease; }
 
-/* libraries in the sidebar: admins drag them into order by a handle that shows on hover */
+/* libraries in the sidebar: dragged into order by a handle that shows on hover (this server's: admins; others': anyone, kept in the browser) */
 .nav-libs { display: flex; flex-direction: column; gap: 2px; }
 .nav-row { position: relative; border-radius: 10px; }
 .nav-row .nav-item { padding-right: 34px; }
