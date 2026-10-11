@@ -20,7 +20,8 @@ export type Route =
   | { name: "home" }
   | { name: "library"; id: number; rid?: number }
   | { name: "detail"; id: number; rid?: number }
-  | { name: "player"; id: number; resume: boolean; rid?: number }
+  // sleep: sleep mode's count of episodes still to play after this one (Player.tsx), carried to the next episode
+  | { name: "player"; id: number; resume: boolean; rid?: number; sleep?: number }
   | { name: "playlist"; id: number; rid?: number }
   | { name: "search" }
   | { name: "settings" };
@@ -249,7 +250,7 @@ export default function App() {
     <NavCtx.Provider value={nav}>
       <ScreenCtx.Provider value={{ fid: top.fid }} key={top.key}>
         {r.name === "player" ? (
-          <Player key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} resume={r.resume} />
+          <Player key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} resume={r.resume} sleep={r.sleep} />
         ) : (
           <div className={`shell ${music.current ? "has-np" : ""}`}>
             <Rail />

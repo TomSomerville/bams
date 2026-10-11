@@ -49,11 +49,16 @@ Files may have changed since you last looked, and work may exist that you never 
    - **TMDB:** each user pastes their **own** key in Settings. There is **no shared/project key** (user decision).
      Attribution text must stay, and cached TMDB data/images must be refreshed within 6 months
      (`matcher.REFRESH_AFTER`).
+   - **OpenSubtitles:** each server's admin pastes their **own** API key too (owner's decision, 2026-10-11), although
+     OpenSubtitles' terms ask for one key per app and say they may ban apps whose users bring their own. Send the
+     `USER_AGENT` ("BAMS v<version>"), stay under 5 requests/second (`opensubtitles._throttle`), never retry a login
+     they refused. Keep the "Subtitles from OpenSubtitles.com" credit in the UI.
    - **FFmpeg is never bundled.** It's found on the system (`probe.ffprobe_path`, `stream.ffmpeg_path`).
    - Don't copy Jellyfin code (GPL).
    - The repo ships no copyrighted posters.
-4. **Never handle the user's TMDB key yourself.** Don't read it from the browser or DB and replay it. The user
-   enters it in Settings or with `bams tmdb-key`.
+4. **Never handle the user's TMDB or OpenSubtitles key (or OpenSubtitles password) yourself.** Don't read them from
+   the browser or DB and replay them. The user enters them in Settings (or `bams tmdb-key`). Test against a fake
+   (`app.state.opensubtitles_transport`, see `tests/test_opensubtitles.py`).
 5. **No placeholder data in the UI.** Every page shows real server data, with empty states when there's none.
 
 ## Run / test
@@ -61,7 +66,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 300 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 320 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\owner\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -239,4 +244,20 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   (`test_movie_in_tv_library_is_flagged`), but a film under a show's folder is that show's Specials, even in its own
   subfolder (`Daria Complete Series/Daria Is It College Yet 2002 …/…avi`). "Don't place" is `files.manual = {skip: true}`: code reading `manual` must
   expect it (no title).
+- **guessit splits names at hyphens**: a folder "Catch-22" read as "Catch" + episode 22, "Ant-Man.2015" as release
+  group "Ant" + "Man". In `parse.py` always read names through `parse._read(text, kind, folder=)`, never `guessit()`
+  directly: it re-reads a hyphenated word the title was cut through with the hyphen protected (`_protect`). In a
+  *file* name "Naruto-01" stays episode 1 and an all-lowercase "aaf-movie.name" keeps "aaf" as the group (folders
+  don't get those exceptions). New cases go in `test_parse.py`; dry-run over the owner's paths before shipping.
+- **Downloaded subtitles ("d<n>" tracks)** live in the data dir (`subtitles/opensubtitles/`, table
+  `subtitle_downloads`), not next to the video. `subtitles.tracks()` lists only the file's own tracks: code that
+  needs every track adds `opensubtitles.tracks(con, file_id)` (as `get_item` and the `.vtt` route do).
+- **OpenSubtitles answers a wrong API key with 403 "You cannot consume this service"** on searches (`/infos/formats`
+  works with any key, so it can't check one). `Client.check()` uses a small search; searching never counts against
+  the download limit, downloads do (also when picked from the TV).
+- **`web/src/subtitleLangs.ts` is shared with the TV app** (OpenSubtitles' language list): no React, router or
+  storage in it, like `everywhere.ts`.
+- **Sleep mode's count rides in the navigation state** (web `location.state.sleep`, TV route `sleep`): both players
+  are re-created for the next episode, so component state alone would forget it. `goNext`/`playNext` pass
+  `sleep - 1`; going on by hand after it stopped turns it off.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

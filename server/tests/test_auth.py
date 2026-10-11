@@ -133,11 +133,12 @@ def test_migration_to_v4_keeps_data(tmp_path):
     con.close()
     con = connect(p)
     db.migrate(con, backup_dir=tmp_path / "backups")
-    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 9
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 10
     assert db.get_setting(con, "tmdb_key") == "k" and auth.user_count(con) == 0
     assert "prefs" in [r[1] for r in con.execute("PRAGMA table_info(users)")]  # v5
     assert "manual" in [r[1] for r in con.execute("PRAGMA table_info(files)")]  # v6
     assert "sort_order" in [r[1] for r in con.execute("PRAGMA table_info(libraries)")]  # v7
+    assert con.execute("SELECT 1 FROM sqlite_master WHERE name='subtitle_downloads'").fetchone()  # v10
     assert list((tmp_path / "backups").iterdir())
 
 

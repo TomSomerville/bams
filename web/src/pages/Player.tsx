@@ -1,7 +1,8 @@
 import type Hls from "hls.js"; // loaded on demand (it's most of the bundle), only when a video goes over HLS
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ApiError, type ItemDetail, type Probe } from "../api";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ApiError, type ItemDetail, type Probe, type SubtitleTrack } from "../api";
+import FindSubtitles from "../components/FindSubtitles";
 import Icon from "../components/Icon";
 import { fmtClock, PLAY_LABEL, sxe } from "../format";
 import { useScope, type Call } from "../servers";
@@ -30,6 +31,7 @@ const SPEED_MIN = 0.1, SPEED_MAX = 3;
 const SKIP_FORWARD = 30, SKIP_BACK = 10;  // seconds (buttons and arrow keys)
 const CREDITS = 30;  // the up-next countdown starts this long before an episode ends (the credits)
 const SUB_STEP = 100;  // ms: one press of the subtitle timing buttons (and the g / h keys)
+const SLEEP_MORE = 2;  // sleep mode on an episode: this one, then this many more, then playback stops
 const clampSpeed = (r: number) => Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, r)) * 100) / 100;
 const KEYS = { quality: "bams.quality", audioLang: "bams.audioLang", subLang: "bams.subLang", surround: "bams.surround",
                passthrough: "bams.passthrough" };
@@ -123,6 +125,7 @@ function Player({ id }: { id: string }) {
   const nav = useNavigate();
   const { call, media, to, rid } = useScope();  // this server, or another one (/r/:rid/play/:id)
   const [search] = useSearchParams();
+  const location = useLocation();
   const { data: item, error } = useApi<ItemDetail>(`/api/items/${id}`);
   const video = useRef<HTMLVideoElement>(null);
   const shell = useRef<HTMLDivElement>(null);
@@ -161,12 +164,26 @@ function Player({ id }: { id: string }) {
   const [trackEl, setTrackEl] = useState<HTMLTrackElement | null>(null);
   const [cuesLoaded, setCuesLoaded] = useState(0);
   const cueTimes = useRef(new WeakMap<TextTrackCue, [number, number]>()); // each cue's own times, before the delay
+  // Sleep mode: how many more episodes may start after this one (null = off; 0 = stop after this one). It rides
+  // along to the next episode in the navigation state, so it counts down across the player's restarts.
+  const [sleep, setSleep] = useState<number | null>(() => {
+    const n = (location.state as { sleep?: unknown } | null)?.sleep;
+    return typeof n === "number" && n >= 0 ? n : null;
+  });
+  const [slept, setSlept] = useState(false);   // sleep mode stopped playback at the end
+  const [notice, setNotice] = useState<string | null>(null);  // a short note at the top (sleep mode, downloads left)
+  const [finding, setFinding] = useState(false); // the OpenSubtitles dialog is open
+  const findingRef = useRef(false);
+  findingRef.current = finding;
+  const [found, setFound] = useState<SubtitleTrack[]>([]);   // fetched from OpenSubtitles while playing
+  const [dropped, setDropped] = useState<string[]>([]);      // downloaded ones removed while playing
 
   const file = item?.files.find((f) => f.available) ?? item?.files[0];
   const show = item?.ancestors.find((a) => a.kind === "show");
   const pb = file?.playback;
   const audioTracks = file?.audio_tracks ?? [];
-  const subTracks = file?.subtitles ?? [];
+  const subTracks = useMemo(() => [...(file?.subtitles ?? []), ...found.filter((f) => !file?.subtitles?.some((s) => s.id === f.id))]
+    .filter((s) => !dropped.includes(s.id)), [file, found, dropped]);
   const subTrack = subTracks.find((s) => s.id === sub) ?? null;
   const burn = subTrack?.image ? subTrack.id : null;  // painted on by the server: embedded or a VobSub sidecar
   const decodable = useMemo(() => canDecode(file?.probe?.video), [file]);
@@ -370,11 +387,18 @@ function Player({ id }: { id: string }) {
     return () => clearTimeout(timer);
   }, [upNext, item?.next_id, playing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The credits: the up-next countdown starts CREDITS seconds before the end, as if the episode were over.
+  // The credits: the up-next countdown starts CREDITS seconds before the end, as if the episode were over
+  // (not when sleep mode stops after this one).
   const inCredits = !!item?.next_id && total > 4 * CREDITS && pos >= total - CREDITS;
   useEffect(() => {
-    if (inCredits && playing && upNext === null && !skipCredits.current) setUpNext(10);
+    if (inCredits && playing && upNext === null && !skipCredits.current && sleep !== 0) setUpNext(10);
   }, [inCredits, playing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (notice === null) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     if (resumed === null) return;
@@ -467,6 +491,25 @@ function Player({ id }: { id: string }) {
     setPassFailed(false);
     setPassPref(on);
   };
+  /** A subtitle picked in the OpenSubtitles dialog: now one of the file's tracks, shown at once. */
+  const takeFound = (t: SubtitleTrack, note: string | null) => {
+    setFinding(false);
+    setFound((f) => f.some((x) => x.id === t.id) ? f : [...f, t]);
+    setDropped((d) => d.filter((x) => x !== t.id));
+    setPref(KEYS.subLang, t.language ?? null);
+    if (subTrack?.image) continueAt(pos);  // the burned-in pictures go: a new stream
+    setSub(t.id);
+    if (note) setNotice(note);
+  };
+  const toggleSleep = () => {
+    const n = sleep !== null ? null : item?.next_id ? SLEEP_MORE : 0;
+    setSleep(n);
+    setSlept(false);
+    setNotice(n === null ? "Sleep mode off"
+      : n ? `Sleep mode: stops after this episode and ${n} more`
+      : `Sleep mode: stops after this ${item?.kind === "movie" ? "movie" : "episode"}`);
+    if (n === 0) setUpNext(null);
+  };
   const pickSub = (sid: string | null) => {
     setMenu(null);
     const next = subTracks.find((s) => s.id === sid) ?? null;
@@ -478,7 +521,8 @@ function Player({ id }: { id: string }) {
   const goNext = (done: boolean) => {
     if (!item?.next_id) return;
     finished.current = done;  // the report on leaving says where this one ended
-    nav(to(`/play/${item.next_id}`), { replace: true });
+    // sleep mode counts down; going on by hand after it stopped means someone's awake: off
+    nav(to(`/play/${item.next_id}`), { replace: true, state: sleep ? { sleep: sleep - 1 } : undefined });
   };
   const fullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -498,6 +542,7 @@ function Player({ id }: { id: string }) {
       idleTimer.current = window.setTimeout(() => setIdle(true), 3000);
     };
     const key = (e: KeyboardEvent) => {
+      if (findingRef.current) return wake();  // typing/choosing in the OpenSubtitles dialog
       if (e.key === " " || e.key === "k") { e.preventDefault(); toggle(); }
       if (e.key === "Escape" && !document.fullscreenElement) nav(-1);
       if (e.key === "ArrowRight") seekRef.current(posRef.current + SKIP_FORWARD);
@@ -540,7 +585,7 @@ function Player({ id }: { id: string }) {
   const nextUp = upNext !== null && item.next_id;
 
   return (
-    <div ref={shell} className={`player ${idle && playing && !menu ? "idle" : ""}`}>
+    <div ref={shell} className={`player ${idle && playing && !menu && !finding ? "idle" : ""}`}>
       {file ? (
         <video
           // a new element per stream: hls.js detaching must not wipe the next stream's src
@@ -564,7 +609,8 @@ function Player({ id }: { id: string }) {
           onDurationChange={(e) => !live && setFileDur(e.currentTarget.duration)}
           onEnded={() => {
             report(totalRef.current || posRef.current);  // the end counts as watched
-            if (item.next_id) setUpNext(10);
+            if (sleep === 0) setSlept(true);  // sleep mode: this was the last one
+            else if (item.next_id) setUpNext(10);
           }}
           onLoadedMetadata={(e) => {
             const v = e.currentTarget;
@@ -596,6 +642,16 @@ function Player({ id }: { id: string }) {
           <p>{problem}</p>
         </div>
       )}
+      {slept && (
+        <div className="player-msg">
+          <p>Sleep mode stopped playback here.</p>
+          <div className="actions">
+            {item.next_id && <button className="btn primary small" onClick={() => goNext(true)}>
+              <Icon name="play" size={16} /> Next episode</button>}
+            <button className="btn ghost small" onClick={() => nav(-1)}>Back</button>
+          </div>
+        </div>
+      )}
       {nextUp && (
         <div className="up-next">
           <span className="muted">Next episode in {upNext}…</span>
@@ -604,7 +660,7 @@ function Player({ id }: { id: string }) {
           <button className="btn ghost small" onClick={() => { skipCredits.current = true; setUpNext(null); }}>Cancel</button>
         </div>
       )}
-      {!playing && !problem && !nextUp && file && (
+      {!playing && !problem && !nextUp && !slept && file && (
         <button className="player-center" onClick={toggle} aria-label="Play">
           <span className="round-btn big"><Icon name="play" size={40} /></span>
         </button>
@@ -620,6 +676,7 @@ function Player({ id }: { id: string }) {
           <div className="resumed">Playing without sound: this browser wants a tap first
             <button className="link-btn" onClick={unmute}>Turn sound on</button></div>
         )}
+        {notice !== null && resumed === null && <div className="resumed">{notice}</div>}
         {resumed !== null && (
           <div className="resumed">Resumed from {fmt(resumed)}
             <button className="link-btn" onClick={() => { setResumed(null); seek(0); }}>Start over</button></div>
@@ -658,10 +715,19 @@ function Player({ id }: { id: string }) {
           <button className={`icon-btn ${muted ? "off" : ""}`} aria-label={muted ? "Unmute" : "Mute"} onClick={unmute}>
             <Icon name="volume" size={24} />
           </button>
+          {watchable && (
+            <button className={`icon-btn sleep-btn ${sleep !== null ? "on" : ""}`} onClick={toggleSleep} aria-pressed={sleep !== null}
+              aria-label="Sleep mode" title={sleep === null
+                ? `Sleep mode: stop after this ${item.kind === "movie" ? "movie" : item.next_id ? `episode and ${SLEEP_MORE} more` : "episode"}`
+                : sleep ? `Sleep mode on: stops after this episode and ${sleep} more (click to turn off)`
+                : "Sleep mode on: stops after this one (click to turn off)"}>
+              <Icon name="sleep" size={24} />{sleep ? <span>+{sleep}</span> : null}
+            </button>
+          )}
           <span className="time">{fmt(scrub ?? pos)} / {fmt(total)}</span>
           {note && <span className="muted audio-note" title={note.why}>{note.text}</span>}
           <span className="spacer" />
-          {subTracks.length > 0 && (
+          {(subTracks.length > 0 || (item.opensubtitles && file)) && (
             <Menu label={<Icon name="subtitles" size={20} />} title="Subtitles" open={menu === "subs"}
               setOpen={(o) => setMenu(o ? "subs" : null)}>
               {delayKey && <>
@@ -682,10 +748,16 @@ function Player({ id }: { id: string }) {
               <Choice on={!subTrack} onClick={() => pickSub(null)}>Off</Choice>
               {subTracks.map((s) => (
                 <Choice key={s.id} on={s.id === sub} onClick={() => pickSub(s.id)}
-                  note={s.image ? (canConvert ? "burned in" : "can't show") : s.source === "file" ? "file" : undefined}>
+                  note={s.image ? (canConvert ? "burned in" : "can't show") : s.source === "file" ? "file"
+                    : s.source === "download" ? "OpenSubtitles" : undefined}>
                   {s.label}
                 </Choice>
               ))}
+              {item.opensubtitles && file && <>
+                <div className="menu-title">Online</div>
+                <button role="menuitem" onClick={() => { setMenu(null); setFinding(true); }}>
+                  <span>Check OpenSubtitles…</span></button>
+              </>}
             </Menu>
           )}
           {(audioTracks.length > 1 || (surroundSource && canConvert) || (passOk && mode === "remux")) && (
@@ -738,6 +810,11 @@ function Player({ id }: { id: string }) {
           <button className="icon-btn" title="Fullscreen (f)" onClick={fullscreen}><Icon name="fullscreen" size={24} /></button>
         </div>
       </div>
+      {finding && file && (
+        <FindSubtitles fileId={file.id} call={call} subLang={pref(KEYS.subLang)} tracks={subTracks} current={sub}
+          onUse={takeFound} onClose={() => setFinding(false)}
+          onRemoved={(tid) => { setDropped((d) => [...d, tid]); if (sub === tid) setSub(null); }} />
+      )}
     </div>
   );
 }

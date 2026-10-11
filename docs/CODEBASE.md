@@ -40,12 +40,15 @@ bams/
 │   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, thresholds (admin settings)
 │   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars incl. VobSub .idx/.sub, language labels), WebVTT
 │   │   │                      conversion + cache, shift(), burn_source() (what stream paints on)
+│   │   ├── opensubtitles.py   OpenSubtitles.com: Client (the server's API key, USER_AGENT, throttle), the admin's key +
+│   │   │                      optional account (status, save_key, sign_in token cache), lookup/search (TMDB/IMDb id +
+│   │   │                      moviehash, else name), download → data dir, tracks() ("d<n>"), remove()
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
-│   │   ├── db.py              SQLite schema (v1 + migration steps to v8), connect(), migrate(), Tx, settings, JSON helpers
+│   │   ├── db.py              SQLite schema (v1 + migration steps to v10), connect(), migrate(), Tx, settings, JSON helpers
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
-│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; `_show_dir` picks the folder that names the show; `guess()` = Auto fill's best guess when the rules can't place a file
+│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; every name is read through `_read` (guessit, with hyphenated words kept whole: `_protect`); `_show_dir`/`_show_dir_at` pick the folder that names the show (`title_folder` for Fix match); `guess()` = Auto fill's best guess when the rules can't place a file
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
 │   │   ├── identify.py        Files identified by hand (files.manual, {skip} = don't place): parsed_for() (scanner), from_name() (rules, then Auto fill guess), store(), replace_unplaced(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
@@ -67,7 +70,7 @@ bams/
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 271 tests, see §7
+│   └── tests/                 pytest: 320 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
@@ -83,6 +86,7 @@ bams/
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
 │       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search)
 │       ├── everywhere.ts      Home rows (`homeSpecs`) and Search across every server, and how answers merge (newest, interleave, Continue Watching by `last_watched_at`, genres); SHARED with the TV app (no React/router)
+│       ├── subtitleLangs.ts   OpenSubtitles' language list, names, the default pick; SHARED with the TV app (no React/storage)
 │       ├── homeRows.ts        Home's rows: defaultRows(libs, genres) (default order, labels; one `genre:<name>` row per genre) + homeRows(saved, libs, genres) (user order merged with what exists; an old `genres` entry expands in place)
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
@@ -109,7 +113,9 @@ bams/
 │       │   ├── TranscodeSettings.tsx  Playback card: encoder in use, CPU/GPU choice (EncoderChoice), conversion limit
 │       │   ├── Art.tsx        Poster / Backdrop with gradient fallback when there's no artwork
 │       │   ├── FolderPicker.tsx  Modal: browse server folders via /api/fs/browse
-│       │   ├── FixMatch.tsx   Modal: TMDB search → POST /api/items/{id}/match
+│       │   ├── FixMatch.tsx   Modal: the title's folders on the server (/api/items/{id}/folders) + TMDB search → POST /api/items/{id}/match
+│       │   ├── FindSubtitles.tsx  Player dialog "Check OpenSubtitles": language, results (made for this file first), pick → track; downloaded ones: use/remove
+│       │   ├── OpenSubtitlesSettings.tsx  Settings → Playback: the server's OpenSubtitles API key (like TMDB's) + optional account
 │       │   ├── TmdbSettings.tsx  TMDB key card (save = server-verified; test; replace; remove)
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
@@ -120,7 +126,8 @@ bams/
 │           │                  PlaylistPage (/playlist/:id), PlaylistCard + cover Mosaic
 │           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
 │           │                  (at the end and CREDITS = 30 s before it; next-episode button), skip +30 / −10 s (SKIP_*),
-│           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard
+│           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard; sleep mode (SLEEP_MORE,
+│           │                  location.state.sleep), "Check OpenSubtitles…" (FindSubtitles, found/dropped tracks)
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
 │           └── Settings.tsx   Admins: libraries, unrecognized files, TMDB, music, playback, accounts. Viewers: their account only
 │
@@ -140,7 +147,7 @@ bams/
 │       ├── plan.ts            What the TV decodes (TV caps vs BROWSER caps) → direct / remux / convert; pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── Rail.tsx · Cards.tsx · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
 │   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
@@ -197,11 +204,11 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v9)
+## 3. Data model (`db.py`, schema v10)
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `music_output` ("aac" default \| "flac": what unplayable music is converted to), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic) |
+| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `music_output` ("aac" default \| "flac": what unplayable music is converted to), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic), `opensubtitles_key` (+ `opensubtitles_verified_at`), `opensubtitles_user`/`opensubtitles_password` (optional account) + `opensubtitles_account` (JSON: level, downloads a day) |
 | `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status`, `sort_order` (v7: the admin's order; `library.ORDER`) |
 | `library_roots` | its folders | `library_id`, `path` (absolute, as given) |
 | `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit, `matched_by` tag\|search\|manual…), `poster_src` (v8, JSON: where the poster came from: `{from: folder, file, size, mtime_ns}` \| `embedded` \| `caa` \| `commons`, or `{from: null, checked}`); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
@@ -213,6 +220,7 @@ web UI, `/docs`.
 | `scans` | scan history | `trigger`, `status` ok\|partial\|error, `stats` JSON |
 | `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`), v9: `must_change_password` (0/1), `totp_secret` (base32, NULL = two-step off), `totp_last` (time step of the last code used) |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
+| `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `subtitles/opensubtitles/<ext_id>.srt`, shared by files that picked the same one), `added_by`, `added_at` |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
 
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
@@ -362,6 +370,29 @@ sends the track id as `burn` (HLS) / `sub` (`/transcode`); `app._burn` → `subt
 stream number, or `(sidecar .idx, k)`. The overlay reads `[1:s:n]` from a second input: the same file seeked
 `SUB_LEAD` (30 s) earlier, or the .idx (always, even from 0). Both outputs keep the file's clock with `-copyts
 -start_at_zero` (the fMP4 transcode then `-output_ts_offset -t`); the .idx has no start time, so it needs no offset.
+
+### 4.3f OpenSubtitles (`opensubtitles.py`)
+Off until an admin saves an API key (Settings → Playback → OpenSubtitles; `PUT /api/settings/opensubtitles-key` →
+`Client.check()`, a search: their 403 "You cannot consume this service" = refused, 400, not kept; unreachable = kept
+unchecked). `get_item` sets `opensubtitles: true` on movies/episodes then, and the players offer "Check
+OpenSubtitles". `GET /api/files/{id}/opensubtitles?languages=` → `search`: `lookup` builds the ask from the file's
+item (episode: show `parent_tmdb_id` else `parent_imdb_id` + season/episode; movie: `tmdb_id` else `imdb_id`) + the
+file's `quick_hash` as `moviehash` (≥ 128 KiB), parameters sorted and lowercase (their caching advice); nothing
+found → by name (`query`, year). Results with one file only; `hash_match` first (their order); `track` = this file
+already has it. `POST …/opensubtitles {file_id}` → `download`: a subtitle this file has is returned as it is; one the
+server has for another file is reused (no download); else `sign_in` (the account's token, cached per key + account,
+refused credentials kept in `_refused` and not retried) → `/download` (a refused token is re-made once) → the link →
+UTF-8 text checked to be a subtitle → `data/subtitles/opensubtitles/<id>.srt` → a `subtitle_downloads` row →
+the track (`tracks()`: "d<row id>", label language · release · SDH) + `remaining`. The `.vtt` route converts it like a
+sidecar (`subtitles.webvtt(src=)`). Errors: no key/refused key or account → 409, quota (406/429) → 429, else 502.
+`DELETE /api/files/{id}/subtitles/d<n>`: whoever downloaded it or an admin; the file goes once no row uses it.
+
+### 4.3g Sleep mode (players only)
+Web `Player.tsx`: `sleep` = episodes still to start after this one (null off, 0 stop after this); the bed button sets
+`SLEEP_MORE` (2) on an episode with a next one, else 0. `goNext` passes `{sleep: sleep - 1}` in the navigation state
+(the player is re-created per episode); at 0 the credits/end countdown doesn't start and the end shows "Sleep mode
+stopped playback here". TV `screens/Player.tsx`: the same with the route's `sleep` and `st.current.sleep` (the
+engine's `onEnd` reads it).
 
 ### 4.3e Watch state (`watch.py`)
 The player PUTs `/api/items/{id}/progress {position, duration}` every 10 s, on pause, on leaving (keepalive) and at
@@ -525,7 +556,12 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video → H.264 + audio → AAC (fMP4), starting exactly at `t` (fallback; 503 at the limit). `sub` = picture track id or embedded stream number | Player |
 | `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, passthrough?, start?}` → `{id, playlist, variants, copy, channels, passthrough}` | open an HLS session (503 at the limit, 409 if not probed / no keyframes, 422 unknown `burn` track) | Player |
 | `GET /api/hls/{sid}/index.m3u8` · `/{v}/index.m3u8` · `/{v}/init.mp4` · `/{v}/{k}.ts\|m4s` · `DELETE /api/hls/{sid}` | master / variant playlist / copy header / segment (made on demand; 409 superseded, 504 too slow) / close | Player (hls.js) |
-| `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track as WebVTT (400 for picture tracks) | Player |
+| `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track (embedded `e<n>`, sidecar `x<n>`, downloaded `d<n>`) as WebVTT (400 for picture tracks) | Player |
+| `PUT /api/settings/opensubtitles-key {key}` · `DELETE` · `POST …/test` (admin; state in `GET /api/settings` → `opensubtitles` `{configured, last4, verified_at, user, account, error}`) | the server's OpenSubtitles API key: checked first (400 refused), never returned | OpenSubtitlesSettings |
+| `PUT /api/settings/opensubtitles {username, password}` · `DELETE` (admin) | the optional OpenSubtitles account (signed in first; 400 refused; 409 without a key) | OpenSubtitlesSettings |
+| `GET /api/files/{id}/opensubtitles?languages=` → `{what, by, results, account}` · `POST /api/files/{id}/opensubtitles {file_id, language, release, hearing_impaired}` → `{track, remaining, message}` | search for a file / download one as its track (409 no key, 429 daily limit, 502 OpenSubtitles failed) | FindSubtitles, TV Player |
+| `DELETE /api/files/{id}/subtitles/d<n>` | remove a downloaded subtitle (who downloaded it, or an admin) | FindSubtitles |
+| `GET /api/items/{id}/folders` (admin) → `{folders: [{path, files, missing}], more}` | a show's folders / a movie's files on the server | FixMatch |
 | `GET /api/files/{id}/audio?t=` | music converted to AAC (fMP4, `audio/mp4`) or FLAC (`audio/flac`, per `music_output`) from `t` | music.tsx |
 | `GET /api/images/{path}` | cached artwork (path-traversal checked) | everywhere |
 | everything else | `web/dist` with SPA fallback (`SpaFiles`) | — |
@@ -565,10 +601,11 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
 | `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
 | `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB; Auto fill: guesses placed + listed, keep, skip, rescan keeps both, setting off/on |
+| `test_opensubtitles.py` | against a fake OpenSubtitles (`app.state.opensubtitles_transport`): search by TMDB id + season/episode + the file's hash (sorted, lowercase), by name for a movie without ids, the key like TMDB's (refused/not kept, never returned, test, removed = off), account refused/kept, token reused and re-made, download into the data dir (media untouched), no second download, quota 429, removal rights |
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
 | `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |
 | `test_readonly.py` | 15 write attempts must all raise and leave the tree byte-identical; reads allowed; full scan leaves media untouched; root validation |
-| `test_parse.py` | real-world names: scene packs, nested packs (megapack/show/S03/release/…), Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, extras with the season in their name, Series-N folders, movies; `guess()` cases (and where it gives up) |
+| `test_parse.py` | hyphenated names (Catch-22 folder, Ant-Man/Spider-Man/Obi-Wan/She-Ra/9-1-1, "Naruto-01" stays an episode, lowercase scene groups), `title_folder`; real-world names: scene packs, nested packs (megapack/show/S03/release/…), Plex layout, friend's quoted format, multi-ep, ranges, id tags, release-tag brackets, extras with the season in their name, Series-N folders, movies; `guess()` cases (and where it gives up) |
 | `test_scanner.py` | grouping, idempotent rescan, moved file keeps its row, deleted → flagged, offline root, movie versions, no write lock while walking/hashing, unnumbered extras in season folders (+ merge), progress reports (done/total/bytes) + Scheduler record |
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration, files are streamed but never offered for download (no route, no `download_url`, no file name) |
@@ -583,6 +620,10 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | I want to… | Go to |
 |---|---|
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
+| How hyphenated names are read | `parse._read` / `_protect` / `_GLUED` (what the other half may have been read as) |
+| OpenSubtitles: what's asked, how results are shown | `opensubtitles.lookup` / `_params` / `_result` / `search`; web `FindSubtitles.tsx`, TV `FindSubs` (`screens/Player.tsx`); languages in `web/src/subtitleLangs.ts` |
+| OpenSubtitles key, account, limits | `opensubtitles.save_key`, `sign_in`, `_MIN_INTERVAL`, `download`; routes `/api/settings/opensubtitles*` in `app.py`; `OpenSubtitlesSettings.tsx` |
+| Sleep mode (how many episodes) | `SLEEP_MORE` in `web/src/pages/Player.tsx` and `tv/src/screens/Player.tsx` |
 | Change Auto fill's best guesses | `parse.guess` (`_folder_show`, `_names_film`, `_decollect`, `_tidy`, `_loose_number`, `_LOOSE_EP_RE`, `_LOOSE_SEASON_DIR_RE`, `_DISC_DIR_RE`, `_bare`) + a case in `test_parse.py`, bump `PARSER_VERSION` |
 | Change how files group into shows | `items.get_or_create_title`, `parse.title_key` |
 | Tune TMDB matching | `matcher.score` (tail-of-ours rule), `matcher.best_match`, `matcher.choose` (exact title vs wrong year), `ACCEPT`, `EXACT` |

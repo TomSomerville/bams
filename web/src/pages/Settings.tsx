@@ -15,6 +15,7 @@ import SecuritySettings from "../components/SecuritySettings";
 import ServerNameSettings from "../components/ServerNameSettings";
 import TranscodeSettings from "../components/TranscodeSettings";
 import WatchSettings from "../components/WatchSettings";
+import OpenSubtitlesSettings from "../components/OpenSubtitlesSettings";
 import TmdbSettings from "../components/TmdbSettings";
 import { fmtSize, LIB_TYPES, type LibType } from "../format";
 
@@ -425,7 +426,8 @@ function AdminSettings() {
       <div className="lib-list"><MusicSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Playback</h2></div>
-      <div className="lib-list"><TranscodeSettings status={status} onChange={changed} /><WatchSettings /></div>
+      <div className="lib-list"><TranscodeSettings status={status} onChange={changed} /><WatchSettings />
+        <OpenSubtitlesSettings /></div>
 
       <div className="section-head"><h2 className="section-title">Home page</h2></div>
       <div className="lib-list"><HomeSettings /></div>

@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-10** (release 0.9.1).
+Last updated: **2026-10-11** (release 0.10.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -148,6 +148,12 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-10 | **Music on the TV** with one HTML `<audio>` (not AVPlay), no gapless | AVPlay is the video player and owns the screen; `<audio>` plays MP3/AAC/FLAC and falls back to the server's conversion on an error |
 | 10-10 | **Auto fill** (`parse.guess`, setting `autofill`, on by default): files the naming rules can't place are **placed automatically** by a best guess (show from the folder, season from "Season/Volume/Level" folders, number from "Part 3"/"Lesson 12"/"01 - Name", no number = extra, a film in its show's folder = Specials), marked `parse.guessed` and listed for review (Keep / Change / Don't place). Replaces the 10-08 "loose in a show folder stays unrecognised" rule while it's on. Still not guessed: a loose top-level file with no number, a movie in its own folder in a TV library | Owner asked for a best-guess parser and chose automatic placing over a pre-filled form. A wrong guess is one click to fix; turning the setting off takes every guess out at once |
 | 10-10 | **No downloads** (0.9.2): no `/api/files/{id}/download`, no `download_url`, no Download buttons; `/stream` sends no file name; right-click on the player's video is blocked | Owner: "remove the ability to download the files from the server completely. across the entire application". Playing still sends the file's bytes (direct play, copy-HLS), so a technical viewer could save a stream; stopping that would mean converting everything |
+| 10-11 | **OpenSubtitles: each server's admin pastes their own API key** in Settings, like TMDB (checked with a search before it's kept, never sent back); an OpenSubtitles account is optional (more downloads a day) | Owner's decision (test session 3 asked for "an area to add that API"). OpenSubtitles' terms ask for **one key per application** and say they may ban apps whose users bring their own; a single BAMS key was built first and replaced at the owner's request, so a key may get blocked |
+| 10-11 | **Downloaded subtitles belong to the file, for everyone**: kept in the data dir (`subtitles/opensubtitles/<id>.srt`, table `subtitle_downloads`, schema v10), listed as tracks `d<n>`; removable by whoever downloaded them or an admin; a subtitle the server already has isn't downloaded again | Media folders are read-only; downloads are limited per day (5 without an account, 20 free), so one pick should serve the whole household |
+| 10-11 | OpenSubtitles is searched by the title's **TMDB id** (show id + season/episode for episodes), else IMDb, plus the file's **moviehash** (BAMS's `quick_hash` is their hash); by name only when that finds nothing | Their advice; the hash puts subtitles made for the exact file first ("made for this file") |
+| 10-11 | **Sleep mode** = this episode **and 2 more**, then stop (a movie: stop at its end); toggled in the player, per viewing, not saved | Tester request ("finish the current episode, play 2 more, and then stop"). Carried to the next episode in the navigation state |
+| 10-11 | **Hyphenated words in names are read whole** (`parse._read`): when guessit's title cuts through one, it's read again with the hyphen protected. In file names "Show-01" stays episode 1 and an all-lowercase "grp-title.2010" keeps its group; a movie folder's name wins when the file's lost its front | Tester: "Catch-22" was "Catch" (guessit read "-22" as the episode; "Ant-" in "Ant-Man.2015" as a release group). Dry run over the owner's 4,391 real paths: nothing else changed |
+| 10-11 | **Fix match lists the title's folders** (shows: the folder above the season folders, as the parser picks it, with file counts; movies: their files), admins only | Tester request: check the right folder is being fixed. Server paths are admin information (`/api/status` hides them from viewers too) |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
 
 ## 4. Built so far
@@ -166,7 +172,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   Specials = Season 0, " - " kept inside titles, unnumbered files in season folders = extras of that season
   (also when the file name carries the season), the show = the folder right above the season folder (nested packs),
   else the deepest season-pack folder; Star Trek short forms (DS9/TNG/TOS/VOY/ENT) spelled out; a year after a
-  "Series N" marker is the season's, not the show's. ~50 real-world cases in `tests/test_parse.py`.
+  "Series N" marker is the season's, not the show's; hyphenated names kept whole ("Catch-22", "Ant-Man", "9-1-1",
+  `parse._read`). ~65 real-world cases in `tests/test_parse.py`.
 - **Identify by hand** (`identify.py`): unrecognised files listed with hints; an admin pastes a TMDB/IMDb link or
   enters title/year/season/episodes; kept in `files.manual` across rescans; undo; "Don't place" (`{skip: true}`).
 - **Auto fill** (0.9.0, `parse.guess`): what the rules can't place is placed by a best guess from folders and name
@@ -175,7 +182,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   "Bob's Burgers (2011) S14…") become one show, and stay merged on later scans.
 - **TMDB matcher:** path-id hints → `/find`, else search + confidence score (≥0.80) → details, images, seasons,
   episodes. Duplicate titles are merged. Low confidence → "unmatched" (never guessed). Refresh before 6 months.
-  Fix-match endpoint.
+  Fix-match endpoint; Fix match lists the title's folders/files (`/api/items/{id}/folders`).
 - **Probe:** ffprobe summary (container, codecs, resolution, HDR, audio/subtitle tracks; music tags, embedded cover flag).
 - **Music libraries:** artist > album > track from tags (ffprobe) with the folder layout as fallback (disc folders,
   `Artist - Album`, FMA-style names). Album covers from `cover.jpg`/`folder.jpg`… or the embedded picture;
@@ -211,6 +218,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
   encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead, VobSub `.idx/.sub` sidecars
   (one track per language) burned in too.
+- **OpenSubtitles** (0.10.0, `opensubtitles.py`): each server's own API key + optional account (Settings → Playback);
+  "Check OpenSubtitles" in the web and TV players searches by TMDB/IMDb id + moviehash; a picked subtitle is
+  downloaded into the data dir and becomes a track (`d<n>`) of that file for everyone; removable.
 - **Audio:** track list with labels, any track via the remux, 5.1 AAC on request (`channels`/`ch`), Dolby (AC3/EAC3)
   pass-through on devices that decode it.
 - **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback
@@ -254,7 +264,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   show, season and episode, Resume / Start over; Continue Watching cards link the show and the episode's season. Player:
   resume, progress reports, up-next countdown (at the end and 30 s before it), next-episode button, skip +30 / −10 s, sound menu
   (tracks, Surround, Dolby pass-through on/off), subtitles menu (text via `<track>`, picture incl. VobSub = burned in),
-  quality Original / Auto / sizes, remux over HLS with fallback to the live remux.
+  quality Original / Auto / sizes, remux over HLS with fallback to the live remux. Sleep mode (bed button: this
+  episode + 2 more, a movie to its end), "Check OpenSubtitles…" in the subtitles menu (`FindSubtitles.tsx`).
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
 
@@ -267,7 +278,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - Player (`screens/Player.tsx`, `engine.ts`): AVPlay on the TV (`<video>` + hls.js in a browser); copy-HLS in TS for
   what the TV decodes (`plan.ts`), full conversion otherwise or after a failure; resume, ±skip, progress every 10 s,
   sound/subtitle menus (text subtitles drawn by the app from the server's WebVTT, with a timing control; picture
-  subtitles burned in), up-next countdown. Packaging: `npm run package` (`scripts/wgt.mjs`) signs with the Tizen
+  subtitles burned in), up-next countdown, Sleep button, Check OpenSubtitles (results + language list). Packaging: `npm run package` (`scripts/wgt.mjs`) signs with the Tizen
   Studio profile `BAMS`, `--install --run` puts it on the TV, `--release` copies `dist/BAMS-SamsungTV-<v>.wgt`.
 - Web: Settings → Your TVs (`TvSettings.tsx`) and `/link` (`LinkTv.tsx`).
 - More servers (0.7.0): Settings → Other BAMS servers (add with the find/link screens, link again, remove, show/hide
@@ -294,11 +305,14 @@ Roughly in priority order:
    editing playlists in BAMS (only imported today); `.cue` entries inside playlists.
 3. **ISO / DVD / Blu-ray folders** (phase 3).
 4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning).
-5. **TV app leftovers:** the TV's music has no queue view/reorder and no gapless hand-over; renaming other servers'
+5. **OpenSubtitles leftovers:** not yet tried with a real key (built and tested against a fake; the API was read
+   from their docs and probed with a made-up key); downloaded subtitles can be removed only on the web; machine-made
+   translations are left out (their default); subtitles split over 2 CDs are skipped.
+6. **TV app leftovers:** the TV's music has no queue view/reorder and no gapless hand-over; renaming other servers'
    libraries is web-only (the TV only hides them); Samsung TVs other than the owner's 2022 Frame untested (codec table in
    `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
    README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
-6. **UI redesign** from the owner's mockups.
+7. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
 
@@ -335,6 +349,48 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-11: Test session 3: OpenSubtitles, sleep mode, Fix match folders, hyphenated titles (release 0.10.0)
+- **What / why:** tester requests and one bug. (1) Fix match shows "the path to the show/folder": `GET
+  /api/items/{id}/folders` (admin) lists a show's folders as the parser picks them (`parse.title_folder` →
+  `_show_dir_at`) with file counts, or a movie's files; `FixMatch.tsx` shows them above the search. (2) "Subtitle
+  support: OpenSubtitles… an area to add that API… Check OpenSubtitles… select one… test another": new
+  `opensubtitles.py` (client: Api-Key + `USER_AGENT`, 4 req/s throttle, optional account login with the 24 h token in
+  memory and refused credentials not retried, a once-only re-login when a token stops working; search by TMDB/IMDb
+  id + season/episode + moviehash, else by name; download → data dir; tracks `d<n>`), schema v10
+  `subtitle_downloads`, routes for the key, the account, search, download and removal; web `OpenSubtitlesSettings.tsx`
+  (Settings → Playback: key like TMDB's, optional account), `FindSubtitles.tsx` (player dialog: language, results with
+  "made for this file", already-downloaded ones to switch to or remove); TV `FindSubs` in `screens/Player.tsx`
+  (results + language list on the remote). First built with a single BAMS key (OpenSubtitles' rule), then changed at
+  the owner's request to a key per server (decisions log). (3) Sleep mode: "an icon… a silhouette of a bed with stars
+  above it… finish the current episode, play 2 more, and then stop… a movie… finish… and then stop": web button next
+  to volume (new `sleep` icon: bed strokes + filled stars, `Icon.tsx` FILLS), TV "Sleep" pill; the count rides in the
+  navigation state to the next episode; at the end "Sleep mode stopped playback here". (4) Bug "In Linux… a dash…
+  Catch-22 is identified as Catch": not Linux-only; guessit splits at hyphens (folder "Catch-22" = "Catch" + episode
+  22; "Ant-Man.2015" = group "Ant" + "Man"; "She-Ra and…" = "She" + a ".ra" file). `parse._read` re-reads a name
+  with the cut word's hyphens protected (U+2010, swapped back); `PARSER_VERSION` 9.
+- **Files:** `server/bams/opensubtitles.py` (new), `app.py` (routes, `os_client`, `item_folders`, downloaded tracks in
+  `get_item` and the `.vtt` route, `opensubtitles` flag on items), `db.py` (v10), `parse.py` (`_read`, `_protect`,
+  `_labels`, `_show_dir_at`, `title_folder`, movie folder wins when the file's name lost its front, v9),
+  `subtitles.py` (`webvtt(src=)`); tests `test_opensubtitles.py` (new, fake OpenSubtitles), `test_parse.py` (+13
+  hyphen cases, `test_title_folder`), `test_api.py` (Fix match folders), `test_auth.py` (v10); web `api.ts`,
+  `subtitleLangs.ts` (new, shared with the TV), `components/FindSubtitles.tsx`, `OpenSubtitlesSettings.tsx` (new),
+  `FixMatch.tsx`, `Icon.tsx`, `pages/Player.tsx`, `Settings.tsx`, `styles.css`; TV `App.tsx` (route `sleep`),
+  `Icon.tsx`, `api.ts`, `prefs.ts` (`osLang`), `screens/Player.tsx`, `styles.css`; CHANGELOG, VERSION 0.10.0, TV 0.10.0.
+- **Verified:** 320 server tests (OpenSubtitles against a fake: search parameters sorted/lowercase with the file's
+  real hash, key refused/kept/never returned, account refused then kept, token reuse and re-login, quota 429,
+  download stored in the data dir with the media untouched, re-picks not downloaded again, removal rights); TV `npm
+  test` 32 pass; web + TV `tsc` and builds. Parser dry run over the owner's 4,391 video paths (read-only export from
+  the Ubuntu server): no result changed. Scratch server (:8498, DB copy + generated "Catch-22" clips + the fake
+  OpenSubtitles): the show read as "Catch-22"; Fix match listed the folders; Settings refused a wrong key and a wrong
+  account, kept the right ones; the player's dialog downloaded a pick, the subtitle showed and stayed after a reload;
+  sleep mode played E01 → E02 → E03 and stopped; TV app in a browser at 1920×1080 with the remote keys: Subtitles →
+  Check OpenSubtitles → language list (Back returns) → pick → line drawn; Sleep on the last episode showed the stop
+  message; E02 → E03 → E04 then stopped. The real OpenSubtitles API was only probed with a made-up key (403 "You
+  cannot consume this service" on searches, `/infos/formats` open to any key).
+- **Left open:** not tried with a real OpenSubtitles key/account; the TV app isn't installed on the owner's Frame;
+  released alone while another session's Fire TV app and "hide from Continue Watching" (schema v11) were still
+  uncommitted (owner's choice).
 
 ### 2026-10-10: Converted playback on Ubuntu fixed (FFmpeg 6.1 init file, VAAPI constant QP), downloads removed (release 0.9.2)
 - **What / why:** owner: Family Guy episodes (HEVC + AC3 MP4) didn't play on their new Ubuntu 24.04 server: a long

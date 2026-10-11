@@ -55,6 +55,30 @@ def test_movie_in_tv_library_is_flagged(tmp_path):
         readonly.set_protected_roots([])
 
 
+def test_fix_match_shows_where_the_files_are(tmp_path):
+    """Test session 3: Fix match says which folder it's fixing. A show's folders as the parser picks them (the one
+    above the season folders), with file counts; a movie's files. Admins only (server paths)."""
+    from bams import jobs
+    media = tmp_path / "media"
+    make_tree(media, ["Catch-22/Season 1/Catch-22 S01E01.mkv", "Catch-22/Season 1/Catch-22 S01E02.mkv",
+                      "Pack/Catch-22 S02/Catch-22 S02E01.mkv"])
+    paths = Paths(tmp_path / "data")
+    c = signed_in(create_app(paths, start_scheduler=False))
+    try:
+        lib = c.post("/api/libraries", json={"name": "TV", "type": "show", "paths": [str(media)]}).json()
+        jobs.run_scan(paths, lib["id"], do_match=False)
+        [show] = c.get(f"/api/libraries/{lib['id']}/items").json()
+        assert show["title"] == "Catch-22"  # not "Catch"
+        assert c.get(f"/api/items/{show['id']}/folders").json() == {"folders": [
+            {"path": str(media / "Catch-22"), "files": 2, "missing": 0},
+            {"path": str(media / "Pack" / "Catch-22 S02"), "files": 1, "missing": 0}], "more": 0}
+        season = c.get(f"/api/items/{show['id']}").json()["children"][0]
+        assert c.get(f"/api/items/{season['id']}/folders").status_code == 404
+        assert signed_in(c.app, "Kid", admin=False).get(f"/api/items/{show['id']}/folders").status_code == 403
+    finally:
+        readonly.set_protected_roots([])
+
+
 def test_files_play_but_are_never_offered_for_download(tmp_path):
     """Owner's decision: BAMS has no downloads. A file is streamed for playing only, with no name to save it under."""
     from bams import jobs

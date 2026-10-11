@@ -88,7 +88,10 @@ settings or accounts (and Fix match, folder browsing) are for admins.
 | `GET /api/files/{id}/remux?t=&audio=&ch=` · `/seek?t=` | video copied + audio converted to AAC (fragmented MP4) for browsers; `/seek` says where a stream started at `t` really begins |
 | `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video converted to H.264 too (fragmented MP4) |
 | `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, start?}` · `GET /api/hls/{sid}/index.m3u8` | HLS: the remux or a conversion, segments made on demand |
-| `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track (embedded or sidecar) as WebVTT |
+| `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track (embedded, sidecar, or downloaded `d<n>`) as WebVTT |
+| `PUT/DELETE /api/settings/opensubtitles-key {key}` · `POST …/test` · `PUT/DELETE /api/settings/opensubtitles {username, password}` | this server's OpenSubtitles API key (checked first, never returned) and optional account (admins) |
+| `GET /api/files/{id}/opensubtitles?languages=` · `POST /api/files/{id}/opensubtitles {file_id, …}` · `DELETE /api/files/{id}/subtitles/d{n}` | OpenSubtitles results for a file / download one as a track of that file / remove it |
+| `GET /api/items/{id}/folders` | where a show's folders / a movie's files are (Fix match; admins) |
 | `GET /api/files/{id}/audio?t=` | music converted to AAC (fragmented MP4) for formats browsers can't play |
 | `GET /api/images/{path}` | cached artwork |
 

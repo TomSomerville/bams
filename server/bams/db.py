@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -307,7 +307,24 @@ def _v9(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE users ADD COLUMN totp_last INTEGER")  # time step of the last code used (no replays)
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9}  # target version -> step
+def _v10(con: sqlite3.Connection) -> None:
+    """v10: subtitles downloaded from OpenSubtitles for a video file (opensubtitles.py). The subtitle itself is a
+    file in the data dir (`path`, relative to it), never next to the video."""
+    con.execute("""CREATE TABLE subtitle_downloads (
+        id          INTEGER PRIMARY KEY,
+        file_id     INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        provider    TEXT NOT NULL,                 -- 'opensubtitles'
+        ext_id      TEXT NOT NULL,                 -- the provider's id of the subtitle file
+        language    TEXT,                          -- the provider's code ('en', 'pt-br')
+        release     TEXT,                          -- the release name it was made for (its label in the menu)
+        hearing_impaired INTEGER NOT NULL DEFAULT 0,
+        path        TEXT NOT NULL,                 -- relative to the data dir
+        added_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        added_at    TEXT NOT NULL,
+        UNIQUE (file_id, provider, ext_id))""")
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

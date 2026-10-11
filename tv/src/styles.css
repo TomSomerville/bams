@@ -217,6 +217,14 @@ p { margin: 0; }
   background: rgba(14, 16, 21, 0.95); }
 .player-error { left: 50%; top: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%); }
 .upnext h2, .player-error h2 { font-size: 40px; margin-bottom: 14px; }
+.pill.on { color: var(--cyan); box-shadow: inset 0 0 0 3px var(--cyan); }
+.pill.on:focus { color: #10131a; }
+.os-lang { margin-bottom: 22px; }
+.os-note { font-size: 24px; color: var(--muted); margin: 0 0 18px; line-height: 1.4; }
+.os-note.bad { color: #ff8fa8; }
+.os-result { align-items: flex-start; text-align: left; }
+.os-result > span:last-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.os-meta { font-size: 21px; opacity: 0.75; }
 .menu-timing { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; font-size: 26px; }
 .menu-timing strong { min-width: 110px; text-align: center; font-variant-numeric: tabular-nums; }
 .home.no-hero { padding-top: 50px; }

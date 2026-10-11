@@ -75,6 +75,15 @@ EPISODES = [
     # ...unless the inner one is a one-word short form that the outer pack spells out
     ("Parks and Recreation S01-07 web hevc-d3g/Parks S07/Parks.and.Recreation.S07E01.2017.1080p.AMZN.WEBRip.DD5.1.x264-NTb.mkv",
      dict(title="Parks and Recreation", season=7, episodes=[1])),
+    # hyphenated names stay whole (test session 3: "Catch-22" was read as "Catch"); guessit splits them at the hyphen
+    ("Catch-22/Season 1/Catch-22 S01E01.mkv", dict(title="Catch-22", season=1, episodes=[1])),
+    ("Catch-22 Season 1/Catch-22 - 01.mkv", dict(title="Catch-22", season=1, episodes=[1])),
+    ("Obi-Wan.Kenobi.S01E02.1080p.WEB.x264-GRP.mkv", dict(title="Obi-Wan Kenobi", season=1, episodes=[2])),
+    ("She-Ra and the Princesses of Power/Season 1/She-Ra and the Princesses of Power - S01E01.mkv",
+     dict(title="She-Ra and the Princesses of Power", season=1, episodes=[1])),
+    ("9-1-1/Season 1/9-1-1 - S01E01 - Pilot.mkv", dict(title="9-1-1", season=1, episodes=[1], episode_title="Pilot")),
+    ("9-1-1 Lone Star/Season 2/9-1-1.Lone.Star.S02E03.mkv", dict(title="9-1-1 Lone Star", season=2, episodes=[3])),
+    ("Naruto/Naruto-01.mkv", dict(title="Naruto", season=1, episodes=[1])),  # in a file name "-01" is still the episode
 ]
 
 MOVIES = [
@@ -88,6 +97,14 @@ MOVIES = [
     ("Spider-Man - Into the Spider-Verse (2018)/Spider-Man - Into the Spider-Verse (2018).mkv",
      dict(title="Spider-Man - Into the Spider-Verse", year=2018)),
     ("Mission Impossible - Fallout (2018) 1080p BluRay x264-GRP.mkv", dict(title="Mission Impossible - Fallout", year=2018)),
+    # hyphenated names: guessit reads "Catch-" / "Ant-" as a release group in front
+    ("Catch-22.1970.1080p.BluRay.mkv", dict(title="Catch-22", year=1970)),
+    ("Ant-Man.2015.1080p.mkv", dict(title="Ant-Man", year=2015)),
+    ("Spider-Man.Far.From.Home.2019.1080p.x264-GRP.mkv", dict(title="Spider-Man Far From Home", year=2019)),
+    ("Tenet-2020.mkv", dict(title="Tenet", year=2020)),  # a year glued on stays the year
+    # ...but all-lowercase scene names do lead with their group; the folder then has the full name
+    ("Movie.Name.2010.DVDRip.XviD-AAF/aaf-movie.name.2010.dvdrip.avi", dict(title="movie name", year=2010)),
+    ("Ant-Man (2015)/ant-man.2015.mkv", dict(title="Ant-Man", year=2015)),
 ]
 
 
@@ -111,6 +128,15 @@ def test_release_info_from_name():
     p = parse("Family Guy S15 1080p DSNP WEB-DL AAC2 0 H 264-GrpA/Family.Guy.S15E01.The.the.Band.1080p.DSNP.WEB-DL.AAC2.0.H.264-GrpA.mkv", "show")
     assert p.release["resolution"] == "1080p"
     assert p.release["video_codec"] == "H.264"
+
+
+def test_title_folder():
+    from bams.parse import title_folder
+    assert title_folder("Catch-22/Season 1/Catch-22 S01E01.mkv", "show") == "Catch-22"
+    assert title_folder("Star.Trek.Megapack.TheGrp/Star.Trek.DS9/S03/Star.Trek.DS9.S03E14.DVDRip/x.avi", "show")         == "Star.Trek.Megapack.TheGrp/Star.Trek.DS9"
+    assert title_folder("Pack/The Simpsons S28/The Simpsons - 28x01.mkv", "show") == "Pack/The Simpsons S28"
+    assert title_folder("Show.S01E01.mkv", "show") == "Show.S01E01.mkv"
+    assert title_folder("Heat (1995)/movie.mkv", "movie") == "Heat (1995)/movie.mkv"
 
 
 def test_unrecognized_episode():

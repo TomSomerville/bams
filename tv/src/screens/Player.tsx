@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFor, mediaFor, refreshTicket, type FileInfo, type ItemDetail, type SubtitleTrack } from "../api";
+import { apiFor, mediaFor, refreshTicket, type FileInfo, type ItemDetail, type SubtitleSearch, type SubtitleTrack } from "../api";
 import { useNav } from "../App";
 import { AvplayEngine, hasAvplay, VideoEngine, type Engine } from "../engine";
 import { clock, sxe } from "../format";
@@ -9,17 +9,21 @@ import { focus, focusFirst } from "../nav";
 import { pickAudio, pickFile, plan, type Mode } from "../plan";
 import { prefs, setPref } from "../prefs";
 import { isBack, KEY } from "../tizen";
+import { defaultLanguage, languageName, OS_LANGUAGES } from "../../../web/src/subtitleLangs";
 
 type Cue = { start: number; end: number; text: string };
 
 const OSD_HIDE = 5000;   // ms without a key before the controls fade while playing
 const SEEK_SETTLE = 700; // ms after the last left/right press before the seek is made
 const UP_NEXT = 10;      // seconds before the next episode starts by itself
+const SLEEP_MORE = 2;    // sleep mode on an episode: this one, then this many more, then playback stops (as on the web)
 
 /** The player: the file as-is when the TV can (AVPlay decodes MKV/HEVC/AC3...), else an HLS session from the
  *  server (sound converted, or everything converted). Saves the position like the web player does.
  *  `rid`: the item is on another of this TV's servers (api.ts); everything then goes to that one. */
-export default function Player({ id, resume, rid }: { id: number; resume: boolean; rid?: number }) {
+export default function Player({ id, resume, rid, sleep: sleeping }: { id: number; resume: boolean; rid?: number;
+  /** sleep mode: episodes still to play after this one (0 = stop after it), carried over from the last episode */
+  sleep?: number }) {
   const api = apiFor(rid);      // this item's server
   const media = mediaFor(rid);
   const nav = useNav();
@@ -35,16 +39,21 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
   const [paused, setPaused] = useState(false);
   const [buffering, setBuffering] = useState(true);
   const [osd, setOsd] = useState(true);
-  const [menu, setMenu] = useState<"audio" | "subs" | null>(null);
+  // "find": Check OpenSubtitles, "findLang": its language list
+  const [menu, setMenu] = useState<"audio" | "subs" | "find" | "findLang" | null>(null);
   const [seekTo, setSeekTo] = useState<number | null>(null);
   const [upNext, setUpNext] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [subDelay, setSubDelay] = useState(prefs.subDelay);
+  const [sleep, setSleep] = useState<number | null>(sleeping ?? null);  // null = off
+  const [slept, setSlept] = useState(false);  // sleep mode stopped playback at the end
+  const [found, setFound] = useState<SubtitleTrack[]>([]);  // fetched from OpenSubtitles while playing
+  const [osLang, setOsLang] = useState(() => defaultLanguage(prefs.osLang, prefs.subLang || null));
 
   // what callbacks need without re-binding
   const st = useRef({ file: null as FileInfo | null, audio: 0, sub: null as SubtitleTrack | null, mode: null as Mode | null,
     session: null as string | null, started: false, startAt: 0, fellBack: false, duration: null as number | null,
-    item: null as ItemDetail | null, seek: null as number | null, ended: false });
+    item: null as ItemDetail | null, seek: null as number | null, ended: false, sleep: sleeping ?? null as number | null });
   const timers = useRef<{ osd?: ReturnType<typeof setTimeout>; seek?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setInterval> }>({});
 
   const duration = (): number | null => st.current.duration ?? engine.current?.duration() ?? null;
@@ -132,7 +141,8 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
         const d = duration();
         report(false, d ?? engine.current?.time());
         const next = st.current.item?.next_id;
-        if (next) setUpNext(UP_NEXT);
+        if (st.current.sleep === 0) setSlept(true);  // sleep mode: that was the last one
+        else if (next) setUpNext(UP_NEXT);
         else nav.back();
       },
       onError: (m: string) => fail(m),
@@ -230,7 +240,9 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
   const playNext = () => {
     clearInterval(timers.current.next);
     const next = st.current.item?.next_id;
-    if (next) nav.replace({ name: "player", id: next, rid, resume: true });
+    // sleep mode counts down; going on by hand after it stopped means someone's awake: off
+    const left = st.current.sleep;
+    if (next) nav.replace({ name: "player", id: next, rid, resume: true, sleep: left ? left - 1 : undefined });
   };
 
   // the up-next countdown
@@ -256,6 +268,25 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
     void begin(now);  // the server makes the stream with that track
   };
 
+  const toggleSleep = () => {
+    const n = sleep !== null ? null : st.current.item?.next_id ? SLEEP_MORE : 0;
+    st.current.sleep = n;
+    setSleep(n);
+    wake();
+  };
+
+  /** A subtitle picked from OpenSubtitles: now one of the file's tracks, shown at once. */
+  const takeFound = (t: SubtitleTrack) => {
+    setFound((f) => f.some((x) => x.id === t.id) || st.current.file?.subtitles?.some((x) => x.id === t.id) ? f : [...f, t]);
+    chooseSub(t);
+    setTimeout(() => focus(document.querySelector<HTMLElement>('[data-fid="osd-subs"]')));
+  };
+  const pickOsLang = (code: string) => {
+    setOsLang(code);
+    setPref("osLang", code);
+    setMenu("find");
+  };
+
   const chooseSub = (t: SubtitleTrack | null) => {
     setMenu(null);
     setPref("subLang", t ? t.language ?? "" : "");
@@ -275,13 +306,14 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
         if (isBack(e)) { setUpNext(null); nav.back(); return true; }
         return true;
       }
-      if (error) {
+      if (error || slept) {
         if (isBack(e) || k === KEY.ENTER) { nav.back(); return true; }
         return false;
       }
       wake();  // every key counts, menu keys too
       if (menu) {
-        if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu}"]`))); return true; }
+        if (isBack(e) && menu === "findLang") { setMenu("find"); return true; }
+        if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu === "audio" ? "audio" : "subs"}"]`))); return true; }
         return false;  // arrows and OK move within the menu
       }
       const inButtons = !!(document.activeElement as HTMLElement | null)?.closest(".osd-buttons");
@@ -323,6 +355,7 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
   const show = item?.ancestors.find((a) => a.kind === "show");
   const title = show ? show.title : item?.title ?? "";
   const subtitle = item?.kind === "episode" ? `${sxe(item)} · ${item.title}` : null;
+  const subs = [...(file?.subtitles ?? []), ...found.filter((f) => !file?.subtitles?.some((x) => x.id === f.id))];
 
   return (
     <div className={`player ${osd ? "" : "hide-cursor"}`}>
@@ -352,17 +385,26 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
             {(file?.audio_tracks?.length ?? 0) > 1 && (
               <button className="pill" data-fid="osd-audio" onClick={() => setMenu("audio")}><Icon name="audio" /> Sound</button>
             )}
-            {!!file?.subtitles?.length && (
+            {(subs.length > 0 || !!item?.opensubtitles) && (
               <button className="pill" data-fid="osd-subs" onClick={() => setMenu("subs")}><Icon name="subs" /> Subtitles</button>
             )}
             {item?.next_id && <button className="pill" data-fid="osd-next" onClick={playNext}><Icon name="next" /> Next episode</button>}
+            {(item?.kind === "movie" || item?.kind === "episode") && (
+              <button className={`pill ${sleep !== null ? "on" : ""}`} data-fid="osd-sleep" onClick={toggleSleep}>
+                <Icon name="sleep" /> {sleep === null ? "Sleep" : sleep ? `Sleep: this + ${sleep} more` : "Sleep: stop after this"}
+              </button>
+            )}
             <span className="osd-mode">{mode === "direct" ? "Playing as-is" : mode === "remux" ? "Video as-is, sound converted" : mode === "convert" ? "Converted by the server" : ""}</span>
           </div>
           <div className="osd-hint">◀ ▶ skip back 10 s / ahead 30 s · OK pause · ▲▼ controls</div>
         </div>
       </div>
 
-      {menu && file && (
+      {(menu === "find" || menu === "findLang") && file && (
+        <FindSubs fileId={file.id} rid={rid} lang={osLang} picking={menu === "findLang"} current={sub?.id ?? null}
+          tracks={subs} onLang={() => setMenu("findLang")} onPickLang={pickOsLang} onUse={takeFound} />
+      )}
+      {(menu === "audio" || menu === "subs") && file && (
         <Menu title={menu === "audio" ? "Sound" : "Subtitles"}
           extra={menu === "subs" && sub && !sub.image ? (
             <div className="menu-timing">
@@ -375,8 +417,9 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
           options={menu === "audio"
             ? (file.audio_tracks ?? []).map((t) => ({ key: `a${t.index}`, label: t.label, on: t.index === audio, pick: () => chooseAudio(t.index) }))
             : [{ key: "off", label: "Off", on: !sub, pick: () => chooseSub(null) },
-              ...(file.subtitles ?? []).map((t) => ({ key: t.id, label: t.label + (t.image ? " (the server converts the video)" : ""),
-                on: sub?.id === t.id, pick: () => chooseSub(t) }))]} />
+              ...subs.map((t) => ({ key: t.id, label: t.label + (t.image ? " (the server converts the video)"
+                : t.source === "download" ? " (OpenSubtitles)" : ""), on: sub?.id === t.id, pick: () => chooseSub(t) })),
+              ...(item?.opensubtitles ? [{ key: "os", label: "Check OpenSubtitles…", on: false, pick: () => setMenu("find") }] : [])]} />
       )}
 
       {upNext !== null && item?.next_id && (
@@ -386,6 +429,14 @@ export default function Player({ id, resume, rid }: { id: number; resume: boolea
             <button className="btn primary" ref={(b) => b?.focus()} onClick={playNext}><Icon name="play" size={30} /> Play now</button>
             <button className="btn" onClick={() => nav.back()}>Back</button>
           </div>
+        </div>
+      )}
+
+      {slept && !error && (
+        <div className="player-error" data-trap>
+          <h2>Sleep mode</h2>
+          <p>Playback stopped here.</p>
+          <button className="btn primary" ref={(b) => b?.focus()} onClick={() => nav.back()}>Back</button>
         </div>
       )}
 
@@ -417,6 +468,98 @@ function Menu({ title, options, extra }: { title: string; extra?: React.ReactNod
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** "Check OpenSubtitles": what OpenSubtitles has for the playing file in one language; OK on one fetches it (on the
+ *  server, which keeps it for that file) and shows it. The language button opens the list of languages. */
+function FindSubs({ fileId, rid, lang, picking, current, tracks, onLang, onPickLang, onUse }: {
+  fileId: number; rid?: number; lang: string; picking: boolean; current: string | null; tracks: SubtitleTrack[];
+  onLang: () => void; onPickLang: (code: string) => void; onUse: (t: SubtitleTrack) => void;
+}) {
+  const api = apiFor(rid);
+  const ref = useRef<HTMLDivElement>(null);
+  const [res, setRes] = useState<SubtitleSearch | null>(null);
+  const [busy, setBusy] = useState<number | "search" | null>("search");
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setBusy("search");
+    setErr(null);
+    api.get<SubtitleSearch>(`/api/files/${fileId}/opensubtitles?languages=${encodeURIComponent(lang)}`)
+      .then((r) => { if (live) setRes(r); })
+      .catch((e) => { if (live) { setRes(null); setErr((e as Error).message); } })
+      .finally(() => { if (live) setBusy(null); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileId, lang]);
+
+  // the focus: the language picked (list), else the first result, else the language button
+  useEffect(() => {
+    if (busy === "search" && !picking) return;
+    setTimeout(() => focus(ref.current?.querySelector<HTMLElement>(picking ? ".menu-item.on" : ".os-result")
+      ?? ref.current?.querySelector<HTMLElement>("button")));
+  }, [picking, busy === "search"]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const use = async (fid: number) => {
+    const r = res?.results.find((x) => x.file_id === fid);
+    if (!r) return;
+    const have = r.track ? tracks.find((t) => t.id === r.track) : undefined;
+    if (have) return onUse(have);
+    setBusy(fid);
+    setErr(null);
+    try {
+      const d = await api.post<{ track: SubtitleTrack }>(`/api/files/${fileId}/opensubtitles`,
+        { file_id: r.file_id, language: r.language, release: r.release, hearing_impaired: r.hearing_impaired });
+      onUse(d.track);
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  if (picking) {
+    return (
+      <div className="menu" data-trap ref={ref}>
+        <h2>Subtitle language</h2>
+        <div className="menu-list" data-scroll>
+          {OS_LANGUAGES.map((c) => (
+            <button key={c} className={`menu-item ${c === lang ? "on" : ""}`} onClick={() => onPickLang(c)}>
+              <span className="tick">{c === lang ? "✓" : ""}</span>{languageName(c)}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="menu" data-trap ref={ref}>
+      <h2>OpenSubtitles</h2>
+      <button className="pill os-lang" onClick={onLang}>Language: {languageName(lang)}</button>
+      {busy === "search" && <p className="os-note">Searching OpenSubtitles…</p>}
+      {err && <p className="os-note bad">{err}</p>}
+      {res && busy !== "search" && !res.results.length && (
+        <p className="os-note">Nothing in {languageName(lang)}. Try another language.</p>
+      )}
+      {res && busy !== "search" && res.results.length > 0 && (
+        <div className="menu-list" data-scroll>
+          {res.results.map((r) => (
+            <button key={r.file_id} className={`menu-item os-result ${r.track && r.track === current ? "on" : ""}`}
+              onClick={() => use(r.file_id)}>
+              <span className="tick">{r.track && r.track === current ? "✓" : ""}</span>
+              <span>
+                <span>{r.release || "(no release name)"}</span>
+                <span className="os-meta">{[busy === r.file_id ? "Downloading…" : null, r.hash_match ? "made for this file" : null,
+                  r.hearing_impaired ? "for the hard of hearing" : null, `${r.downloads.toLocaleString()} downloads`,
+                  r.ai || r.machine ? "machine-translated" : null, r.track ? "on this video" : null].filter(Boolean).join(" · ")}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="os-note">Subtitles from OpenSubtitles.com. If one doesn't fit, come back and try another.</p>
     </div>
   );
 }

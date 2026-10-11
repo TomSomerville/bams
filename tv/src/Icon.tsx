@@ -18,6 +18,12 @@ const PATHS = {
   music: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
   shuffle: "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
   stop: "M6 6h12v12H6z",
+  // a bed (headboard, sleeper's head, blanket, frame), with two stars above it in FILLS: sleep mode
+  sleep: "M3 9v11M3 17h18v3M9 17v-4h9a3 3 0 0 1 3 3v1M6 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
+};
+// Filled shapes drawn over an icon's strokes (small stars don't read as strokes); the web's Icon has the same
+const FILLS: Partial<Record<keyof typeof PATHS, string>> = {
+  sleep: "M14 1l1.1 2.4 2.4 1.1-2.4 1.1L14 8l-1.1-2.4-2.4-1.1 2.4-1.1zM20 5.5l.7 1.3 1.3.7-1.3.7-.7 1.3-.7-1.3-1.3-.7 1.3-.7z",
 };
 
 export type IconName = keyof typeof PATHS;
@@ -29,6 +35,7 @@ export default function Icon({ name, size = 36 }: { name: IconName; size?: numbe
       fill={fill ? "currentColor" : "none"} stroke={fill ? "none" : "currentColor"} strokeWidth={2}
       strokeLinecap="round" strokeLinejoin="round">
       <path d={PATHS[name]} />
+      {FILLS[name] && <path d={FILLS[name]} fill="currentColor" stroke="none" />}
     </svg>
   );
 }
