@@ -3,7 +3,7 @@ import { api, getServer, hello, removeExtra, updateExtra } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import { prefs, setPref } from "../prefs";
 import { appVersion, deviceName } from "../tizen";
-import { hasAvplay } from "../engine";
+import { hasAvplay, hasExo } from "../engine";
 
 /** This TV: which server, which account, playback choices. */
 export default function Settings() {
@@ -81,18 +81,18 @@ export default function Settings() {
             <small>Only for troubleshooting: the TV plays most files as they are, which looks best and spares the server.</small>
           </span>
         </button>
-        <button className="toggle" data-fid="dts" onClick={() => toggle("dts")}>
+        {!hasExo() && <button className="toggle" data-fid="dts" onClick={() => toggle("dts")}>
           <span className={`switch ${prefs.dts ? "on" : ""}`} />
           <span>
             <strong>This TV plays DTS sound</strong>
             <small>Most Samsung TVs from 2018 on don't, so BAMS converts DTS to AAC. Turn on only if yours does.</small>
           </span>
-        </button>
+        </button>}
       </section>
 
       <section className="panel">
         <h2>About</h2>
-        <p>{deviceName()} · BAMS TV {appVersion()} · player: {hasAvplay() ? "Samsung AVPlay" : "HTML video"}</p>
+        <p>{deviceName()} · BAMS TV {appVersion()} · player: {hasAvplay() ? "Samsung AVPlay" : hasExo() ? "ExoPlayer" : "HTML video"}</p>
       </section>
     </div>
   );

@@ -72,6 +72,8 @@ server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve 
 cd web && npm install && npx tsc -p . && npm run build
 # Samsung TV app (tv/README.md): Tizen Studio in C:	izen-studio, signing profile "BAMS", TV at 192.168.1.211
 cd tv && npm install && npx tsc -p . && npm test && npm run build && npm run package -- --install --run   # --release: dist/BAMS-SamsungTV-<v>.wgt
+# Fire TV app (firetv/README.md): JDK 17 + Android SDK 35; release key C:\Users\Beached\bams-firetv.jks via firetv/keystore.properties
+cd tv && npm run build && npm run firetv -- --install --device <fire-tv-ip>   # --release: dist/BAMS-FireTV-<v>.apk
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
@@ -265,4 +267,15 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   coming after a hold must press nothing (the menu's first button has the focus by then). `tv/test/hold.test.ts`.
 - **Python 3.11 on Windows: `time.time()` ticks every ~16 ms**, so writes in a row often get the same time. Tests that
   depend on the order of timestamps patch the clock (`monkeypatch.setattr(watch, "now", …)` in `test_watch.py`).
+- **The Fire TV app is the `tv/` page in a WebView** (`firetv/`): change the page in `tv/`, rebuild it, then the APK
+  (Gradle copies `tv/dist` in). Fire TV code paths are `hasExo()` / `fireInfo()` branches; keep the Samsung and browser
+  paths untouched by them and add a case to `tv/test/firetv.test.ts`. OK on a text box must stay a simulated tap
+  (`MainActivity.kt`): asking Android for the keyboard directly opened it on a dead input connection and it closed at once.
+- **Fire TV releases need the release key** (`C:\Users\Beached\bams-firetv.jks`, passwords in git-ignored
+  `firetv/keystore.properties`, made at 0.12.0): an APK signed with any other key won't install over a released one.
+  Never commit either; a lost key means every Fire TV reinstalls and signs in again. Debug and release builds don't
+  install over each other (`adb uninstall media.bams.firetv` first).
+- **A saved position of 0 doesn't mean playback was stuck:** `watch.record_progress` stores positions under
+  `resume_after` as 0. To see whether a browser really played, read the traffic log (`netflow/*.jsonl`: how long each
+  `/stream` request stayed open, and whether a second one followed), not `watch_state`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

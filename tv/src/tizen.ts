@@ -1,5 +1,8 @@
 // Samsung/Tizen bits: the remote's keys, device info, leaving the app. Everything here also works (as a no-op or
-// a fallback) in an ordinary browser, where the app is developed.
+// a fallback) in an ordinary browser, where the app is developed, and on a Fire TV (firetv.ts: the Android app's
+// bridge answers instead of Tizen; its remote's keys arrive with the same codes).
+
+import { fireInfo, onFireTv } from "./firetv";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -40,12 +43,15 @@ export function registerKeys() {
 
 export function exitApp() {
   try {
+    if (onFireTv()) return window.BamsAndroid!.exit();
     window.tizen?.application.getCurrentApplication().exit();
   } catch { /* in a browser there's nothing to leave */ }
 }
 
-/** What to call this TV when linking it ("Samsung QN50LS03B"). */
+/** What to call this TV when linking it ("Samsung QN50LS03B", "Living Room Fire TV"). */
 export function deviceName(): string {
+  const fire = fireInfo();
+  if (fire) return fire.name || fire.model || "Fire TV";
   try {
     const model = window.webapis?.productinfo?.getRealModel?.() || window.webapis?.productinfo?.getModel?.();
     if (model) return `Samsung ${model}`;
@@ -58,6 +64,8 @@ const isIp = (ip: unknown): ip is string => typeof ip === "string" && /^\d+\.\d+
 /** The TV's own address on the network ("192.168.1.42"), to look for servers next to it: Samsung's network API,
  *  else Tizen's system info (wired, then Wi-Fi). Null when neither says. */
 export async function localIp(): Promise<string | null> {
+  const fire = fireInfo();
+  if (fire) return isIp(fire.ip) ? fire.ip : null;
   try {
     const ip = window.webapis?.network?.getIp?.();
     if (isIp(ip)) return ip;
@@ -79,6 +87,8 @@ export async function localIp(): Promise<string | null> {
 }
 
 export const appVersion = (): string => {
+  const fire = fireInfo();
+  if (fire) return fire.version;
   try {
     return window.tizen?.application.getCurrentApplication().appInfo.version ?? "dev";
   } catch {
