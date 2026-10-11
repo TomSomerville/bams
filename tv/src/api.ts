@@ -2,7 +2,7 @@
 // The TV's video player and <img> tags can't send headers, so media goes through a ticket path
 // (/api/t/<ticket>/...) that the server hands out (GET /api/media-ticket). Server side: server/bams/devices.py.
 
-export type { ItemSummary, ItemDetail, ContinueItem, FileInfo, AudioTrack, SubtitleTrack, Probe, User, QueueTrack,
+export type { ItemSummary, ItemDetail, ContinueItem, WatchlistItem, FileInfo, AudioTrack, SubtitleTrack, Probe, User, QueueTrack,
   Playlist, PlaylistSummary, ServerLibrary, SubtitleSearch, SubtitleResult }
   from "../../web/src/api";
 import type { User } from "../../web/src/api";

@@ -218,12 +218,12 @@ def test_watch_thresholds_are_settings(tv):
 
 def test_prefs_are_per_user(tv):
     app, c, _, _ = tv
-    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True, "home_rows": []}
-    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False, "home_rows": []}
-    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": False, "home_rows": []}
+    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True, "home_rows": [], "watchlist_name": ""}
+    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False, "home_rows": [], "watchlist_name": ""}
+    assert c.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": False, "home_rows": [], "watchlist_name": ""}
     kid = signed_in(app, "Kid", admin=False)
-    assert kid.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True, "home_rows": []}
-    assert kid.put("/api/me/prefs", json={"nonsense": 1}).json() == {"home_hero": True, "home_rows": []}
+    assert kid.get("/api/auth/state").json()["user"]["prefs"] == {"home_hero": True, "home_rows": [], "watchlist_name": ""}
+    assert kid.put("/api/me/prefs", json={"nonsense": 1}).json() == {"home_hero": True, "home_rows": [], "watchlist_name": ""}
 
 
 def test_home_rows_pref(tv):
@@ -231,7 +231,7 @@ def test_home_rows_pref(tv):
     rows = [{"id": "genres", "show": True}, {"id": "continue", "show": False}, {"id": "lib:1", "show": True}]
     assert c.put("/api/me/prefs", json={"home_rows": rows}).json()["home_rows"] == rows
     # the other pref is untouched, and changing it keeps the rows
-    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False, "home_rows": rows}
+    assert c.put("/api/me/prefs", json={"home_hero": False}).json() == {"home_hero": False, "home_rows": rows, "watchlist_name": ""}
     assert c.get("/api/auth/state").json()["user"]["prefs"]["home_rows"] == rows
     # duplicates are dropped (first wins); bad shapes are refused
     dup = c.put("/api/me/prefs", json={"home_rows": rows + [{"id": "genres", "show": False}]}).json()

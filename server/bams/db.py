@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -334,7 +334,19 @@ def _v11(con: sqlite3.Connection) -> None:
         PRIMARY KEY (user_id, item_id))""")
 
 
-MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11}  # target version -> step
+def _v12(con: sqlite3.Connection) -> None:
+    """v12: each user's watch list (watch.add_to_list): movies, shows, seasons and episodes they mean to watch.
+    Apps that show several servers put every server's list together; each server keeps only its own items."""
+    con.execute("""CREATE TABLE watchlist (
+        user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        item_id  INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,  -- a movie, show, season or episode
+        added_at REAL NOT NULL,
+        PRIMARY KEY (user_id, item_id))""")
+    con.execute("CREATE INDEX watchlist_recent ON watchlist(user_id, added_at)")
+
+
+MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11,
+              12: _v12}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

@@ -37,14 +37,14 @@ bams/
 │   │   │                      media-path tickets), split_ticket_path, TV_AGENT
 │   │   ├── security.py        Sign-in waits/lockout + sign-in log (security.db), IP allow/block policy, Gate middleware (IP check + traffic record)
 │   │   ├── netflow.py         Traffic log: background writer of JSON-lines files under a size cap, backwards reader/search, folder check
-│   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, hide_continue (take a title out of it), thresholds (admin settings)
+│   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts, `watchlist` flags), next_episode, continue_watching, hide_continue (take a title out of it), thresholds (admin settings); the watch list (LISTABLE, add_to_list, remove_from_list, watch_list)
 │   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars incl. VobSub .idx/.sub, language labels), WebVTT
 │   │   │                      conversion + cache, shift(), burn_source() (what stream paints on)
 │   │   ├── opensubtitles.py   OpenSubtitles.com: Client (the server's API key, USER_AGENT, throttle), the admin's key +
 │   │   │                      optional account (status, save_key, sign_in token cache), lookup/search (TMDB/IMDb id +
 │   │   │                      moviehash, else name), download → data dir, tracks() ("d<n>"), remove()
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
-│   │   ├── db.py              SQLite schema (v1 + migration steps to v11), connect(), migrate(), Tx, settings, JSON helpers
+│   │   ├── db.py              SQLite schema (v1 + migration steps to v12), connect(), migrate(), Tx, settings, JSON helpers
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
@@ -70,7 +70,7 @@ bams/
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 320 tests, see §7
+│   └── tests/                 pytest: 330 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
@@ -85,13 +85,13 @@ bams/
 │       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
 │       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search); this browser's names, hidden flags and order for each server's libraries (`setLibrary`, `setLibraryOrder`; `describe` applies the order)
-│       ├── everywhere.ts      Home rows (`homeSpecs`) and Search across every server, and how answers merge (newest, interleave, Continue Watching by `last_watched_at`, genres); SHARED with the TV app (no React/router)
+│       ├── everywhere.ts      Home rows (`homeSpecs`) and Search across every server, and how answers merge (newest, interleave, Continue Watching by `last_watched_at`, genres, the watch list by `listed_at`: `listedOrder`; `listedLook` = how an entry looks); SHARED with the TV app (no React/router)
 │       ├── subtitleLangs.ts   OpenSubtitles' language list, names, the default pick; SHARED with the TV app (no React/storage)
-│       ├── homeRows.ts        Home's rows: defaultRows(libs, genres) (default order, labels; one `genre:<name>` row per genre) + homeRows(saved, libs, genres) (user order merged with what exists; an old `genres` entry expands in place)
+│       ├── homeRows.ts        Home's rows: defaultRows(libs, genres, list) (default order, labels; `watchlist` after `continue`; one `genre:<name>` row per genre) + homeRows(saved, libs, genres, list) (user order merged with what exists; an old `genres` entry expands in place); `listName` / `WATCHLIST_NAME` ("My Watch List")
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
-│       │   ├── Sidebar.tsx    Logo, Home, this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Settings
+│       │   ├── Sidebar.tsx    Logo, Home, the watch list (`/watchlist`, the user's name for it), this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Settings
 │       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
 │       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out) + admins' "Who can sign in" (users CRUD)
@@ -105,7 +105,7 @@ bams/
 │       │   ├── Combo.tsx      Text field with as-you-type suggestions (keyboard + mouse)
 │       │   ├── ConfigBanner.tsx  "TMDB key not configured" (admins) → /settings#tmdb; "can't reach server"
 │       │   ├── Row.tsx        Horizontal shelf with arrow buttons
-│       │   ├── Cards.tsx      PosterCard (+ WatchMarks), ContinueCard (picture → play, name → show, episode line →
+│       │   ├── Cards.tsx      PosterCard (+ WatchMarks, hover bookmark), ListToggle (on/off the watch list: button / round icon / small icon), ListedCard + listedPage (a watch list entry), ContinueCard (picture → play, name → show, episode line →
 │       │   │                  its season; long press / right-click → ContinueMenu "Remove from Continue Watching",
 │       │   │                  useLongPress), AlbumCard, ArtistCard, ItemCard, PlayBadge
 │       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
@@ -120,9 +120,10 @@ bams/
 │       │   ├── TmdbSettings.tsx  TMDB key card (save = server-verified; test; replace; remove)
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
-│           ├── Home.tsx       Hero + rows (Continue Watching, Recently Added, libraries, Top Rated, one row per genre from /api/genres) in the user's order (homeRows.ts)
+│           ├── Home.tsx       Hero + rows (Continue Watching, the watch list, Recently Added, libraries, Top Rated, one row per genre from /api/genres) in the user's order (homeRows.ts)
 │           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
-│           ├── Detail.tsx     /title/:id[?season=<season id>]: show (season tabs → episodes, watched toggles) or movie (Resume, TechInfo); music → MusicDetail
+│           ├── Detail.tsx     /title/:id[?season=<season id>[&episode=<id>]]: show (season tabs → episodes, watched + watch list toggles; `episode` picked out) or movie (Resume, TechInfo); watch list buttons; music → MusicDetail
+│           ├── Watchlist.tsx  /watchlist: every server's watch list as one grid (useEverywhere + listedOrder), sort, kind chips, rename (`watchlist_name` pref), empty state
 │           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs), artist page, album page + TrackList, Fix match,
 │           │                  PlaylistPage (/playlist/:id), PlaylistCard + cover Mosaic
 │           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
@@ -149,8 +150,9 @@ bams/
 │       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface
 │       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, BROWSER caps) → direct / remux / convert; convertHeight, pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
-│       ├── Rail.tsx · Cards.tsx · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
+│       ├── ListMenu.tsx       Hold-OK menu: on/off the watch list (`setListed` on the item's server), `useListName`
+│       ├── Rail.tsx · Cards.tsx (Poster: `look` for watch list entries, `onHold`) · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
 ├── firetv/                   ── Fire TV app (Fire OS 6+): Android shell around the tv/ page (firetv/README.md) ──
 │   ├── build.mjs              `cd tv && npm run firetv [-- --install --device <ip> --run --release]`: Gradle build, adb install, release APK → dist/BAMS-FireTV-<v>.apk
 │   ├── app/build.gradle.kts   copies tv/dist into assets/www each build; version from tv/package.json; release signing from keystore.properties (git-ignored)
@@ -216,7 +218,7 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v11)
+## 3. Data model (`db.py`, schema v12)
 
 | Table | Holds | Key columns |
 |---|---|---|
@@ -234,12 +236,13 @@ web UI, `/docs`.
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
 | `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `subtitles/opensubtitles/<ext_id>.srt`, shared by files that picked the same one), `added_by`, `added_at` |
 | `continue_hidden` | titles a user took out of Continue Watching (v11) | (`user_id`, `item_id` = a movie or a show), `hidden_at`: out while the title's latest activity is not newer |
+| `watchlist` | each user's watch list (v12) | (`user_id`, `item_id` = a movie, show, season or episode), `added_at`; apps merge several servers' lists by it. Cascades with the user/item; `items.merge_titles` moves entries (`_move_watchlist`) |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
 
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
 created at v1 and run every step too, so each step is exercised by every test. Before migrating an existing DB,
 `migrate()` copies it to `data/backups/bams-schema-v{N}-{time}.db`. v2 rebuilt `items` (SQLite can't change a
-CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
+CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
 (one file, many tracks) and merged albums (one track, several files);
 albums are found by `(parent_id=artist, title_key)` from the *parsed* title, so renaming an album to its
 MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist'`).
@@ -409,6 +412,19 @@ Web `Player.tsx`: `sleep` = episodes still to start after this one (null off, 0 
 stopped playback here". TV `screens/Player.tsx`: the same with the route's `sleep` and `st.current.sleep` (the
 engine's `onEnd` reads it).
 
+### 4.3h Watch list (`watch.py`, 0.13.0)
+Per account, per server: `PUT /api/watchlist/{id}` → `add_to_list` (movies, shows, seasons, episodes: `LISTABLE`;
+adding again keeps the first `added_at`), `DELETE` → `remove_from_list`, `GET /api/watchlist` → `watch_list` (newest
+first) serialised like Continue Watching (`show` on seasons/episodes, `season_id` on episodes) + `listed_at`.
+`watch.annotate` adds `watchlist: bool` to every movie/show/season/episode it annotates (library lists, `/api/items`,
+item pages and their children/ancestors), so buttons know their state; an older server's items have no field and the
+apps then show no button. Clients ask **every** connected server (`everywhere.WATCHLIST_PATH`) and merge by
+`listed_at` (`listedOrder`); each entry is toggled on its own server (`callFor(rid)` / TV `setListed`). The name is
+the pref `watchlist_name` of the client's first server (`homeRows.listName`). Web: sidebar → `pages/Watchlist.tsx`,
+Home row `watchlist`, `ListToggle` on title pages / episode rows / posters (hover only: `@media (hover: hover)`),
+`ListedCard` → `listedPage` (episode: its season tab with `&episode=` picked out). TV: rail → `screens/Watchlist.tsx`,
+the Home row, Detail's button, holding OK on an episode or a list entry → `ListMenu`.
+
 ### 4.3e Watch state (`watch.py`)
 The player PUTs `/api/items/{id}/progress {position, duration}` every 10 s, on pause, on leaving (keepalive) and at
 the end; only after playback really started (`duration` null if unknown). Until something played, the player's position is
@@ -541,6 +557,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
 | `GET /api/security/accounts` · `PUT /api/security/accounts/{id}/lock {locked}` (admin) | lock state per account / lock (signs out) or unlock | SecuritySettings |
 | `GET /api/security/auth-log?result=ok\|failed\|admin&before=&limit=` · `GET /api/security/netflow/entries?q=&before=&limit=` (admin) → `{entries, next}` | sign-in log / traffic log, newest first | SecuritySettings |
+| `GET /api/watchlist?limit=` (items + `listed_at`; seasons/episodes carry `show`, episodes `season_id`) · `PUT /api/watchlist/{id}` → `{watchlist, listed_at}` (404: not a movie/show/season/episode) · `DELETE /api/watchlist/{id}` → `{watchlist: false, removed}` | the signed-in user's watch list on this server; every item list/page has `watchlist` (watch.annotate) | Watchlist, Cards (ListToggle), Detail, Home |
 | `PUT /api/items/{id}/progress {position,duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` (items carry `reason`, `last_watched_at`) · `DELETE /api/continue/{id}` (take the movie / the episode's show out until it's watched again) | watch state of the signed-in user | Player, Detail, Home |
 | `GET /api/status` | version, data dir, ffprobe/ffmpeg paths, `video_encoder` `{id,name,hardware,hw_decode}`, `transcodes` `{running,limit}`, TMDB configured, guard, scan running/queued | TopBar, Settings |
 | `GET /api/settings` | TMDB status (never the key) | SettingsProvider |
@@ -567,7 +584,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/settings/autofill {enabled}` (admin; state in `GET /api/settings` → `autofill`) | Auto fill on/off; re-places unplaced/guessed files at once | Identify.tsx `AutofillSettings` |
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
 | `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` (admin) | TMDB/IMDb link → fields (409 without a key, 400 wrong type/unreadable) · names in a library for suggestions | Identify.tsx |
-| `PUT /api/me/prefs {home_hero?, home_rows?: [{id, show}]}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`); only sent fields change | auth.tsx, HomeSettings |
+| `PUT /api/me/prefs {home_hero?, home_rows?: [{id, show}], watchlist_name?}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`); only sent fields change | auth.tsx, HomeSettings |
 | `PUT /api/settings/watch {watched_percent 50–100, resume_after 0–600}` (admin; state in `GET /api/settings` → `watch`) | when titles count as watched / started | WatchSettings |
 | `GET /api/tmdb/search?kind=&q=` · `POST /api/items/{id}/match {tmdb_id}` | Fix match | FixMatch |
 | `GET /api/files/{id}/stream` | original bytes (Range), for playing; no file name sent (BAMS has no downloads since 0.9.2) | Player |
@@ -618,6 +635,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_devices.py` | /api/hello + server name (default from the first admin, admin-only, reset), link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session; POST/DELETE on a ticket path with the token), traffic log shows the real path |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
+| `test_watchlist.py` | the watch list: add/list/remove (newest first, `show`/`season_id`), video kinds only, `watchlist` flags on lists and pages, per account (+ removed with the account), 401, merges keep entries, deleted items leave, `watchlist_name` pref, v12 migration |
 | `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), taking a title out until it's watched again, per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
 | `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB; Auto fill: guesses placed + listed, keep, skip, rescan keeps both, setting off/on |
 | `test_opensubtitles.py` | against a fake OpenSubtitles (`app.state.opensubtitles_transport`): search by TMDB id + season/episode + the file's hash (sorted, lowercase), by name for a movie without ids, the key like TMDB's (refused/not kept, never returned, test, removed = off), account refused/kept, token reused and re-made, download into the data dir (media untouched), no second download, quota 429, removal rights |
@@ -674,6 +692,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Long press: web / holding OK on the TV | web `useLongPress` in `components/Cards.tsx` (`LONG_PRESS`); TV `tv/src/hold.ts` (`HOLD_MS`, `NO_UP_WAIT`; any element with `data-hold` + `onContextMenu`), tests `tv/test/hold.test.ts` |
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
 | Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
+| The watch list: what can go on it, order, how entries look | `watch.LISTABLE` / `add_to_list` / `watch_list`, route `get_watchlist` in `app.py`; merge + look `everywhere.listedOrder` / `listedLook` (shared with the TV); web `Cards.tsx` `ListToggle` / `ListedCard` / `listedPage`, `pages/Watchlist.tsx`; TV `ListMenu.tsx`, `screens/Watchlist.tsx`; default name `homeRows.WATCHLIST_NAME` |
 | Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + what it asks and how servers merge in `web/src/everywhere.ts` `homeSpecs`/`mergeRow` (web `pages/Home.tsx` and TV `tv/src/screens/Home.tsx` both use them); ids are saved in users' `home_rows`, so keep old ids stable |
 | Other BAMS servers in a client | web `web/src/servers.tsx` (connect, `rewrite` of links, `/r/:rid` scope; pages use `useScope()`), `components/RemoteSettings.tsx`; TV `tv/src/api.ts` (extras, `apiFor`/`mediaFor`), `screens/Settings.tsx`, Connect/Link (`adding`/`target`) |
 | How Home/Search merge servers | `web/src/everywhere.ts` (`newestFirst`, `interleave`, `continueOrder`, `mergeGenres`, `byTitle`) |

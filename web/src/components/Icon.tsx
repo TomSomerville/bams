@@ -36,10 +36,14 @@ const PATHS: Record<string, string> = {
   disc: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   // a bed (headboard, sleeper's head, blanket, frame), with two stars above it in FILLS: sleep mode
   sleep: "M3 9v11M3 17h18v3M9 17v-4h9a3 3 0 0 1 3 3v1M6 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
+  // the watch list: a bookmark, filled when the item is on it
+  bookmark: "M6 3h12v18l-6-4.5L6 21z",
+  bookmarkOn: "M6 3h12v18l-6-4.5L6 21z",
 };
 // Filled shapes drawn over an icon's strokes (small stars don't read as strokes)
 const FILLS: Record<string, string> = {
   sleep: "M14 1l1.1 2.4 2.4 1.1-2.4 1.1L14 8l-1.1-2.4-2.4-1.1 2.4-1.1zM20 5.5l.7 1.3 1.3.7-1.3.7-.7 1.3-.7-1.3-1.3-.7 1.3-.7z",
+  bookmarkOn: "M6 3h12v18l-6-4.5L6 21z",
 };
 
 export default function Icon({ name, size = 20 }: { name: keyof typeof PATHS | string; size?: number }) {

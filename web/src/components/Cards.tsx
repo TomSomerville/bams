@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import type { ContinueItem, ItemSummary, PlayMethod } from "../api";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import type { ContinueItem, ItemSummary, PlayMethod, WatchlistItem } from "../api";
+import { useAuth } from "../auth";
+import { listedLook } from "../everywhere";
 import { fmtRuntime, PLAY_LABEL, plural, subLabel, sxe } from "../format";
+import { listName } from "../homeRows";
 import { useMusic } from "../music";
 import { callFor, useItemServer } from "../servers";
 import { Poster } from "./Art";
@@ -17,7 +20,7 @@ export function progressOf(item: ItemSummary): number | null {
 /** Watched / unwatched markers on a poster: a tick when it's all watched, the number of unwatched episodes of a
  *  show that's been started, and a progress bar for a movie stopped part-way. */
 export function WatchMarks({ item }: { item: ItemSummary }) {
-  const all = item.kind === "movie" ? item.progress?.watched : !!item.episodes && item.unwatched === 0;
+  const all = item.kind === "movie" || item.kind === "episode" ? item.progress?.watched : !!item.episodes && item.unwatched === 0;
   const left = item.kind === "show" && item.episodes && item.unwatched && item.unwatched < item.episodes ? item.unwatched : 0;
   const pct = progressOf(item);
   return (
@@ -39,10 +42,92 @@ export function PosterCard({ item }: { item: ItemSummary }) {
         <WatchMarks item={item} />
         <div className="poster-hover">
           <span className="round-btn"><Icon name="info" size={18} /></span>
+          <ListToggle item={item} />
         </div>
       </div>
       <div className="poster-title">{item.title}</div>
       <div className="poster-sub">{subLabel(item)}</div>
+    </Link>
+  );
+}
+
+/** Puts an item on the user's watch list or takes it off, on the item's own server (each server keeps its part of
+ *  the list; the watch list page and Home put them together). `big`: a labelled button (title pages); else a round
+ *  icon (posters, episode rows: `small`). `onChange` once the server has done it. Nothing for music, or for a server
+ *  too old to have watch lists (no `watchlist` on its items). */
+export function ListToggle({ item, big, small, what = "", onChange }: {
+  item: ItemSummary; big?: boolean; small?: boolean; what?: string; onChange?: (on: boolean) => void;
+}) {
+  const { rid } = useItemServer(item);
+  const { prefs } = useAuth();
+  const [on, setOn] = useState(!!item.watchlist);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => setOn(!!item.watchlist), [item.id, item.watchlist]);
+  if (item.watchlist === undefined) return null;
+  const name = listName(prefs.watchlist_name);
+  const label = err ?? (on ? `Remove${what} from ${name}` : `Add${what} to ${name}`);
+  const toggle = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    const call = callFor(rid);
+    const path = `/api/watchlist/${item.id}`;
+    (on ? call.del(path) : call.put(path, {}))
+      .then(() => { setOn(!on); onChange?.(!on); })
+      .catch((x: Error) => setErr(`Couldn't change ${name}: ${x.message}`))
+      .finally(() => setBusy(false));
+  };
+  if (big) {
+    return (
+      <button className={`btn ghost list-btn ${on ? "on" : ""}`} onClick={toggle} disabled={busy} title={label} aria-pressed={on}>
+        <Icon name={on ? "check" : "plus"} /> {name}{what && ` (${what.trim()})`}
+      </button>
+    );
+  }
+  return (
+    <button className={small ? `icon-btn subtle list-toggle-small ${on ? "on" : ""}` : `round-btn list-toggle ${on ? "on" : ""}`}
+      onClick={toggle} disabled={busy} title={label} aria-label={label} aria-pressed={on}>
+      <Icon name={on ? "bookmarkOn" : "bookmark"} size={small ? 16 : 18} />
+    </button>
+  );
+}
+
+/** Where a watch list entry opens: a movie's/show's page, a season's tab on its show's page, an episode picked out
+ *  on its season's tab. */
+export function listedPage(i: WatchlistItem): string {
+  if (i.kind === "episode" && i.show && i.season_id) return `/title/${i.show.id}?season=${i.season_id}&episode=${i.id}`;
+  if (i.kind === "season" && i.show) return `/title/${i.show.id}?season=${i.id}`;
+  return `/title/${i.id}`;
+}
+
+/** An entry of the watch list: a poster (an episode or a season under its show's name, everywhere.ts listedLook).
+ *  On hover, movies and episodes can be played straight away, and the bookmark takes it off (`onRemoved`). */
+export function ListedCard({ item, onRemoved }: { item: WatchlistItem; onRemoved?: () => void }) {
+  const { to } = useItemServer(item);
+  const navigate = useNavigate();
+  const look = listedLook(item);
+  const playable = item.kind === "movie" || item.kind === "episode";
+  return (
+    <Link to={to(listedPage(item))} className="poster-card">
+      <div className="poster-frame">
+        <Poster src={look.poster} title={look.title} />
+        {item.match_status === "unmatched" && <span className="corner-badge warn" title="Not matched on TMDB">?</span>}
+        <WatchMarks item={item} />
+        <div className="poster-hover">
+          {playable ? (
+            <button className="round-btn" aria-label={`Play ${look.title}${look.sub ? ` ${look.sub}` : ""}`}
+              onClick={(e) => { e.preventDefault(); navigate(to(`/play/${item.id}`)); }}>
+              <Icon name="play" size={18} />
+            </button>
+          ) : <span className="round-btn"><Icon name="info" size={18} /></span>}
+          <ListToggle item={item} onChange={(on) => { if (!on) onRemoved?.(); }} />
+        </div>
+      </div>
+      <div className="poster-title">{look.title}</div>
+      <div className="poster-sub">{look.sub ?? subLabel(item)}</div>
     </Link>
   );
 }

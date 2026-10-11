@@ -13,7 +13,9 @@ export function HomeSettings() {
   const { data: genres } = useApi<Genre[]>("/api/genres");
   const [rows, setRows] = useState<HomeRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { if (libs && genres) setRows(homeRows(prefs.home_rows, libs, genres)); }, [libs, genres, prefs.home_rows]);
+  useEffect(() => {
+    if (libs && genres) setRows(homeRows(prefs.home_rows, libs, genres, prefs.watchlist_name));
+  }, [libs, genres, prefs.home_rows, prefs.watchlist_name]);
 
   const save = (next: HomeRow[] | null) => {
     if (next) setRows(next);

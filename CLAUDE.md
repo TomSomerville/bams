@@ -66,7 +66,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 320 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 330 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\owner\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -176,7 +176,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   the DB (open it `?mode=ro`, or `sqlite3` backup into `/tmp`) and runs FFmpeg/VAAPI tests; write only to `/tmp` and
   clean up, change nothing else there without asking. It runs the released `.deb`, not this checkout: a fix reaches it
   with a new release, and installing needs the owner's sudo. Docs: STATUS.md §6.
-- **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `recent`, `lib:<id>`, `top_rated`, `genre:<name>`; older saves have one `genres`
+- **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `watchlist`, `recent`, `lib:<id>`, `top_rated`, `genre:<name>`; older saves have one `genres`
   entry, which `homeRows()` expands in place: keep that).
   Renaming an id silently resets that row for everyone who reordered; add new rows in `homeRows.ts` `defaultRows`.
 - **Security state lives in `security.db`, not `bams.db`** (no migration; `CREATE TABLE IF NOT EXISTS`). Login tests
@@ -278,4 +278,10 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **A saved position of 0 doesn't mean playback was stuck:** `watch.record_progress` stores positions under
   `resume_after` as 0. To see whether a browser really played, read the traffic log (`netflow/*.jsonl`: how long each
   `/stream` request stayed open, and whether a second one followed), not `watch_state`.
+- **The watch list lives on each item's own server** (`watchlist` table, per account); the apps merge every server's
+  list (`everywhere.listedOrder`) and toggle an entry on its own server (`callFor(rid)`, TV `setListed`). Never store
+  another server's items on this one (decisions log 10-10/10-11). Adding a pref changes the whole `prefs` dict some
+  tests compare (`test_watch.py` prefs tests).
+- **Buttons shown only on hover must not exist for touch** (`@media (hover: hover)`, the poster bookmark): an
+  `opacity: 0` button still takes the tap that was meant to open the poster.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

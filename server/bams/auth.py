@@ -88,12 +88,15 @@ def user_count(con: sqlite3.Connection) -> int:
 # Each user's display preferences: name -> default. Unknown names are ignored when saving.
 PREFS: dict[str, object] = {
     "home_hero": True,   # the rotating "Recently added" banner at the top of Home
-    # Home's rows in the user's order, each {"id", "show"}: "continue", "recent", "lib:<id>", "top_rated",
-    # "genre:<name>" (older saves: one "genres" entry for every genre).
+    # Home's rows in the user's order, each {"id", "show"}: "continue", "watchlist", "recent", "lib:<id>",
+    # "top_rated", "genre:<name>" (older saves: one "genres" entry for every genre).
     # Empty = the default layout; rows missing from the list (a new library) are shown at their default place.
     "home_rows": [],
+    # what the user calls their watch list (sidebar, Home row, its page); "" = "My Watch List"
+    "watchlist_name": "",
 }
 MAX_HOME_ROWS = 200
+MAX_LIST_NAME = 60
 
 
 def _home_rows(v) -> list | None:
@@ -114,6 +117,8 @@ def _valid(k: str, v):
     """The value to store for pref k, or None when it isn't a valid one."""
     if k == "home_rows":
         return _home_rows(v)
+    if k == "watchlist_name":
+        return " ".join(v.split()) if isinstance(v, str) and len(v) <= MAX_LIST_NAME else None
     return v if isinstance(v, type(PREFS[k])) else None
 
 

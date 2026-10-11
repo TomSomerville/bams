@@ -24,6 +24,7 @@ def thresholds(con: sqlite3.Connection) -> dict:
             return default
     return {"watched_percent": num("watched_percent", WATCHED_PERCENT), "resume_after": num("resume_after", RESUME_AFTER)}
 PLAYABLE = ("movie", "episode")
+LISTABLE = ("movie", "show", "season", "episode")  # what can go on a watch list (music can't)
 
 
 def record_progress(con: sqlite3.Connection, user_id: int, item_id: int, position: float,
@@ -100,9 +101,17 @@ def _state(r) -> dict:
 
 def annotate(con: sqlite3.Connection, user_id: int | None, items: list[dict]) -> list[dict]:
     """Add the user's state to serialised items: `progress` on movies/episodes; `episodes` / `unwatched`
-    counts on shows and seasons. Batched: one query per kind, whatever the number of items."""
+    counts on shows and seasons; `watchlist` (on their watch list or not) on all four. Batched: one query per
+    kind, whatever the number of items."""
     if user_id is None or not items:
         return items
+    listable = [d["id"] for d in items if d["kind"] in LISTABLE]
+    if listable:
+        listed = {r["item_id"] for r in _in(con, "SELECT item_id FROM watchlist WHERE user_id=? AND item_id IN ({})",
+                                            [user_id], listable)}
+        for d in items:
+            if d["kind"] in LISTABLE:
+                d["watchlist"] = d["id"] in listed
     playable = [d["id"] for d in items if d["kind"] in PLAYABLE]
     if playable:
         rows = {r["item_id"]: r for r in _in(con, "SELECT item_id, position, duration, watched FROM watch_state "
@@ -173,6 +182,33 @@ def hide_continue(con: sqlite3.Connection, user_id: int, item_id: int) -> bool:
                        ON CONFLICT(user_id, item_id) DO UPDATE SET hidden_at=excluded.hidden_at""",
                     (user_id, title, now()))
     return True
+
+
+# ------------------------------------------------------------------ the watch list
+
+def add_to_list(con: sqlite3.Connection, user_id: int, item_id: int) -> float | None:
+    """Put a movie, show, season or episode on the user's watch list. Returns when it was added (the first time,
+    if it was already there), or None when the item is none of those."""
+    r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
+    if not r or r["kind"] not in LISTABLE:
+        return None
+    with Tx(con):
+        con.execute("INSERT OR IGNORE INTO watchlist(user_id, item_id, added_at) VALUES (?,?,?)", (user_id, item_id, now()))
+    return con.execute("SELECT added_at FROM watchlist WHERE user_id=? AND item_id=?", (user_id, item_id)).fetchone()[0]
+
+
+def remove_from_list(con: sqlite3.Connection, user_id: int, item_id: int) -> bool:
+    """Take an item off the user's watch list. False when it wasn't on it."""
+    with Tx(con):
+        return con.execute("DELETE FROM watchlist WHERE user_id=? AND item_id=?", (user_id, item_id)).rowcount > 0
+
+
+def watch_list(con: sqlite3.Connection, user_id: int, limit: int = 500) -> list[tuple[int, float]]:
+    """(item id, when it was added) on the user's watch list, most recently added first. Watching something
+    doesn't take it off: the user does."""
+    return [(r["item_id"], r["added_at"]) for r in con.execute(
+        "SELECT item_id, added_at FROM watchlist WHERE user_id=? ORDER BY added_at DESC, rowid DESC LIMIT ?",
+        (user_id, limit))]
 
 
 def continue_watching(con: sqlite3.Connection, user_id: int, limit: int = 20) -> list[tuple[int, str, float]]:

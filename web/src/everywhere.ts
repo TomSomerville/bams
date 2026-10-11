@@ -5,7 +5,7 @@
 //
 // Shared with the TV app (like homeRows.ts): keep it free of React, the router and browser-only APIs.
 
-import type { ContinueItem, Genre, HomeRowPref, ItemSummary, ServerLibrary } from "./api";
+import type { ContinueItem, Genre, HomeRowPref, ItemSummary, ServerLibrary, WatchlistItem } from "./api";
 import { homeRows, rowGenre } from "./homeRows";
 
 /** One server to ask: `get` is that server's API (the client adds its token, and makes media links usable). */
@@ -68,6 +68,11 @@ export function continueOrder(lists: Tagged<ContinueItem>[][], n = ROW_SIZE): Ta
   return interleave(lists, n);
 }
 
+/** The watch list: most recently added first, every server's entries together (each server keeps its own). */
+export function listedOrder(lists: Tagged<WatchlistItem>[][], n = Infinity): Tagged<WatchlistItem>[] {
+  return lists.flat().sort((a, b) => b.listed_at - a.listed_at).slice(0, n);
+}
+
 /** By title (Search). */
 export function byTitle<T extends { title: string }>(lists: T[][], n = Infinity): T[] {
   return lists.flat().sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" })).slice(0, n);
@@ -86,12 +91,12 @@ export function mergeGenres(lists: Genre[][]): Genre[] {
 export type HomeRowSpec = {
   id: string;
   title: string;
-  /** continue: wide cards that play; titles: posters; albums: square covers */
-  kind: "continue" | "titles" | "albums";
+  /** continue: wide cards that play; titles: posters; albums: square covers; watchlist: posters (listedLook) */
+  kind: "continue" | "titles" | "albums" | "watchlist";
   /** asked of every source, or only the first server (its own library rows) */
   path: string;
   everywhere: boolean;
-  merge: "newest" | "mix" | "continue";
+  merge: "newest" | "mix" | "continue" | "listed";
   /** hidden below this many items */
   min: number;
   /** the library the row is from ("See all") */
@@ -99,14 +104,18 @@ export type HomeRowSpec = {
 };
 
 /** Home's rows in the user's order (Settings → Home page, saved on their first server), the same on web and TV:
- *  Continue Watching, Recently Added, Top Rated and each genre combine every server; each library's row is
- *  that library's. `libs` are the first server's libraries, `genres` every server's (mergeGenres). */
-export function homeSpecs(saved: HomeRowPref[], libs: ServerLibrary[], genres: Genre[]): HomeRowSpec[] {
+ *  Continue Watching, the watch list, Recently Added, Top Rated and each genre combine every server; each library's
+ *  row is that library's. `libs` are the first server's libraries, `genres` every server's (mergeGenres), `list` the
+ *  watch list's name (prefs.watchlist_name). */
+export function homeSpecs(saved: HomeRowPref[], libs: ServerLibrary[], genres: Genre[], list = ""): HomeRowSpec[] {
   const out: HomeRowSpec[] = [];
-  for (const r of homeRows(saved, libs, genres).filter((x) => x.show)) {
+  for (const r of homeRows(saved, libs, genres, list).filter((x) => x.show)) {
     const g = rowGenre(r.id);
     if (r.id === "continue") {
       out.push({ id: r.id, title: r.label, kind: "continue", path: "/api/continue", everywhere: true, merge: "continue", min: 1 });
+    } else if (r.id === "watchlist") {
+      out.push({ id: r.id, title: r.label, kind: "watchlist", path: `/api/watchlist?limit=${ROW_SIZE}`, everywhere: true,
+        merge: "listed", min: 1 });
     } else if (r.id === "recent") {
       out.push({ id: r.id, title: r.label, kind: "titles", path: `/api/items?kind=show,movie&sort=added&limit=${ROW_SIZE}`,
         everywhere: true, merge: "newest", min: 1 });
@@ -133,6 +142,7 @@ export function homeSpecs(saved: HomeRowPref[], libs: ServerLibrary[], genres: G
 /** A row's items from the answers so far (one list per server that answered). */
 export function mergeRow(spec: HomeRowSpec, lists: Tagged<ItemSummary>[][]): Tagged<ItemSummary>[] {
   if (spec.merge === "continue") return continueOrder(lists as Tagged<ContinueItem>[][]);
+  if (spec.merge === "listed") return listedOrder(lists as Tagged<WatchlistItem>[][], ROW_SIZE);
   if (spec.merge === "mix") return interleave(lists);
   // a library's own row keeps that library's order ("recent": a show with new episodes comes back up)
   return spec.everywhere ? newestFirst(lists) : lists.flat().slice(0, ROW_SIZE);
@@ -143,6 +153,24 @@ export const HERO_SIZE = 6;
 export const heroPath = "/api/items?kind=show,movie&sort=added&limit=40";
 export function heroItems(lists: Tagged<ItemSummary>[][]): Tagged<ItemSummary>[] {
   return newestFirst(lists, 200).filter((i) => i.backdrop || i.poster).slice(0, HERO_SIZE);
+}
+
+// ---- the watch list
+
+/** Every server's watch list (`listedOrder` puts them together). */
+export const WATCHLIST_PATH = "/api/watchlist";
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** How a watch list entry is shown, the same on web and TV: a season or an episode under its show's name (an episode
+ *  with its show's poster), with what it is as `sub`; null `sub` for movies and shows (each app's usual line). */
+export function listedLook(i: WatchlistItem): { poster: string | null; title: string; sub: string | null } {
+  if (i.kind === "episode") {
+    const num = i.season_number != null ? `S${pad(i.season_number)}${i.episode_number != null ? `E${pad(i.episode_number)}` : ""}` : "";
+    return { poster: i.show?.poster ?? i.poster, title: i.show?.title ?? i.title, sub: [num, i.title].filter(Boolean).join(" · ") };
+  }
+  if (i.kind === "season") return { poster: i.poster ?? i.show?.poster ?? null, title: i.show?.title ?? i.title, sub: i.title };
+  return { poster: i.poster, title: i.title, sub: null };
 }
 
 // ---- Search: the same three asks on every server, merged by title

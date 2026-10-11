@@ -9,7 +9,8 @@ descriptions, and streams to any browser. It runs on **Windows** and **Debian / 
 > **Status: early.** The server (Python) indexes and identifies TV/movie folders (matched on TMDB) and
 > music folders (tags, then MusicBrainz), and streams files. See [server/README.md](server/README.md). The web UI shows your real
 > libraries and plays anything: the server converts what the browser can't decode, with subtitles, audio
-> tracks, and per-person accounts with resume and Continue Watching. Files it can't identify from their names
+> tracks, and per-person accounts with resume, Continue Watching and a watch list (one list across every BAMS
+> server you connect to). Files it can't identify from their names
 > can be identified by hand (paste a TMDB/IMDb link, or pick the show, season and episode).
 > The full plan is in [docs/PLAN.md](docs/PLAN.md).
 >
