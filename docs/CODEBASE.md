@@ -37,14 +37,14 @@ bams/
 │   │   │                      media-path tickets), split_ticket_path, TV_AGENT
 │   │   ├── security.py        Sign-in waits/lockout + sign-in log (security.db), IP allow/block policy, Gate middleware (IP check + traffic record)
 │   │   ├── netflow.py         Traffic log: background writer of JSON-lines files under a size cap, backwards reader/search, folder check
-│   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, thresholds (admin settings)
+│   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts), next_episode, continue_watching, hide_continue (take a title out of it), thresholds (admin settings)
 │   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars incl. VobSub .idx/.sub, language labels), WebVTT
 │   │   │                      conversion + cache, shift(), burn_source() (what stream paints on)
 │   │   ├── opensubtitles.py   OpenSubtitles.com: Client (the server's API key, USER_AGENT, throttle), the admin's key +
 │   │   │                      optional account (status, save_key, sign_in token cache), lookup/search (TMDB/IMDb id +
 │   │   │                      moviehash, else name), download → data dir, tracks() ("d<n>"), remove()
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
-│   │   ├── db.py              SQLite schema (v1 + migration steps to v10), connect(), migrate(), Tx, settings, JSON helpers
+│   │   ├── db.py              SQLite schema (v1 + migration steps to v11), connect(), migrate(), Tx, settings, JSON helpers
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
@@ -106,7 +106,8 @@ bams/
 │       │   ├── ConfigBanner.tsx  "TMDB key not configured" (admins) → /settings#tmdb; "can't reach server"
 │       │   ├── Row.tsx        Horizontal shelf with arrow buttons
 │       │   ├── Cards.tsx      PosterCard (+ WatchMarks), ContinueCard (picture → play, name → show, episode line →
-│       │   │                  its season), AlbumCard, ArtistCard, ItemCard, PlayBadge
+│       │   │                  its season; long press / right-click → ContinueMenu "Remove from Continue Watching",
+│       │   │                  useLongPress), AlbumCard, ArtistCard, ItemCard, PlayBadge
 │       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
 │       │   ├── MusicFixMatch.tsx  Modal: MusicBrainz search → POST /api/items/{id}/music-match
 │       │   ├── MusicSettings.tsx  Music identification on/off + converted-music format (AAC/FLAC) card
@@ -136,18 +137,19 @@ bams/
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
 │   ├── scripts/test.mjs       `npm test`: builds tv/test into one page, runs it in headless Chrome/Edge (CHROME_PATH) at 1920×1080, prints results
-│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), harness.ts (test/eq/mount), run.ts, index.html
+│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
 │       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
 │       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback); MusicProvider in main.tsx
 │       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting; other servers of this TV (extras: apiFor/mediaFor(rid), checkExtras, sources() for everywhere.ts)
 │       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
+│       ├── hold.ts            Holding OK: on a [data-hold] element a long press sends "contextmenu" instead of a click (key-up before HOLD_MS = press; repeats = hold, for remotes without key-ups); App.tsx calls okDown/okUp
 │       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo)
 │       ├── engine.ts          AvplayEngine (webapis.avplay) / VideoEngine (<video> + hls.js) behind one interface
 │       ├── plan.ts            What the TV decodes (TV caps vs BROWSER caps) → direct / remux / convert; pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── Rail.tsx · Cards.tsx · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
 │   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
@@ -204,7 +206,7 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v10)
+## 3. Data model (`db.py`, schema v11)
 
 | Table | Holds | Key columns |
 |---|---|---|
@@ -221,12 +223,13 @@ web UI, `/docs`.
 | `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`), v9: `must_change_password` (0/1), `totp_secret` (base32, NULL = two-step off), `totp_last` (time step of the last code used) |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
 | `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `subtitles/opensubtitles/<ext_id>.srt`, shared by files that picked the same one), `added_by`, `added_at` |
+| `continue_hidden` | titles a user took out of Continue Watching (v11) | (`user_id`, `item_id` = a movie or a show), `hidden_at`: out while the title's latest activity is not newer |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
 
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
 created at v1 and run every step too, so each step is exercised by every test. Before migrating an existing DB,
 `migrate()` copies it to `data/backups/bams-schema-v{N}-{time}.db`. v2 rebuilt `items` (SQLite can't change a
-CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. Music items: tracks are 1:1 with files (Plex-style) except CUE images
+CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
 (one file, many tracks) and merged albums (one track, several files);
 albums are found by `(parent_id=artist, title_key)` from the *parsed* title, so renaming an album to its
 MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist'`).
@@ -402,8 +405,12 @@ per viewing; else position (< 10 s → 0). `PUT …/watched` marks a movie/episo
 `watch.annotate` adds `progress` to movies/episodes and `episodes`/`unwatched` to shows/seasons in every item list
 (batched). `/api/continue` = `continue_watching()` (recent activity: resume ≥ 30 s; per show, the most recent activity
 decides: resume it, or the next unwatched episode via `next_episode`; episodes carry `show` and `season_id` for the
-card's links). `get_item` adds `next_id` for episodes (the player's up-next countdown, shown at the end and from 30 s
-before it, and its next-episode button; leaving from the countdown or "Play now" reports the episode as finished). `items.merge_titles` moves watch state to the kept item.
+card's links). `DELETE /api/continue/{id}` = `hide_continue()`: the movie, or the episode's/season's show, goes into
+`continue_hidden` with `hidden_at` = now; `continue_watching` skips a title whose deciding row's `updated_at` is not
+newer (the show still counts as decided, so an older episode doesn't surface), so watching it again (≥ the "started"
+threshold, or marking an episode watched) brings it back. Web: long press / right-click on a `ContinueCard`; TV:
+holding OK (`hold.ts` → `contextmenu` → Home's `ContinueMenu`). `get_item` adds `next_id` for episodes (the player's up-next countdown, shown at the end and from 30 s
+before it, and its next-episode button; leaving from the countdown or "Play now" reports the episode as finished). `items.merge_titles` moves watch state (and `continue_hidden`) to the kept item.
 
 ### 4.3b Music playback (`stream.plan_audio` → `music.tsx`)
 `GET /api/items/{id}/tracks` (and `/api/playlists/{id}` → `tracks`) returns a play queue built by `app._queue`:
@@ -522,7 +529,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
 | `GET /api/security/accounts` · `PUT /api/security/accounts/{id}/lock {locked}` (admin) | lock state per account / lock (signs out) or unlock | SecuritySettings |
 | `GET /api/security/auth-log?result=ok\|failed\|admin&before=&limit=` · `GET /api/security/netflow/entries?q=&before=&limit=` (admin) → `{entries, next}` | sign-in log / traffic log, newest first | SecuritySettings |
-| `PUT /api/items/{id}/progress {position,duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` (items carry `reason`, `last_watched_at`) | watch state of the signed-in user | Player, Detail, Home |
+| `PUT /api/items/{id}/progress {position,duration}` · `PUT /api/items/{id}/watched {watched}` · `GET /api/continue` (items carry `reason`, `last_watched_at`) · `DELETE /api/continue/{id}` (take the movie / the episode's show out until it's watched again) | watch state of the signed-in user | Player, Detail, Home |
 | `GET /api/status` | version, data dir, ffprobe/ffmpeg paths, `video_encoder` `{id,name,hardware,hw_decode}`, `transcodes` `{running,limit}`, TMDB configured, guard, scan running/queued | TopBar, Settings |
 | `GET /api/settings` | TMDB status (never the key) | SettingsProvider |
 | `PUT /api/settings/tmdb-key` · `DELETE` · `POST …/test` | save (verified) / remove / re-check | TmdbSettings |
@@ -599,7 +606,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_devices.py` | /api/hello + server name (default from the first admin, admin-only, reset), link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session; POST/DELETE on a ticket path with the token), traffic log shows the real path |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
-| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
+| `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), taking a title out until it's watched again, per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
 | `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB; Auto fill: guesses placed + listed, keep, skip, rescan keeps both, setting off/on |
 | `test_opensubtitles.py` | against a fake OpenSubtitles (`app.state.opensubtitles_transport`): search by TMDB id + season/episode + the file's hash (sorted, lowercase), by name for a movie without ids, the key like TMDB's (refused/not kept, never returned, test, removed = off), account refused/kept, token reused and re-made, download into the data dir (media untouched), no second download, quota 429, removal rights |
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
@@ -648,7 +655,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Wrong-password waits / lockout / sign-in log | `security.py` (`wait_after`, `MAX_WAIT`, `DEFAULT_THRESHOLD`, `AUTH_LOG_KEEP`), login flow `app.auth_login` |
 | IP list rules | `security.IpPolicy` (`allowed`), `clean_entries`, `save_policy`; UI `SecuritySettings.tsx` `IpCard` |
 | What the traffic log records / how it rotates | record dict in `security.Gate`; `netflow.py` (`segment_size`, `SCAN_BUDGET`, `DEFAULT_MAX_BYTES`) |
-| When something counts as watched, what Continue Watching offers | admin settings via `watch.thresholds` (defaults `WATCHED_PERCENT`, `RESUME_AFTER`), `continue_watching`, `next_episode` |
+| When something counts as watched, what Continue Watching offers | admin settings via `watch.thresholds` (defaults `WATCHED_PERCENT`, `RESUME_AFTER`), `continue_watching`, `next_episode`; what "Remove from Continue Watching" hides and what brings it back: `hide_continue` + `taken_out` |
+| Long press: web / holding OK on the TV | web `useLongPress` in `components/Cards.tsx` (`LONG_PRESS`); TV `tv/src/hold.ts` (`HOLD_MS`, `NO_UP_WAIT`; any element with `data-hold` + `onContextMenu`), tests `tv/test/hold.test.ts` |
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
 | Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
 | Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + what it asks and how servers merge in `web/src/everywhere.ts` `homeSpecs`/`mergeRow` (web `pages/Home.tsx` and TV `tv/src/screens/Home.tsx` both use them); ids are saved in users' `home_rows`, so keep old ids stable |

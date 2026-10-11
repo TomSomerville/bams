@@ -62,11 +62,19 @@ function HomeRow({ spec }: { spec: HomeRowSpec }) {
   const all = useSources();
   const sources = useMemo(() => (spec.everywhere ? all : all.filter((s) => s.rid === null)), [all, spec.everywhere]);
   const { lists } = useEverywhere<ItemSummary>(sources, spec.path);
-  const items = useMemo(() => mergeRow(spec, lists), [spec, lists]);
+  const [removed, setRemoved] = useState<Set<string>>(new Set());  // Continue Watching cards taken out (long press)
+  const items = useMemo(() => mergeRow(spec, lists).filter((i) => !removed.has(keyOf(i))), [spec, lists, removed]);
   if (items.length < spec.min) return null;
   const to = spec.library !== undefined ? `/library/${spec.library}` : undefined;
   if (spec.kind === "continue") {
-    return <Row title={spec.title}>{items.map((i) => <ContinueCard key={keyOf(i)} item={i as Tagged<ContinueItem>} />)}</Row>;
+    return (
+      <Row title={spec.title}>
+        {items.map((i) => (
+          <ContinueCard key={keyOf(i)} item={i as Tagged<ContinueItem>}
+            onRemoved={() => setRemoved((s) => new Set(s).add(keyOf(i)))} />
+        ))}
+      </Row>
+    );
   }
   if (spec.kind === "albums") return <Row title={spec.title} to={to}>{items.map((a) => <AlbumCard key={keyOf(a)} item={a} />)}</Row>;
   return <Row title={spec.title} to={to}>{items.map((i) => <PosterCard key={keyOf(i)} item={i} />)}</Row>;

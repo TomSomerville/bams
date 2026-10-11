@@ -117,6 +117,50 @@ def test_continue_watching(tv):
     assert c.get(f"/api/items/{ep[(2, 1)]}").json()["next_id"] is None
 
 
+def test_take_out_of_continue_watching(tv, tmp_path, monkeypatch):
+    """Long press on a Continue Watching card: the movie, or the episode's whole show, leaves the row until it's
+    watched again."""
+    app, c, ep, show = tv
+    clock = iter(range(1000, 10**6))  # every write a moment later than the one before
+    monkeypatch.setattr(watch, "now", lambda: float(next(clock)))
+    make_tree(tmp_path / "films", ["Film (2001)/Film (2001).mkv"])
+    lib = c.post("/api/libraries", json={"name": "Films", "type": "movie", "paths": [str(tmp_path / "films")]}).json()
+    jobs.run_scan(app.state.paths, lib["id"], do_match=False)
+    [film] = [i["id"] for i in c.get(f"/api/libraries/{lib['id']}/items").json()]
+
+    c.put(f"/api/items/{film}/progress", json={"position": 600, "duration": 6000})
+    c.put(f"/api/items/{ep[(2, 1)]}/progress", json={"position": 400, "duration": 1300})  # older activity of the show
+    c.put(f"/api/items/{ep[(1, 1)]}/progress", json={"position": 1200, "duration": 1300})  # finished: S01E02 is next
+    assert [i["id"] for i in c.get("/api/continue").json()] == [ep[(1, 2)], film]
+
+    assert c.delete(f"/api/continue/{ep[(1, 2)]}").json() == {"hidden": True}
+    # the show is out, not just that card (its older S02E01 doesn't take its place); the row doesn't come up short
+    assert [i["id"] for i in c.get("/api/continue").json()] == [film]
+    assert [i["id"] for i in c.get("/api/continue?limit=1").json()] == [film]
+    c.put(f"/api/items/{ep[(1, 2)]}/progress", json={"position": 5, "duration": 1300})  # opened, not really watched
+    assert [i["id"] for i in c.get("/api/continue").json()] == [film]
+    assert c.delete(f"/api/continue/{film}").status_code == 200
+    assert c.get("/api/continue").json() == []
+
+    kid = signed_in(app, "Kid", admin=False)  # someone else's row keeps it
+    kid.put(f"/api/items/{film}/progress", json={"position": 300, "duration": 6000})
+    assert [i["id"] for i in kid.get("/api/continue").json()] == [film]
+
+    # watching again brings it back
+    c.put(f"/api/items/{ep[(1, 2)]}/progress", json={"position": 400, "duration": 1300})
+    [back] = c.get("/api/continue").json()
+    assert back["id"] == ep[(1, 2)] and back["reason"] == "resume"
+    c.put(f"/api/items/{film}/progress", json={"position": 700, "duration": 6000})
+    assert [i["id"] for i in c.get("/api/continue").json()] == [film, ep[(1, 2)]]
+    c.put(f"/api/items/{ep[(1, 2)]}/progress", json={"position": 1250, "duration": 1300})  # finished: on to S01E03
+    assert c.get("/api/continue").json()[0]["id"] == ep[(1, 3)]
+
+    assert c.delete(f"/api/continue/{show}").status_code == 200  # the show itself works too
+    assert [i["id"] for i in c.get("/api/continue").json()] == [film]
+    assert c.delete("/api/continue/999999").status_code == 404
+    assert TestClient(app).delete(f"/api/continue/{film}").status_code == 401
+
+
 def test_watch_state_is_per_user(tv):
     app, c, ep, _ = tv
     c.put(f"/api/items/{ep[(1, 1)]}/progress", json={"position": 500, "duration": 1300})
@@ -137,7 +181,9 @@ def test_merged_titles_keep_watch_state(tv):
     c.put(f"/api/items/{other_ep}/watched", json={"watched": True})
     kid = signed_in(app, "Kid", admin=False)
     kid.put(f"/api/items/{other_ep}/watched", json={"watched": True})
+    kid.delete(f"/api/continue/{other}")
     items.merge_titles(con, show, other)  # same TMDB title found under two names: S01E01 is in both
+    assert [r[0] for r in con.execute("SELECT item_id FROM continue_hidden")] == [show]  # still out of Kid's row
     con.close()
     assert c.get(f"/api/items/{ep[(1, 1)]}").json()["progress"]["position"] == 500  # the kept one's state wins
     assert kid.get(f"/api/items/{ep[(1, 1)]}").json()["progress"]["watched"] is True  # moved over

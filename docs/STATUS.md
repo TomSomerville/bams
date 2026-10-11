@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-11** (release 0.10.0).
+Last updated: **2026-10-11** (release 0.11.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -150,6 +150,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-10 | **No downloads** (0.9.2): no `/api/files/{id}/download`, no `download_url`, no Download buttons; `/stream` sends no file name; right-click on the player's video is blocked | Owner: "remove the ability to download the files from the server completely. across the entire application". Playing still sends the file's bytes (direct play, copy-HLS), so a technical viewer could save a stream; stopping that would mean converting everything |
 | 10-11 | **OpenSubtitles: each server's admin pastes their own API key** in Settings, like TMDB (checked with a search before it's kept, never sent back); an OpenSubtitles account is optional (more downloads a day) | Owner's decision (test session 3 asked for "an area to add that API"). OpenSubtitles' terms ask for **one key per application** and say they may ban apps whose users bring their own; a single BAMS key was built first and replaced at the owner's request, so a key may get blocked |
 | 10-11 | **Downloaded subtitles belong to the file, for everyone**: kept in the data dir (`subtitles/opensubtitles/<id>.srt`, table `subtitle_downloads`, schema v10), listed as tracks `d<n>`; removable by whoever downloaded them or an admin; a subtitle the server already has isn't downloaded again | Media folders are read-only; downloads are limited per day (5 without an account, 20 free), so one pick should serve the whole household |
+| 10-11 | **Remove from Continue Watching** takes out the **title** (the movie, or the episode's whole show) for that account until there's **later activity** on it (`continue_hidden.hidden_at` vs the deciding row's `updated_at`; opened < "started" threshold doesn't count). A long press (web: or right-click; TV: holding OK) opens a menu with Remove / Cancel rather than removing at once | Owner: "Long press… to remove it from continue watching. If the show is later watched, it will get added back in." Hiding one episode would just show the next; the menu step guards against a stray hold while scrolling a row on a phone |
 | 10-11 | OpenSubtitles is searched by the title's **TMDB id** (show id + season/episode for episodes), else IMDb, plus the file's **moviehash** (BAMS's `quick_hash` is their hash); by name only when that finds nothing | Their advice; the hash puts subtitles made for the exact file first ("made for this file") |
 | 10-11 | **Sleep mode** = this episode **and 2 more**, then stop (a movie: stop at its end); toggled in the player, per viewing, not saved | Tester request ("finish the current episode, play 2 more, and then stop"). Carried to the next episode in the navigation state |
 | 10-11 | **Hyphenated words in names are read whole** (`parse._read`): when guessit's title cuts through one, it's read again with the hyphen protected. In file names "Show-01" stays episode 1 and an all-lowercase "grp-title.2010" keeps its group; a movie folder's name wins when the file's lost its front | Tester: "Catch-22" was "Catch" (guessit read "-22" as the episode; "Ant-" in "Ant-Man.2015" as a release group). Dry run over the owner's 4,391 real paths: nothing else changed |
@@ -214,7 +215,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   (1 s doubling) and lockout (default 5), admin lock/unlock, IP allow/block lists (`security.Gate`, outermost
   middleware), traffic log of every request (10 GB cap, folder/size settable), `bams security allow-all`.
 - **Watch state:** `watch.py`: progress (watched at 90% / started after 30 s by default; admin settings), watched flags for movie/episode/season/show, per-user counts on
-  every item list, Continue Watching (resume + next episode), next episode for up-next.
+  every item list, Continue Watching (resume + next episode; a title can be taken out until it's watched again,
+  `hide_continue`, 0.11.0), next episode for up-next.
 - **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
   encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead, VobSub `.idx/.sub` sidecars
   (one track per language) burned in too.
@@ -261,7 +263,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - Sign-in / first-admin screens (`auth.tsx`; code box for two-step accounts; "Pick your own password" screen),
   account menu, Settings → Accounts (password, two-step sign-in with QR code, users with "must change password" and
   "Turn off two-step"); viewers see only their account. Continue Watching row, watched ticks / unwatched counts / progress bars, mark watched on movie,
-  show, season and episode, Resume / Start over; Continue Watching cards link the show and the episode's season. Player:
+  show, season and episode, Resume / Start over; Continue Watching cards link the show and the episode's season, and a
+  long press or right-click offers "Remove from Continue Watching". Player:
   resume, progress reports, up-next countdown (at the end and 30 s before it), next-episode button, skip +30 / −10 s, sound menu
   (tracks, Surround, Dolby pass-through on/off), subtitles menu (text via `<track>`, picture incl. VobSub = burned in),
   quality Original / Auto / sizes, remux over HLS with fallback to the live remux. Sleep mode (bed button: this
@@ -271,7 +274,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 
 ### Samsung TV app (`tv/`, Tizen web app, React + Vite + TS)
 - Finds the server (TV's /24 from Tizen system info, else common home ranges, or typed), links with a code + QR or
-  name/password, Home (hero of the focused title, Continue Watching, Recently added, per-library rows), library grids
+  name/password, Home (hero of the focused title, Continue Watching (hold OK on a card: remove it), Recently added,
+  per-library rows), library grids
   (sorts), detail (seasons/episodes, resume/start over/mark watched), search, settings (server, sign out, always
   convert, "TV plays DTS"). Remote: spatial navigation (`nav.ts`), Back, media and colour keys registered.
   Tests (0.7.1): `cd tv && npm test` runs `tv/test/*.test.ts` in headless Chrome/Edge at 1920×1080 (`scripts/test.mjs`).
@@ -349,6 +353,35 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-11: Remove from Continue Watching (release 0.11.0)
+- **What / why:** owner: "Long press on a video card in the Continue Watching category to remove it from continue
+  watching. If the show is later watched, it will get added back in." Server: schema v11 `continue_hidden (user_id,
+  item_id = movie or show, hidden_at)`; `watch.hide_continue` (movie → itself, episode/season → its show);
+  `continue_watching` skips a title whose deciding activity is not newer than `hidden_at` (a hidden show still uses
+  up its older rows, so an older episode doesn't take its place); `DELETE /api/continue/{id}`; `items.merge_titles`
+  carries hidden rows over. Web: `ContinueCard` long press (500 ms held still, `useLongPress`) or right-click →
+  `ContinueMenu` over the card (Remove / Cancel; Escape or a press elsewhere closes it; the click ending a long press
+  is swallowed); Home drops the card once the item's own server confirms. TV: `tv/src/hold.ts`: OK on a `[data-hold]`
+  element is decided there (key-up before 800 ms = press; held = a `contextmenu` event). The Fire TV app passes no
+  key-ups, so there repeats decide (600 ms); key-downs that keep coming after a hold press nothing. `Wide` `onHold`;
+  Home's `ContinueMenu` (data-trap, Back closes, focus to the next card after removing).
+- **Files:** `server/bams/db.py` (v11), `watch.py`, `items.py`, `app.py`; `tests/test_watch.py`
+  (`test_take_out_of_continue_watching`, merge case), `test_auth.py` (v11); web `components/Cards.tsx`,
+  `pages/Home.tsx`, `styles.css`; TV `src/hold.ts` (new), `App.tsx` (OK + key-up), `Cards.tsx`, `screens/Home.tsx`,
+  `styles.css`, `test/hold.test.ts` (new), `test/run.ts`; CHANGELOG, VERSION 0.11.0, TV 0.11.0.
+- **Verified:** 321 server tests; TV `npm test` 37 (5 new: Samsung-style press/hold with key-ups, Fire TV-style
+  press/hold from repeats only, repeats after a hold swallowed); web + TV `tsc`. Scratch server (:8499, copy of the
+  local DB, own account): right-click and a held press opened the menu (not at 300 ms, yes at 700 ms), the click ending
+  the hold didn't navigate, a swipe didn't open it, a tap still played, Escape / a press elsewhere closed it; Remove
+  took Bob's Burgers out (card gone, `/api/continue` agreed); 5 s of it kept it out, 400 s brought it back; menu fits
+  a 240 px phone card. TV app in a browser at 1920×1080 with synthetic remote keys: held OK (with repeats) opened
+  the menu and the repeats didn't press Remove; Back closed it with the focus back on the card; Remove took the card
+  out with the focus on the next one; a short OK still played.
+- **Left open:** holding OK not tried on the owner's Frame or a Fire TV (Tizen's docs don't say whether a held key
+  repeats; both cases are handled); on Fire TV a press on a Continue Watching card waits 600 ms because
+  `MainActivity.kt` passes no key-ups (passing them would remove the wait). Released alone while another session's
+  Fire TV app and "Keep" for hand identifications stay uncommitted.
 
 ### 2026-10-11: Test session 3: OpenSubtitles, sleep mode, Fix match folders, hyphenated titles (release 0.10.0)
 - **What / why:** tester requests and one bug. (1) Fix match shows "the path to the show/folder": `GET

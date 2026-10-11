@@ -106,6 +106,8 @@ def merge_titles(con: sqlite3.Connection, keep: int, drop: int) -> None:
     """Fold `drop` into `keep` (same TMDB title found under two folder names)."""
     kind = con.execute("SELECT kind FROM items WHERE id=?", (keep,)).fetchone()["kind"]
     con.execute("UPDATE item_keys SET item_id=? WHERE item_id=?", (keep, drop))
+    # taken out of someone's Continue Watching: stays out (where both were, the kept title's time wins)
+    con.execute("UPDATE OR IGNORE continue_hidden SET item_id=? WHERE item_id=?", (keep, drop))
     if kind == "movie":
         con.execute("UPDATE OR IGNORE file_items SET item_id=? WHERE item_id=?", (keep, drop))
         _move_watch_state(con, drop, keep)

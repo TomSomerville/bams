@@ -260,4 +260,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Sleep mode's count rides in the navigation state** (web `location.state.sleep`, TV route `sleep`): both players
   are re-created for the next episode, so component state alone would forget it. `goNext`/`playNext` pass
   `sleep - 1`; going on by hand after it stopped turns it off.
+- **Holding OK on the TV** (`tv/src/hold.ts`, `[data-hold]` → `contextmenu`): the Fire TV app passes OK's key-downs
+  only, never a key-up, so a press must never wait for a key-up alone (repeats decide there); key-downs that keep
+  coming after a hold must press nothing (the menu's first button has the focus by then). `tv/test/hold.test.ts`.
+- **Python 3.11 on Windows: `time.time()` ticks every ~16 ms**, so writes in a row often get the same time. Tests that
+  depend on the order of timestamps patch the clock (`monkeypatch.setattr(watch, "now", …)` in `test_watch.py`).
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

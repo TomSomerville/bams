@@ -3,6 +3,18 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.11.0 (2026-10-11)
+
+### New
+- **Remove a title from Continue Watching.** Long-press a card in the Continue Watching row (or right-click it with
+  a mouse) and choose **Remove from Continue Watching**; on the Samsung TV app, hold OK on the card. For an episode
+  the whole show leaves the row, not just that episode. It comes back by itself as soon as you watch it again
+  (opening it for a few seconds doesn't count). Only your own account's row changes.
+
+Update the server with the new installer (the database is backed up and upgraded by itself), and install
+`BAMS-SamsungTV-0.11.0.wgt` on the TV for holding OK. Removing needs a 0.11.0 server: on an older one the TV app and
+the web page show an error in the menu and the card stays.
+
 ## 0.10.0 (2026-10-11)
 
 ### New

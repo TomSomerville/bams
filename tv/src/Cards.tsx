@@ -19,14 +19,15 @@ export function Poster({ item, fid, onPress, onFocus, autoFocus, rid }: {
   );
 }
 
-/** Wide card (16:9): Continue Watching, episodes. */
-export function Wide({ img, title, sub, progress, fid, onPress, onFocus, rid }: {
+/** Wide card (16:9): Continue Watching, episodes. `onHold`: holding OK on it (hold.ts). */
+export function Wide({ img, title, sub, progress, fid, onPress, onFocus, onHold, rid }: {
   img: string | null | undefined; title: string; sub?: string | null; progress?: number | null;
-  fid: string; onPress: () => void; onFocus?: () => void; rid?: number;
+  fid: string; onPress: () => void; onFocus?: () => void; onHold?: () => void; rid?: number;
 }) {
   const src = mediaFor(rid)(img);
   return (
-    <button className="card wide" data-fid={fid} onClick={onPress} onFocus={onFocus}>
+    <button className="card wide" data-fid={fid} onClick={onPress} onFocus={onFocus} data-hold={onHold ? "" : undefined}
+      onContextMenu={onHold ? (e) => { e.preventDefault(); onHold(); } : undefined}>
       {src ? <img src={src} alt="" loading="lazy" /> : <div className="no-art"><span>{title}</span></div>}
       {progress !== null && progress !== undefined && <div className="bar"><div style={{ width: `${progress * 100}%` }} /></div>}
       <div className="wide-text">

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { api, mediaFor, ridOf, sources, type ContinueItem, type ItemSummary, type User } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, apiFor, mediaFor, ridOf, sources, type ContinueItem, type ItemSummary, type User } from "../api";
 import type { Genre, HomeRowPref } from "../../../web/src/api";
 import {
   askAll, heroItems, heroPath, homeSpecs, keyOf, mergeGenres, mergeRow, type HomeRowSpec, type Tagged,
@@ -7,6 +7,9 @@ import {
 import { useFocusOnReady, useNav } from "../App";
 import { Poster, Shelf, Square, Wide } from "../Cards";
 import { metaLine, progressOf, sxe } from "../format";
+import { setKeyHandler } from "../keys";
+import { focus, focusFirst, focusId } from "../nav";
+import { isBack } from "../tizen";
 
 // The web's Home (web/src/pages/Home.tsx), row for row: the rows each person chose in Settings → Home page (saved
 // on their first server, `home_rows`), Continue Watching, Recently Added, Top Rated and each genre combined from
@@ -100,38 +103,114 @@ export default function Home() {
   );
 }
 
-/** One row of Home: the web's HomeRow, with the TV's cards. */
+/** One row of Home: the web's HomeRow, with the TV's cards. Holding OK on a Continue Watching card offers to take it
+ *  out of the row (ContinueMenu), like a long press on the web. */
 function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) => void }) {
   const nav = useNav();
-  const items = useRow(spec);
+  const row = useRow(spec);
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [menu, setMenu] = useState<{ item: Tagged<ContinueItem>; fid: string } | null>(null);
+  const items = useMemo(() => row?.filter((i) => !removed.has(keyOf(i))) ?? null, [row, removed]);
   if (!items || items.length < spec.min) return null;
+  const fidOf = (i: Item) => `${spec.id}-${keyOf(i)}`;
+
+  const closeMenu = () => {
+    const back = menu?.fid;
+    setMenu(null);
+    setTimeout(() => focusId(back));
+  };
+  const removedOne = (c: Item) => {
+    const i = items.findIndex((x) => keyOf(x) === keyOf(c));
+    const next = items[i + 1] ?? items[i - 1];  // the focus goes to the card beside it
+    setRemoved((s) => new Set(s).add(keyOf(c)));
+    setMenu(null);
+    setTimeout(() => {
+      if (!(next && focusId(fidOf(next)))) focusFirst(document.querySelector("main") ?? document);
+    });
+  };
+
   return (
-    <Shelf title={spec.title}>
-      {items.map((it) => {
-        const rid = ridOf(it.rid);
-        const fid = `${spec.id}-${keyOf(it)}`;
-        if (spec.kind === "continue") {
-          const c = it as Tagged<ContinueItem>;
+    <>
+      <Shelf title={spec.title}>
+        {items.map((it) => {
+          const rid = ridOf(it.rid);
+          const fid = fidOf(it);
+          if (spec.kind === "continue") {
+            const c = it as Tagged<ContinueItem>;
+            return (
+              <Wide key={keyOf(c)} fid={fid} rid={rid} img={c.still || c.backdrop || c.show?.backdrop}
+                title={c.show ? c.show.title : c.title}
+                sub={c.kind === "episode" ? `${sxe(c)} · ${c.title}${c.reason === "next" ? " · Next" : ""}` : null}
+                progress={progressOf(c)} onFocus={() => onFocus(c)}
+                onPress={() => nav.push({ name: "player", id: c.id, rid, resume: true })}
+                onHold={() => setMenu({ item: c, fid })} />
+            );
+          }
+          if (spec.kind === "albums") {
+            return (
+              <Square key={keyOf(it)} fid={fid} rid={rid} img={it.poster} title={it.title}
+                sub={[it.parent_title, it.year].filter(Boolean).join(" · ")} onFocus={() => onFocus(it)}
+                onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
+            );
+          }
           return (
-            <Wide key={keyOf(c)} fid={fid} rid={rid} img={c.still || c.backdrop || c.show?.backdrop}
-              title={c.show ? c.show.title : c.title}
-              sub={c.kind === "episode" ? `${sxe(c)} · ${c.title}${c.reason === "next" ? " · Next" : ""}` : null}
-              progress={progressOf(c)} onFocus={() => onFocus(c)}
-              onPress={() => nav.push({ name: "player", id: c.id, rid, resume: true })} />
-          );
-        }
-        if (spec.kind === "albums") {
-          return (
-            <Square key={keyOf(it)} fid={fid} rid={rid} img={it.poster} title={it.title}
-              sub={[it.parent_title, it.year].filter(Boolean).join(" · ")} onFocus={() => onFocus(it)}
+            <Poster key={keyOf(it)} item={it} rid={rid} fid={fid} onFocus={() => onFocus(it)}
               onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
           );
-        }
-        return (
-          <Poster key={keyOf(it)} item={it} rid={rid} fid={fid} onFocus={() => onFocus(it)}
-            onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
-        );
-      })}
-    </Shelf>
+        })}
+      </Shelf>
+      {menu && <ContinueMenu item={menu.item} onClose={closeMenu} onRemoved={() => removedOne(menu.item)} />}
+    </>
+  );
+}
+
+/** Over Home after holding OK on a Continue Watching card: take it out of the row (the movie, or the episode's whole
+ *  show; it comes back once it's watched again), or not. Back closes it too. */
+function ContinueMenu({ item, onClose, onRemoved }: {
+  item: Tagged<ContinueItem>; onClose: () => void; onRemoved: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    setTimeout(() => focus(ref.current?.querySelector("button")));
+    setKeyHandler((e) => {
+      if (!isBack(e)) return false;
+      close.current();
+      return true;
+    });
+    return () => setKeyHandler(null);
+  }, []);
+  const remove = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await apiFor(ridOf(item.rid)).del(`/api/continue/${item.id}`);
+      onRemoved();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="hold-menu" data-trap ref={ref}>
+      <div className="hold-box">
+        <h2>{item.show ? item.show.title : item.title}</h2>
+        {item.kind === "episode" && <div className="hold-ep">{sxe(item)} · {item.title}</div>}
+        <p className="muted">
+          {item.show ? "The show" : "The film"} leaves Continue Watching until you watch it again.
+        </p>
+        {err && <p className="error">{err}</p>}
+        <div className="button-row">
+          <button className="btn primary" onClick={() => void remove()}>
+            {busy ? "Removing…" : "Remove from Continue Watching"}
+          </button>
+          <button className="btn" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
   );
 }
