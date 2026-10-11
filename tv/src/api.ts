@@ -3,7 +3,7 @@
 // (/api/t/<ticket>/...) that the server hands out (GET /api/media-ticket). Server side: server/bams/devices.py.
 
 export type { ItemSummary, ItemDetail, ContinueItem, FileInfo, AudioTrack, SubtitleTrack, Probe, User, QueueTrack,
-  Playlist, PlaylistSummary, ServerLibrary }
+  Playlist, PlaylistSummary, ServerLibrary, SubtitleSearch, SubtitleResult }
   from "../../web/src/api";
 import type { User } from "../../web/src/api";
 import type { Source } from "../../web/src/everywhere";

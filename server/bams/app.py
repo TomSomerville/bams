@@ -25,12 +25,12 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
-from . import devices, netflow, security, updates
+from . import devices, netflow, opensubtitles, security, updates
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
 from .musicbrainz import MusicBrainz, MusicLookupError
-from .parse import guess, parse_episode, parse_movie
+from .parse import guess, parse_episode, parse_movie, title_folder
 from .tmdb import InvalidKey, Tmdb, TmdbError, key_kind
 
 log = logging.getLogger(__name__)
@@ -207,6 +207,19 @@ class KeyIn(BaseModel):
 
 class MatchIn(BaseModel):
     tmdb_id: int
+
+
+class OpenSubtitlesAccountIn(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class SubtitlePickIn(BaseModel):
+    """One of GET /opensubtitles's results (its labels are only shown in the menu)."""
+    file_id: int = Field(gt=0)
+    language: str | None = Field(None, max_length=16)
+    release: str | None = Field(None, max_length=300)
+    hearing_impaired: bool = False
 
 
 class IdentifyIn(BaseModel):
@@ -586,6 +599,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     app.state.transcodes = transcodes
     app.state.security = sec
     app.state.netflow = flows
+    app.state.opensubtitles_transport = None  # tests: an httpx.MockTransport standing in for OpenSubtitles
     app.add_middleware(LoginRequired, lookup=lookup_digest, tickets=tickets)
     # Apps on other devices (the TV app runs from its own origin) may call the API with a bearer token. "*" never
     # lets another site use a browser's cookie: browsers don't send credentials to a wildcard origin.
@@ -1047,7 +1061,74 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 "autofill": identify.autofill_enabled(con),
                 "max_transcodes": int(get_setting(con, "max_transcodes", "0") or 0),
                 "max_transcodes_auto": auto_transcode_limit(), "watch": watch.thresholds(con),
-                "server_name": server_name(con)}
+                "server_name": server_name(con), "opensubtitles": opensubtitles.status(con)}
+
+    def os_client(con: sqlite3.Connection, key: str | None = None) -> opensubtitles.Client:
+        """The OpenSubtitles API with this server's key, or `key` (409 when there's none). Tests set the transport."""
+        try:
+            return opensubtitles.Client(key or opensubtitles.api_key(con), transport=app.state.opensubtitles_transport)
+        except opensubtitles.NotSetUp as e:
+            raise HTTPException(409, str(e)) from None
+
+    def os_error(e: opensubtitles.OpenSubtitlesError) -> HTTPException:
+        code = 429 if isinstance(e, opensubtitles.QuotaReached) else 409 if isinstance(
+            e, (opensubtitles.LoginRefused, opensubtitles.NotSetUp, opensubtitles.InvalidKey)) else 502
+        if code == 502:
+            log.warning("OpenSubtitles: %s", e)
+        return HTTPException(code, str(e))
+
+    @app.put("/api/settings/opensubtitles-key", dependencies=ADMIN)
+    def put_opensubtitles_key(body: KeyIn, con=Depends(db)):
+        """This server's OpenSubtitles API key, like the TMDB key: checked with OpenSubtitles first (a key they
+        refuse isn't kept: 400), never sent back (only its last 4 characters)."""
+        key = body.key.strip()
+        if not opensubtitles.valid_key_format(key):
+            raise HTTPException(400, "That doesn't look like an OpenSubtitles API key (letters and digits, no spaces).")
+        with os_client(con, key) as c:
+            try:
+                return opensubtitles.save_key(con, c)
+            except opensubtitles.InvalidKey as e:
+                raise HTTPException(400, str(e)) from None
+
+    @app.delete("/api/settings/opensubtitles-key", dependencies=ADMIN)
+    def delete_opensubtitles_key(con=Depends(db)):
+        return opensubtitles.remove_key(con)
+
+    @app.post("/api/settings/opensubtitles-key/test", dependencies=ADMIN)
+    def test_opensubtitles_key(con=Depends(db)):
+        """Check the saved key with OpenSubtitles again."""
+        with os_client(con) as c:
+            try:
+                c.check()
+            except opensubtitles.OpenSubtitlesError as e:
+                return {"ok": False, "message": str(e)}
+        return {"ok": True, "message": "OpenSubtitles accepted the key."}
+
+    @app.put("/api/settings/opensubtitles", dependencies=ADMIN)
+    def put_opensubtitles(body: OpenSubtitlesAccountIn, con=Depends(db)):
+        """The OpenSubtitles account this server downloads subtitles with (checked by signing in; a refused one
+        isn't kept). Without one, OpenSubtitles allows 5 downloads a day per IP address."""
+        with os_client(con) as c:
+            try:
+                return opensubtitles.save_account(con, c, body.username.strip(), body.password)
+            except opensubtitles.LoginRefused as e:
+                raise HTTPException(400, str(e)) from None
+            except opensubtitles.OpenSubtitlesError as e:
+                raise os_error(e) from None
+
+    @app.delete("/api/settings/opensubtitles", dependencies=ADMIN)
+    def delete_opensubtitles(con=Depends(db)):
+        """Stop using the OpenSubtitles account (downloads go back to 5 a day per IP)."""
+        try:
+            c = os_client(con)
+        except HTTPException:
+            c = None
+        try:
+            opensubtitles.forget_account(con, c)
+        finally:
+            if c:
+                c.close()
+        return opensubtitles.status(con)
 
     @app.put("/api/settings/server-name", dependencies=ADMIN)
     def put_server_name(body: ServerNameIn, con=Depends(db)):
@@ -1304,6 +1385,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if playable and _probe_now(con, rows):
             rows = con.execute(files_sql, (item_id,)).fetchall()
         d["files"] = [file_info(f, with_subtitles=playable, music_out=mo) for f in rows]
+        if playable:
+            for f in d["files"]:
+                f["subtitles"] += opensubtitles.tracks(con, f["id"])
+            d["opensubtitles"] = opensubtitles.api_key(con) is not None  # the player offers "Check OpenSubtitles"
         watch.annotate(con, me["id"], [d, *d["children"], *d["ancestors"]])
         if r["kind"] == "episode":
             d["next_id"] = watch.next_episode(con, item_id)
@@ -1606,6 +1691,35 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             with MusicBrainz() as mb:
                 if kind == "artist":
                     return [{"mbid": a["id"], "title": a.get("name"), "sort_name": a.get("sort-name"),
+    @app.get("/api/items/{item_id}/folders", dependencies=ADMIN)
+    def item_folders(item_id: int, con=Depends(db)):
+        """Where a show's or movie's files are, so Fix match can say which folder is being fixed: a show's folders
+        (as the parser picks them: the one above the season folders) or a movie's files, with how many files each."""
+        r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
+        if not r or r["kind"] not in ("show", "movie"):
+            raise HTTPException(404, "no such show/movie")
+        rows = con.execute(
+            """WITH RECURSIVE t(id) AS (SELECT ? UNION ALL SELECT i.id FROM items i JOIN t ON i.parent_id=t.id)
+               SELECT DISTINCT f.id, f.rel_path, f.available, lr.path root FROM t JOIN file_items fi ON fi.item_id=t.id
+               JOIN files f ON f.id=fi.file_id JOIN library_roots lr ON lr.id=f.root_id""", (item_id,)).fetchall()
+        found: dict[tuple[str, str], list[int]] = {}  # (root, folder) -> [files, missing]
+        seen: dict[str, str] = {}  # parent folder -> its title folder (the parser reads each folder once)
+        for f in rows:
+            parent = f["rel_path"].rpartition("/")[0]
+            if r["kind"] == "movie" or not parent:  # a movie's file, or an episode loose at the top of the library
+                where = f["rel_path"]
+            else:
+                if parent not in seen:
+                    seen[parent] = title_folder(f["rel_path"], "show")
+                where = seen[parent]
+            n = found.setdefault((f["root"], where), [0, 0])
+            n[0] += 1
+            n[1] += not f["available"]
+        out = [{"path": os.path.join(root, *where.split("/")) if where else root, "files": n, "missing": m}
+               for (root, where), (n, m) in found.items()]
+        out.sort(key=lambda x: (-x["files"], x["path"].casefold()))
+        return {"folders": out[:20], "more": max(0, len(out) - 20)}
+
                              "type": a.get("type"), "country": a.get("country"),
                              "disambiguation": a.get("disambiguation") or None,
                              "years": "–".join(filter(None, [(a.get("life-span") or {}).get("begin", "")[:4],
@@ -1672,20 +1786,22 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         start, for players of the remux/plain transcode streams, whose clock starts at 0 there."""
         p, _ = _file_path(con, file_id)
         row = con.execute("SELECT probe, mtime_ns FROM files WHERE id=?", (file_id,)).fetchone()
-        tr = next((x for x in subtitles.tracks(jload(row["probe"]), p, file_id) if x["id"] == track), None)
+        tr = next((x for x in subtitles.tracks(jload(row["probe"]), p, file_id) + opensubtitles.tracks(con, file_id)
+                   if x["id"] == track), None)
         if not tr:
             raise HTTPException(404, "no such subtitle track")
         if tr["image"]:
             raise HTTPException(400, "This is a picture-based subtitle track; it's burned into a converted video "
                                      "instead.")
         try:
-            vtt = subtitles.webvtt(p, tr, paths.cache / "subtitles", row["mtime_ns"])
+            vtt = subtitles.webvtt(p, tr, paths.cache / "subtitles", row["mtime_ns"], src)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
             log.warning("subtitle %s of file %s: %s", track, file_id, e)
             raise HTTPException(500, f"Couldn't convert these subtitles: {e}") from None
         return Response(subtitles.shift(vtt, shift), media_type="text/vtt; charset=utf-8",
                         headers={"cache-control": "private, max-age=300"})
 
+        src = opensubtitles.stored(paths.root, con, tr) if tr["source"] == "download" else None
     def _probe_of(file_id: int) -> tuple[Path, dict]:
         con = connect(paths.db)
         try:
@@ -1694,6 +1810,45 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         finally:
             con.close()
         return p, {"probe": jload(row["probe"]) or {}, "parse": jload(row["parse"])}
+    @app.get("/api/files/{file_id}/opensubtitles")
+    def opensubtitles_search(file_id: int, languages: str = Query("", max_length=100), con=Depends(db)):
+        """Subtitles OpenSubtitles has for this file (its title's TMDB/IMDb id, season/episode and the file's
+        moviehash; else its name), in `languages` ("en", "en,fr"; empty = all). Results made for this exact file
+        come first (`hash_match`); `track` is set on ones this file already has."""
+        if not con.execute("SELECT 1 FROM files WHERE id=?", (file_id,)).fetchone():
+            raise HTTPException(404, "no such file")
+        with os_client(con) as c:
+            try:
+                return opensubtitles.search(con, c, file_id, languages)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
+            except opensubtitles.OpenSubtitlesError as e:
+                raise os_error(e) from None
+
+    @app.post("/api/files/{file_id}/opensubtitles")
+    def opensubtitles_download(file_id: int, body: SubtitlePickIn, con=Depends(db), me=Depends(current_user)):
+        """Download one of the search's subtitles for this file: it becomes one of the file's subtitle tracks (for
+        everyone), returned as `track`, with the downloads OpenSubtitles still allows today (`remaining`)."""
+        with os_client(con) as c:
+            try:
+                return opensubtitles.download(con, c, paths.root, file_id, body.file_id, body.language, body.release,
+                                              body.hearing_impaired, me["id"])
+            except LookupError:
+                raise HTTPException(404, "no such file") from None
+            except opensubtitles.OpenSubtitlesError as e:
+                raise os_error(e) from None
+
+    @app.delete("/api/files/{file_id}/subtitles/{track}", status_code=204)
+    def delete_subtitle(file_id: int, track: str, con=Depends(db), me=Depends(current_user)):
+        """Take a downloaded subtitle ("d<n>") off a file: whoever downloaded it, or an admin. The file's own
+        subtitles can't be removed (media folders are read-only)."""
+        t = next((x for x in opensubtitles.tracks(con, file_id) if x["id"] == track), None)
+        if not t:
+            raise HTTPException(404, "no such downloaded subtitle")
+        if not me["is_admin"] and t["added_by"] != me["id"]:
+            raise HTTPException(403, "Only an admin or whoever downloaded it can remove it.")
+        opensubtitles.remove(con, paths.root, t["index"])
+
 
     def _channels(pr: dict, audio: int, want: int) -> int:
         tracks = pr.get("audio") or []

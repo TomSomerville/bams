@@ -10,10 +10,12 @@ type Prefs = {
   subLang: string | null;
   /** seconds the subtitles are shown later than their times (the TV delays its picture; the text isn't) */
   subDelay: number;
+  /** the language last searched in "Check OpenSubtitles" */
+  osLang: string | null;
 };
 
 const KEY = "bams.prefs";
-const DEFAULTS: Prefs = { alwaysConvert: false, dts: false, audioLang: null, subLang: null, subDelay: 0 };
+const DEFAULTS: Prefs = { alwaysConvert: false, dts: false, audioLang: null, subLang: null, subDelay: 0, osLang: null };
 
 function load(): Prefs {
   try {

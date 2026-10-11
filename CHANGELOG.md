@@ -3,6 +3,33 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.10.0 (2026-10-11)
+
+### New
+- **Subtitles from OpenSubtitles.com.** While a movie or episode plays, the subtitles menu has **Check
+  OpenSubtitles** (web and Samsung TV app). It lists what OpenSubtitles has for that title in the language you pick,
+  the ones made for your exact file first ("made for this file"). Pick one and it shows at once; if it doesn't fit,
+  open the list again and try another. A picked subtitle is kept on the server (never in your media folders) and
+  offered to everyone who plays that file; whoever downloaded it, or an admin, can remove it again.
+  - To turn it on, an admin pastes their own free OpenSubtitles API key under **Settings → Playback →
+    OpenSubtitles**, like the TMDB key: sign in at OpenSubtitles.com, open **API consumers** in your profile, create
+    one and copy its API key. BAMS checks the key before saving it.
+  - Optional: sign in with your OpenSubtitles account in the same place. OpenSubtitles allows 5 downloads a day
+    without an account and 20 with a free one (more with VIP). Searching never counts.
+- **Sleep mode**: a bed-with-stars button next to the volume button (web) or a **Sleep** button (TV app). On an
+  episode it plays this one and 2 more, then stops; on a movie it stops at the end. Press it again to turn it off.
+- **Fix match shows where the files are**: the dialog lists the show's folders on the server (with how many files
+  each) or the movie's files, so you can check you're fixing the right one.
+
+### Fixed
+- **Titles with a hyphen were cut at the hyphen**: a show in a folder named `Catch-22` was identified as "Catch",
+  and names like `Ant-Man.2015.1080p.mkv`, `Spider-Man.Far.From.Home…` or `Obi-Wan.Kenobi.S01…` lost the part
+  before the dash ("She-Ra and the Princesses of Power" became "She"). This happened on Windows and Linux alike. The
+  next scan after updating reads every file name again, so affected titles are fixed by themselves.
+
+Update the server with the new installer (the database is backed up and upgraded by itself). The Samsung TV app has
+a new version too: install `BAMS-SamsungTV-0.10.0.wgt` for sleep mode and OpenSubtitles on the TV.
+
 ## 0.9.2 (2026-10-10)
 
 ### Fixed

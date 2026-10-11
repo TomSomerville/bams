@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { type ItemDetail, type TmdbResult } from "../api";
+import { type ItemDetail, type TitleFolders, type TmdbResult } from "../api";
 import { useScope } from "../servers";
 import Icon from "./Icon";
 
@@ -13,6 +13,7 @@ export default function FixMatch({ item, onClose }: { item: ItemDetail; onClose:
   const [results, setResults] = useState<TmdbResult[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | "search" | null>(null);
+  const [where, setWhere] = useState<TitleFolders | null>(null);  // which folder this is, so the right one gets fixed
 
   const search = async () => {
     setBusy("search");
@@ -42,6 +43,7 @@ export default function FixMatch({ item, onClose }: { item: ItemDetail; onClose:
 
   useEffect(() => {
     search();
+    call.get<TitleFolders>(`/api/items/${item.id}/folders`).then(setWhere).catch(() => {});
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -55,6 +57,21 @@ export default function FixMatch({ item, onClose }: { item: ItemDetail; onClose:
           <h3>Fix match</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" size={20} /></button>
         </div>
+        {where && where.folders.length > 0 && (
+          <div className="match-where">
+            <div className="muted">{`${item.kind === "show" ? "Folder" : "File"}${where.folders.length + where.more > 1 ? "s" : ""}`} on the server</div>
+            <ul>
+              {where.folders.map((f) => (
+                <li key={f.path} title={f.path}>
+                  <code>{f.path}</code>
+                  {item.kind === "show" && <span className="muted"> · {f.files} {f.files === 1 ? "file" : "files"}</span>}
+                  {f.missing > 0 && <span className="muted"> · {f.missing} missing</span>}
+                </li>
+              ))}
+              {where.more > 0 && <li className="muted">and {where.more} more</li>}
+            </ul>
+          </div>
+        )}
         <form className="picker-path" onSubmit={(e) => { e.preventDefault(); search(); }}>
           <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search TMDB" />
           <button className="btn ghost small" disabled={!q.trim() || busy !== null}>Search</button>

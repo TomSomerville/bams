@@ -163,12 +163,12 @@ def _decode(data: bytes) -> str:
         return data.decode("cp1252", errors="replace")
 
 
-def webvtt(video: Path, track: dict, cache: Path, mtime_ns: int) -> str:
+def webvtt(video: Path, track: dict, cache: Path, mtime_ns: int, src: Path | None = None) -> str:
     """The track as WebVTT text, converted once and cached (keyed by the file's mtime, so an edited sidecar
-    or replaced video is converted again)."""
-    src = video if track["source"] == "embedded" else video.parent / track["file"]
+    or replaced video is converted again). `src`: where a downloaded track ("d<n>", opensubtitles.py) is kept."""
+    src = src or (video if track["source"] == "embedded" else video.parent / track["file"])
     try:
-        stamp = src.stat().st_mtime_ns if track["source"] == "file" else mtime_ns
+        stamp = src.stat().st_mtime_ns if track["source"] != "embedded" else mtime_ns
     except OSError:
         stamp = mtime_ns
     key = hashlib.sha1(f"{src}|{track['id']}|{stamp}".encode()).hexdigest()[:20]

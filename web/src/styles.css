@@ -388,6 +388,10 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .quality-menu .muted { font-size: 12px; font-weight: 500; }
 .select { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font: inherit; }
 .match-list button { align-items: flex-start; }
+.match-where { padding: 0 18px 6px; font-size: 13px; }
+.match-where ul { list-style: none; margin: 4px 0 0; padding: 0; max-height: 110px; overflow-y: auto; }
+.match-where li { padding: 2px 0; overflow-wrap: anywhere; }
+.match-where code { font: 12px ui-monospace, Consolas, monospace; color: var(--text); }
 .match-list img, .match-noposter { width: 46px; height: 69px; border-radius: 4px; object-fit: cover; flex-shrink: 0; background: var(--surface-2); }
 .match-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .match-text .tag { align-self: flex-start; }
@@ -624,6 +628,22 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .resumed { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.14); }
 .player-top .resumed + .player-stream { margin-left: 12px; }
 .player-top .resumed { margin-left: auto; }
+.sleep-btn { display: inline-flex; align-items: center; gap: 2px; border-radius: 18px; font-size: 12px; font-weight: 700; }
+.sleep-btn.on { color: var(--cyan); background: rgba(0, 200, 255, 0.12); }
+.find-subs { cursor: default; }
+.os-account { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); }
+.os-account h4 { font-size: 15px; margin: 0 0 6px; }
+.os-account h4 .muted { font-weight: 500; font-size: 13px; }
+.find-subs h3 .muted { font-weight: 500; font-size: 14px; }
+.find-subs .picker-path select { flex: 0 1 220px; }
+.find-subs-by { align-self: center; font-size: 13px; }
+.find-subs-have { padding: 4px 18px 0; font-size: 13px; }
+.find-subs-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.find-subs-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.find-subs-row > span.on { color: var(--cyan); font-weight: 600; }
+.find-subs-list .match-text strong { overflow-wrap: anywhere; }
+.find-subs-list .tag { margin-left: 6px; }
+.find-subs-foot { padding: 0 18px 16px; margin-top: 4px; }
 .skip-btn { display: inline-flex; align-items: center; gap: 1px; border-radius: 18px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .up-next { position: absolute; right: 32px; bottom: 120px; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 12px; background: rgba(12, 12, 20, 0.92); border: 1px solid var(--border); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6); cursor: default; }
 .player-video::cue { background: rgba(0, 0, 0, 0.62); color: #fff; font-family: inherit; font-size: 1.05em; line-height: 1.35; }

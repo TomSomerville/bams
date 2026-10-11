@@ -34,6 +34,12 @@ const PATHS: Record<string, string> = {
   grip: "M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01",
   server: "M3 4h18v7H3zM3 13h18v7H3zM7 7.5h.01M7 16.5h.01",
   disc: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  // a bed (headboard, sleeper's head, blanket, frame), with two stars above it in FILLS: sleep mode
+  sleep: "M3 9v11M3 17h18v3M9 17v-4h9a3 3 0 0 1 3 3v1M6 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
+};
+// Filled shapes drawn over an icon's strokes (small stars don't read as strokes)
+const FILLS: Record<string, string> = {
+  sleep: "M14 1l1.1 2.4 2.4 1.1-2.4 1.1L14 8l-1.1-2.4-2.4-1.1 2.4-1.1zM20 5.5l.7 1.3 1.3.7-1.3.7-.7 1.3-.7-1.3-1.3-.7 1.3-.7z",
 };
 
 export default function Icon({ name, size = 20 }: { name: keyof typeof PATHS | string; size?: number }) {
@@ -41,6 +47,7 @@ export default function Icon({ name, size = 20 }: { name: keyof typeof PATHS | s
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={name === "play" ? 0 : 2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d={PATHS[name]} fill={name === "play" ? "currentColor" : "none"} />
+      {FILLS[name] && <path d={FILLS[name]} fill="currentColor" stroke="none" />}
     </svg>
   );
 }

@@ -171,8 +171,27 @@ export type AudioTrack = { index: number; label: string; language: string | null
  *  can only be burned into a converted video (index = which subtitle stream). */
 /** id: "e{n}" embedded, "x{n}" a sidecar file, "x{n}-{k}" stream k of a VobSub .idx/.sub sidecar. Picture
  *  tracks (image) have no url: they're burned in by sending the id as `burn`. */
-export type SubtitleTrack = { id: string; index: number; source: "embedded" | "file"; language: string | null;
-  label: string; forced: boolean; sdh: boolean; image: boolean; codec: string | null; url: string | null };
+export type SubtitleTrack = { id: string; index: number; source: "embedded" | "file" | "download"; language: string | null;
+  label: string; forced: boolean; sdh: boolean; image: boolean; codec: string | null; url: string | null;
+  /** downloaded ("d<n>"): where from, its id there, and who downloaded it (they or an admin can remove it) */
+  provider?: string; ext_id?: string; added_by?: number | null };
+
+/** GET /api/settings → opensubtitles: this server's OpenSubtitles API key (only its last 4 characters) and the
+ *  admin's optional account */
+export type OpenSubtitlesStatus = { configured: boolean; last4: string | null; verified_at: string | null;
+  user: string | null; error: string | null;
+  account: { level: string | null; allowed_downloads: number | null; vip: boolean } | null };
+
+/** One of GET /api/files/:id/opensubtitles's results */
+export type SubtitleResult = { file_id: number; language: string | null; release: string; hearing_impaired: boolean;
+  fps: number | null; downloads: number; rating: number | null; trusted: boolean; ai: boolean; machine: boolean;
+  /** made for this exact file (OpenSubtitles' moviehash) */
+  hash_match: boolean; uploader: string | null; uploaded: string | null; url: string | null;
+  /** this file already has it as that track */
+  track: string | null };
+export type SubtitleSearch = { results: SubtitleResult[]; by: "ids" | "name" | null; account: boolean;
+  what: { kind: "movie" | "episode"; title: string | null; year: number | null; show?: string | null;
+          season?: number | null; episode?: number | null } };
 
 export type Probe = {
   container: string | null;
@@ -238,6 +257,8 @@ export type ItemDetail = ItemSummary & {
   files: FileInfo[];
   /** episodes: the next one in the show (null at the end) */
   next_id?: number | null;
+  /** movies/episodes: the player may offer "Check OpenSubtitles" (this server has an OpenSubtitles API key) */
+  opensubtitles?: boolean;
 };
 
 /** What a file is, entered by hand (PUT /api/files/:id/identify). No episodes = an extra in that season. */
@@ -328,6 +349,8 @@ export type PlaylistSummary = {
 export type Playlist = PlaylistSummary & { library_name: string; tracks: QueueTrack[] };
 
 export type TmdbResult ={ tmdb_id: number; title: string; year: number | null; overview: string | null; poster_path: string | null };
+/** GET /api/items/{id}/folders (admins): where a show's folders / a movie's files are, for Fix match */
+export type TitleFolders = { folders: { path: string; files: number; missing: number }[]; more: number };
 
 // ---- other BAMS servers this browser is connected to (kept in the browser: servers.tsx)
 

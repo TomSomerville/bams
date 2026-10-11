@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from guessit import guessit
 
 # Bump when parsing rules change: the next scan re-parses files parsed by an older version.
-PARSER_VERSION = 8
+PARSER_VERSION = 9
 
 # {tmdb-603} [tmdbid=603] {imdb-tt0133093} [imdbid-tt0133093] {tvdb-81189}
 _ID_RE = re.compile(r"[\[{](tmdb|imdb|tvdb)(?:id)?[-=]((?:tt)?\d+)[\]}]", re.I)
@@ -35,6 +35,11 @@ _GENERIC_STEMS = {"movie", "film", "video", "feature", "main", "title", "video_t
 # Scene packs abbreviate the Star Trek series ("Star.Trek.DS9"); TMDB knows the full names (TOS is just "Star Trek").
 _STAR_TREK_RE = re.compile(r"^(star[ .]?trek)[ .:_-]+(ds9|tng|tos|voy|ent)$", re.I)
 _STAR_TREK = {"ds9": "Deep Space Nine", "tng": "The Next Generation", "tos": "", "voy": "Voyager", "ent": "Enterprise"}
+# guessit splits names at hyphens: a folder "Catch-22" reads as "Catch" + episode 22, "Ant-Man.2015" as release group
+# "Ant" + "Man", "She-Ra and..." as "She" + a ".ra" file. Such a word is read again with its hyphens swapped for this
+# look-alike, which guessit doesn't split at, and swapped back in the answer (_read).
+_HYPHEN = "‐"
+_HYPHENED_RE = re.compile(r"[^\W_]+(?:-[^\W_]+)+")  # "Catch-22", "9-1-1", "Spider-Man"
 
 
 @dataclass
@@ -105,6 +110,66 @@ def _int(v) -> int | None:
     return v if isinstance(v, int) else None
 
 
+# what guessit may have made of the other half of a hyphenated title word ("Catch-22": episode 22, "Ant-Man":
+# release group "Ant", "She-Ra": a ".ra" file); a year ("Tenet-2020"), "CD1", "1080p"... stay what they are
+_GLUED = {"episode", "release_group", "container", "title", "alternative_title", "episode_title"}
+
+
+def _labels(g, a: int, b: int) -> set[str]:
+    """What guessit read text[a:b] as (the names of its matches overlapping that stretch)."""
+    return {name for name, ms in (getattr(g, "matches", None) or {}).items()
+            for m in ms if m.span[0] < b and m.span[1] > a}
+
+
+def _protect(text: str, g, kind: str, folder: bool) -> str:
+    """`text` with the hyphens of each hyphenated word that guessit's title cuts through swapped for _HYPHEN."""
+    spans = (getattr(g, "matches", None) or {}).get("title") or []
+    if not spans:
+        return text
+    start, end = spans[0].span
+    while start < end and not text[start].isalnum():  # spans can take in the separators around them
+        start += 1
+    while end > start and not text[end - 1].isalnum():
+        end -= 1
+    out = text
+    for m in _HYPHENED_RE.finditer(text):
+        a, b = m.span()
+        if a < start < b:  # glued on in front: "Ant-|Man.2015", "9-|1-1 Lone Star"
+            other = (a, start - 1)
+            # all-lowercase scene file names lead with their group: "aaf-movie.name.2010.avi", "st-tng.s02e02.avi"
+            if not folder and text == text.lower() and "release_group" in _labels(g, *other):
+                continue
+        elif a < end < b:  # glued on behind: "Catch|-22", "She|-Ra and the Princesses of Power"
+            other = (end + 1, b)
+            # in a file name "Naruto-01" is episode 1; a folder names the show ("Catch-22/Season 1/...")
+            if (kind == "episode" and not folder and text[other[0]:b].isdigit() and g.get("season") is None
+                    and not isinstance(g.get("episode"), list)):
+                continue
+        else:
+            continue
+        if _labels(g, *other) <= _GLUED:
+            out = out[:a] + text[a:b].replace("-", _HYPHEN) + out[b:]
+    return out
+
+
+def _unprotect(v):
+    if isinstance(v, str):
+        return v.replace(_HYPHEN, "-")
+    if isinstance(v, list):
+        return [_unprotect(x) for x in v]
+    return v
+
+
+def _read(text: str, kind: str, folder: bool = False) -> dict:
+    """guessit's reading of a name (kind "episode" or "movie"), without splitting a hyphenated title ("Catch-22",
+    "Ant-Man", "9-1-1"). folder: a folder's name, which names a show or film ("Catch-22", not episode 22)."""
+    g = guessit(text, {"type": kind})
+    fixed = _protect(text, g, kind, folder)
+    if fixed == text:
+        return g
+    return {k: _unprotect(v) for k, v in guessit(fixed, {"type": kind}).items()}
+
+
 def _ids(rel: str) -> dict[str, str]:
     ids = {k.lower(): v for k, v in _ID_RE.findall(rel)}
     if "imdb" in ids and not ids["imdb"].startswith("tt"):
@@ -172,7 +237,13 @@ def _folder_year(name: str, year: int | None) -> int | None:
 
 
 def _show_dir(dirs: list[str]) -> tuple[str | None, int | None]:
-    """Which folder names the show, and the season of the season folder the file is in (if any).
+    """Which folder names the show, and the season of the season folder the file is in (if any)."""
+    at, season = _show_dir_at(dirs)
+    return (None if at is None else dirs[at]), season
+
+
+def _show_dir_at(dirs: list[str]) -> tuple[int | None, int | None]:
+    """_show_dir, with the folder's place in `dirs` instead of its name.
 
     With a season folder ("S03", "Season 2", "Specials"), the show is the folder right above it: in a nested pack
     ("Star.Trek.Megapack/Star.Trek.DS9/S03/...") that's the series, not the pack. Folders below the season folder
@@ -181,28 +252,38 @@ def _show_dir(dirs: list[str]) -> tuple[str | None, int | None]:
     """
     season_at = [i for i, d in enumerate(dirs) if _season_from_dir(d) is not None]
     if season_at:  # "Season 3/Season 3 Extras/x.avi": both are season folders; the show is above them
-        above = [d for d in dirs[:season_at[-1]] if _season_from_dir(d) is None]
+        above = [i for i in range(season_at[-1]) if _season_from_dir(dirs[i]) is None]
         return (above[-1] if above else None), _season_from_dir(dirs[season_at[-1]])
-    chosen: tuple[str, str] | None = None  # (folder, its title)
-    for d in reversed(dirs):
-        gd = guessit(_clean_dir(d), {"type": "episode"})
+    chosen: tuple[int, str] | None = None  # (folder, its title)
+    for i in reversed(range(len(dirs))):
+        gd = _read(_clean_dir(dirs[i]), "episode", folder=True)
         t = _title(gd)
         if not t or gd.get("episode") is not None or (gd.get("season") is None and not gd.get("year")):
             continue
         if chosen is None:
-            chosen = (d, t)
+            chosen = (i, t)
         elif " " not in chosen[1] and title_key(t).startswith(title_key(chosen[1])):
-            chosen = (d, t)  # "Parks and Recreation S01-07/Parks S07/...": the pack spells out the one-word inner name
-    return (chosen[0] if chosen else dirs[0] if dirs else None), None
+            chosen = (i, t)  # "Parks and Recreation S01-07/Parks S07/...": the pack spells out the one-word inner name
+    return (chosen[0] if chosen else 0 if dirs else None), None
+
+
+def title_folder(rel: str, kind: str) -> str:
+    """Where a file's show or movie is, relative to its library root: a show's folder as parse_episode picks it
+    ("Star.Trek.Megapack/Star.Trek.DS9" for ".../S03/x.avi"), a movie's file itself. For Fix match."""
+    parts = rel.replace("\\", "/").split("/")
+    if kind != "show" or len(parts) == 1:
+        return "/".join(parts)
+    at, _ = _show_dir_at(parts[:-1])
+    return "/".join(parts[:at + 1]) if at is not None else "/".join(parts[:-1])
 
 
 def parse_episode(rel: str) -> Parsed:
     parts = rel.replace("\\", "/").split("/")
     dirs, name = parts[:-1], parts[-1]
     stem = _clean_stem(name)
-    p = Parsed(kind="episode", ids=_ids(rel), release=_release(guessit(stem, {"type": "episode"})))
+    p = Parsed(kind="episode", ids=_ids(rel), release=_release(_read(stem, "episode")))
     stem = _core(stem) or stem
-    g = guessit(stem, {"type": "episode"})
+    g = _read(stem, "episode")
 
     if hit := _sxe(stem):
         p.season, p.episodes, tail = hit
@@ -217,7 +298,7 @@ def parse_episode(rel: str) -> Parsed:
         for d in reversed(dirs):
             s = _season_from_dir(d)
             if s is None:
-                s = _int(guessit(_unquote(d), {"type": "episode"}).get("season"))
+                s = _int(_read(_unquote(d), "episode", folder=True).get("season"))
             if s is not None:
                 p.season, season_dir = s, True
                 break
@@ -229,7 +310,7 @@ def parse_episode(rel: str) -> Parsed:
     if folder_season is not None and not p.episodes:
         p.season, season_dir = folder_season, True  # "S03/.../ds9.s03.extra1.avi": an extra of the folder's season
     if show_dir:
-        gd = guessit(_clean_dir(show_dir), {"type": "episode"})
+        gd = _read(_clean_dir(show_dir), "episode", folder=True)
         p.title = _title(gd)
         p.year = _folder_year(_clean_dir(show_dir), _int(gd.get("year")))
     if not p.title:
@@ -241,7 +322,7 @@ def parse_episode(rel: str) -> Parsed:
     if (not et or _SXE_RE.search(et)) and tail:
         # guessit missed it, or swallowed the SxxEyy into it (quoted names): look at what follows SxxEyy,
         # letting guessit strip release tags. A bare release group ("...x264-TrollHD") is not a title.
-        cand = _str(guessit(tail.strip(" ._-–:"), {"type": "movie"}).get("title"))
+        cand = _str(_read(tail.strip(" ._-–:"), "movie").get("title"))
         junk = {(_str(v) or "").casefold() for v in (g.get("release_group"), g.get("streaming_service"),
                                                       p.release.get("group"), p.release.get("service"))}
         et = cand if cand and cand.casefold() not in junk else None
@@ -256,7 +337,7 @@ def parse_episode(rel: str) -> Parsed:
 
 def _loose_title(stem: str, show: str) -> str:
     """A name for an unnumbered episode: the file name without the show's name and release tags."""
-    g = guessit(stem, {"type": "movie"})
+    g = _read(stem, "movie")
     alt = g.get("alternative_title")
     if alt:  # "Star.Trek.DS9.S03.Extra10": guessit reads the show as the title and the rest as an alternative
         t = str(alt[-1] if isinstance(alt, list) else alt)
@@ -272,7 +353,7 @@ def parse_movie(rel: str) -> Parsed:
     parts = rel.replace("\\", "/").split("/")
     dirs, name = parts[:-1], parts[-1]
     stem = _clean_stem(name)
-    g = guessit(stem, {"type": "movie"})
+    g = _read(stem, "movie")
     p = Parsed(kind="movie", ids=_ids(rel), release=_release(g))
     p.title = _title(g)
     p.year = _int(g.get("year"))
@@ -280,11 +361,16 @@ def parse_movie(rel: str) -> Parsed:
     p.edition = _str(g.get("edition"))
 
     if dirs:  # "Movie (Year)/whatever.mkv": the folder is often the better name
-        gd = guessit(_clean_dir(dirs[-1]), {"type": "movie"})
+        gd = _read(_clean_dir(dirs[-1]), "movie", folder=True)
         ft, fy = _title(gd), _int(gd.get("year"))
         generic = not p.title or p.title.casefold() in _GENERIC_STEMS
+        # "Ant-Man (2015)/ant-man.2015.mkv": the file's name lost its front (read as a release group), the folder's didn't
+        fw, pw = re.findall(r"[^\W_]+", ft or ""), re.findall(r"[^\W_]+", p.title or "")
+        cut = 0 < len(pw) < len(fw) and title_key(" ".join(fw[-len(pw):])) == title_key(p.title) and fy in (None, p.year)
         if ft and (generic or (p.year is None and fy is not None)):
             p.title, p.year = ft, fy
+        elif cut:
+            p.title = ft
         elif p.year is None:
             p.year = fy
     return p
@@ -365,7 +451,7 @@ def _decollect(title: str | None) -> str | None:
 
 def _folder_show(d: str) -> tuple[str | None, int | None]:
     """The show a folder names (and its year), read as parse() reads show folders."""
-    gd = guessit(_clean_dir(d), {"type": "episode"})
+    gd = _read(_clean_dir(d), "episode", folder=True)
     t = _title(gd) or _words(_clean_dir(d)) or None
     return _decollect(t), _folder_year(_clean_dir(d), _int(gd.get("year")))
 
@@ -373,7 +459,7 @@ def _folder_show(d: str) -> tuple[str | None, int | None]:
 def _names_film(d: str, film: str) -> bool:
     """Is this folder the film's own ("Daria Is It College Yet 2002 DVDRip XviD/...")?"""
     k = title_key(film)
-    return k in {title_key(_str(guessit(_clean_dir(d), {"type": "movie"}).get("title"))), title_key(_words(_clean_dir(d)))}
+    return k in {title_key(_str(_read(_clean_dir(d), "movie", folder=True).get("title"))), title_key(_words(_clean_dir(d)))}
 
 
 def guess(rel: str, library_type: str, force: bool = False) -> Parsed | None:
@@ -405,7 +491,7 @@ def guess(rel: str, library_type: str, force: bool = False) -> Parsed | None:
         if p.title is None:
             return None
         if p.year is None and dirs:
-            p.year = _int(guessit(_clean_dir(dirs[-1]), {"type": "movie"}).get("year"))
+            p.year = _int(_read(_clean_dir(dirs[-1]), "movie", folder=True).get("year"))
         return p
 
     # TV: the show (from the folders, as parse() read them), a season, an episode number or none (an extra)
