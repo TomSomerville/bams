@@ -1683,14 +1683,6 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                            (body.tmdb_id, r["kind"])).fetchone()
         return get_item(keep["id"], con, me)
 
-    @app.get("/api/musicbrainz/search", dependencies=ADMIN)
-    def musicbrainz_search(kind: str = Query(pattern="^(album|artist)$"), q: str = Query(min_length=1),
-                           artist: str | None = None):
-        """Fix match for music: candidate releases (albums) or artists on MusicBrainz."""
-        try:
-            with MusicBrainz() as mb:
-                if kind == "artist":
-                    return [{"mbid": a["id"], "title": a.get("name"), "sort_name": a.get("sort-name"),
     @app.get("/api/items/{item_id}/folders", dependencies=ADMIN)
     def item_folders(item_id: int, con=Depends(db)):
         """Where a show's or movie's files are, so Fix match can say which folder is being fixed: a show's folders
@@ -1720,6 +1712,14 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         out.sort(key=lambda x: (-x["files"], x["path"].casefold()))
         return {"folders": out[:20], "more": max(0, len(out) - 20)}
 
+    @app.get("/api/musicbrainz/search", dependencies=ADMIN)
+    def musicbrainz_search(kind: str = Query(pattern="^(album|artist)$"), q: str = Query(min_length=1),
+                           artist: str | None = None):
+        """Fix match for music: candidate releases (albums) or artists on MusicBrainz."""
+        try:
+            with MusicBrainz() as mb:
+                if kind == "artist":
+                    return [{"mbid": a["id"], "title": a.get("name"), "sort_name": a.get("sort-name"),
                              "type": a.get("type"), "country": a.get("country"),
                              "disambiguation": a.get("disambiguation") or None,
                              "years": "–".join(filter(None, [(a.get("life-span") or {}).get("begin", "")[:4],
@@ -1793,6 +1793,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if tr["image"]:
             raise HTTPException(400, "This is a picture-based subtitle track; it's burned into a converted video "
                                      "instead.")
+        src = opensubtitles.stored(paths.root, con, tr) if tr["source"] == "download" else None
         try:
             vtt = subtitles.webvtt(p, tr, paths.cache / "subtitles", row["mtime_ns"], src)
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
@@ -1801,15 +1802,6 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         return Response(subtitles.shift(vtt, shift), media_type="text/vtt; charset=utf-8",
                         headers={"cache-control": "private, max-age=300"})
 
-        src = opensubtitles.stored(paths.root, con, tr) if tr["source"] == "download" else None
-    def _probe_of(file_id: int) -> tuple[Path, dict]:
-        con = connect(paths.db)
-        try:
-            p, _ = _file_path(con, file_id)
-            row = con.execute("SELECT probe, parse FROM files WHERE id=?", (file_id,)).fetchone()
-        finally:
-            con.close()
-        return p, {"probe": jload(row["probe"]) or {}, "parse": jload(row["parse"])}
     @app.get("/api/files/{file_id}/opensubtitles")
     def opensubtitles_search(file_id: int, languages: str = Query("", max_length=100), con=Depends(db)):
         """Subtitles OpenSubtitles has for this file (its title's TMDB/IMDb id, season/episode and the file's
@@ -1849,6 +1841,14 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             raise HTTPException(403, "Only an admin or whoever downloaded it can remove it.")
         opensubtitles.remove(con, paths.root, t["index"])
 
+    def _probe_of(file_id: int) -> tuple[Path, dict]:
+        con = connect(paths.db)
+        try:
+            p, _ = _file_path(con, file_id)
+            row = con.execute("SELECT probe, parse FROM files WHERE id=?", (file_id,)).fetchone()
+        finally:
+            con.close()
+        return p, {"probe": jload(row["probe"]) or {}, "parse": jload(row["parse"])}
 
     def _channels(pr: dict, audio: int, want: int) -> int:
         tracks = pr.get("audio") or []
