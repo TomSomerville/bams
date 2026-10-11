@@ -156,6 +156,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **Hyphenated words in names are read whole** (`parse._read`): when guessit's title cuts through one, it's read again with the hyphen protected. In file names "Show-01" stays episode 1 and an all-lowercase "grp-title.2010" keeps its group; a movie folder's name wins when the file's lost its front | Tester: "Catch-22" was "Catch" (guessit read "-22" as the episode; "Ant-" in "Ant-Man.2015" as a release group). Dry run over the owner's 4,391 real paths: nothing else changed |
 | 10-11 | **Another server's library order is kept per browser** (dragged in the sidebar, `bams.servers` → `order`), by anyone; this server's own order stays the admin's, shared by everyone. This server's libraries sit under its **name** in the sidebar, like other servers' | Owner: "allow me to drag and re-arrange the library order on other servers" and "This should say your server name, not Libraries". Kept where that browser's names and hidden flags for the server already are: no admin rights needed there, nothing changes for its other users |
 | 10-11 | **Fix match lists the title's folders** (shows: the folder above the season folders, as the parser picks it, with file counts; movies: their files), admins only | Tester request: check the right folder is being fixed. Server paths are admin information (`/api/status` hides them from viewers too) |
+| 10-11 | **The Fire TV app is the Samsung TV app** (`tv/`, built page bundled as APK assets) in a full-screen WebView, with **ExoPlayer** drawing under the see-through page and the device's decoders read from Android (`Caps.kt`), not a table. Fire OS 6+ only (not Vega OS) | One app to keep in step with the web/TV look (owner wants web and TV to show the same). ExoPlayer seeks inside a streamed file (AVPlay can't), so files the device decodes play from `/stream`; Fire TV models differ too much for a codec table |
+| 10-11 | **Fire TV releases are signed with a release key** made for BAMS (`C:\Users\owner\bams-firetv.jks`, passwords in git-ignored `firetv/keystore.properties`); debug builds use this PC's debug key | Owner's choice at release 0.12.0. Android installs an update only over an app signed with the same key: losing it means every Fire TV uninstalls, reinstalls and signs in again |
+| 10-11 | **Quality menu: sizes up to the file's own** (the 16:9 box it fills: 1920×800 counts as 1080p), 4K/1440p only on a GPU encoder (`/api/status.video_encoder.hardware`); a size picked in this player applies even at the file's own size (converted), one **remembered** from another video only shrinks bigger files | Owner: "add a 1080P and 4k option". The CPU encoder stops at 1080p (`stream._box`), so 4K there was a 1080p picture. Remembering "1080p" from one workaround must not convert every 1080p file afterwards |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
 
 ## 4. Built so far
@@ -269,7 +272,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   long press or right-click offers "Remove from Continue Watching". Player:
   resume, progress reports, up-next countdown (at the end and 30 s before it), next-episode button, skip +30 / −10 s, sound menu
   (tracks, Surround, Dolby pass-through on/off), subtitles menu (text via `<track>`, picture incl. VobSub = burned in),
-  quality Original / Auto / sizes, remux over HLS with fallback to the live remux. Sleep mode (bed button: this
+  quality Original / Auto / sizes up to the file's own (4K on a GPU server, 0.12.0), remux over HLS with fallback to
+  the live remux. Sleep mode (bed button: this
   episode + 2 more, a movie to its end), "Check OpenSubtitles…" in the subtitles menu (`FindSubtitles.tsx`).
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
@@ -290,6 +294,17 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - More servers (0.7.0): Settings → Other BAMS servers (add with the find/link screens, link again, remove, show/hide
   each library); their libraries in the menu under the server's name; Home and Search combined with the web's rows
   (`web/src/everywhere.ts`). Music (0.7.0): music libraries, artist/album/playlist pages, a music bar, media keys.
+
+### Fire TV app (`firetv/`, 0.12.0, Android shell around `tv/`)
+- Fire OS 6+ (Fire TV Stick 4K / 4K Max / Lite / 3rd gen, Cube, Fire TV TVs). The `tv/` page in a full-screen WebView
+  (`MainActivity.kt`), ExoPlayer under it (`Video.kt`, page side `ExoEngine` in `tv/src/engine.ts`), the device's
+  decoders and audio output (`Caps.kt` → `plan.ts`: sizes too, a 1080p stick converts 4K; conversions no taller than
+  its H.264 decoder), device name/IP and exit (`Bridge.kt` ↔ `tv/src/firetv.ts`). Remote: Back/OK/media keys passed
+  on with the Samsung key codes; OK on a text box simulates a tap so the Fire TV keyboard opens. Files it decodes
+  play from `/stream` (ExoPlayer seeks in them), others through copy-HLS in fMP4 or a conversion.
+- Build: `cd tv && npm run build && npm run firetv` (Gradle 8.11.1, JDK 17, Android SDK 35); `--install --device <ip>`
+  over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
+  `tv/test/firetv.test.ts` (fake bridge).
 
 ### More servers (0.7.0, web + TV)
 - Clients keep their own server lists: web `servers.tsx` (`bams.servers` in localStorage; `/r/<rid>/…` pages are the
@@ -319,6 +334,8 @@ Roughly in priority order:
    libraries is web-only (the TV only hides them); Samsung TVs other than the owner's 2022 Frame untested (codec table in
    `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
    README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
+   Fire TV: video playback not yet tried on a real device (sign-in, Home, navigation, search and the keyboard were,
+   on a Fire TV in the owner's home); no Amazon Appstore build; Vega OS sticks (2025+) would need a separate app.
 7. **UI redesign** from the owner's mockups.
 
 ## 6. Dev environment (owner's machine)
@@ -356,6 +373,51 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-11: Fire TV app (release 0.12.0)
+- **What / why:** owner asked for a FireTV/Firestick app (a separate session built it; released by the session that
+  cut 0.12.0, at the owner's request "include the firetv work"). An Android app for Fire OS 6+ that **is** the TV app:
+  `tv/dist` bundled as APK assets in a full-screen WebView, ExoPlayer under the see-through page, the device's
+  decoders from Android. See "Fire TV app" in §4 and `firetv/README.md` (build, install over adb, release key).
+- **Files:** `firetv/` (Gradle project: `MainActivity.kt`, `Bridge.kt`, `Video.kt`, `Caps.kt`, `build.mjs`, `art.py`,
+  icons/banner), `tv/src/firetv.ts`, `ExoEngine` in `tv/src/engine.ts`, Fire TV branches in `tv/src/plan.ts`
+  (device caps + `convertHeight`), `tizen.ts`, `screens/Player.tsx` (fMP4 copy-HLS, pass-through, conversion height),
+  `screens/Settings.tsx` (no DTS toggle, "player: ExoPlayer"), `tv/test/firetv.test.ts`, `tv/package.json`
+  (`npm run firetv`); web `TvSettings.tsx` wording; README. Release signing key made at release time (decisions log).
+- **Verified:** the building session installed debug builds on a Fire TV in the owner's home ("Haley's 2nd TV") and
+  drove it with adb key presses: server found, linked, Home with Continue Watching and artwork, rail/rows navigation,
+  Search with the Fire TV keyboard (typed "bob" → Bob's Burgers), Back closing only the keyboard. TV tests (37, incl.
+  7 Fire TV ones with a fake bridge) pass. Release: signed `BAMS-FireTV-0.12.0.apk` built from the release worktree.
+- **Left open:** video playback not tried on the Fire TV yet (ExoPlayer direct play, fMP4 copy-HLS, conversions,
+  Dolby/DTS pass-through); the release APK doesn't install over the debug build on that Fire TV (uninstall first:
+  it forgets its servers and sign-in); no Appstore build; Vega OS sticks unsupported.
+
+### 2026-10-11: 1080p and 4K in the web player's Quality menu (release 0.12.0)
+- **What / why:** owner: "For quality options, please add a 1080P and 4k option… H.264 1080p video files dont play and
+  just sit there at a black screen at 00 seconds". The menu offered only sizes *below* the source (`h < height`), so
+  a 1080p file had no 1080p and a 4K file no 4K. Now: sizes up to the file's own (16:9 box it fills, 5 % leeway:
+  1920×800 and 1912×1072 are 1080p), 2160 shown as "4K", 4K/1440p only when `/api/status.video_encoder.hardware`
+  (the CPU stops at 1080p, `stream._box`); "Full size" only when no listed size is the whole picture. A size picked in
+  this player applies even at the file's own size (converted); one remembered from another video (`bams.quality`)
+  only shrinks bigger files. Web only, no server change (the server already took heights up to 4320).
+- **Black screen:** not a BAMS fault as far as could be found. Server log + traffic log (`/var/lib/bams/netflow`):
+  the owner's Chrome 155 on the PC made one `/stream` request per MP4 and never a second (on 10-10, with 0.9.2, the
+  same Chrome made three and played); nothing in how files are sent changed 0.9.2 → 0.11. The same file played
+  through the owner's server (0.11.1 code run on a DB copy in `/tmp`, SSH tunnel) in the app's Chromium 152, direct
+  and HEVC copy-HLS. The PC's GPU had 14.3 of 16 GB in use. Owner asked to restart Chrome / try Edge and, if it
+  persists, send `chrome://media-internals`. Found on the way (spun off as a task): an abandoned `/stream` request
+  still reads the whole file off the NAS (uvicorn's `send` ignores writes after a disconnect; `FileResponse` doesn't
+  watch for it).
+- **Files:** `web/src/pages/Player.tsx` (`qualityName`, `srcSize`/`maxSize`/`fullSize`, `picked`, `bigOk` from
+  `/api/status`); CHANGELOG, VERSION 0.12.0.
+- **Verified:** web `tsc` + build. Scratch server (:8502, own data dir, NVENC) in the app's browser: The Throne
+  (1920×800) listed Original/Auto/1080p/720p/480p/360p, 1080p converted over HLS and played at 1920×800 from where it
+  was; reload with "1080" remembered → Original. A generated 3840×2160 clip listed 4K/1440p/1080p…, 4K converted and
+  played at 3840×2160; with the encoder set to x264 (CPU) 4K/1440p were gone and the remembered 2160 fell back to
+  Original. Release worktree: 321 server tests, web + TV `tsc`, TV tests 37/37; the `.deb` installed in Docker
+  `ubuntu:24.04` and served 0.12.0 with the new menu in its UI bundle; APK signed with the release key (`CN=BAMS`,
+  versionCode 1200), `.wgt` signed with the Samsung profile. The Windows `.exe` was built, not installed.
+- **Left open:** the owner's Chrome stall (waiting on them); the NAS read-after-disconnect fix (separate task).
 
 ### 2026-10-11: Server name over its own libraries, other servers' libraries in any order (release 0.11.1)
 - **What / why:** owner: "Your server's Libraries are categorized under the word 'Libraries' instead of the server

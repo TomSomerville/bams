@@ -1,13 +1,20 @@
 // What the TV plays as-is and what the server has to help with. Samsung's 2022 TVs (Tizen 6.5) decode far more
 // than a browser: MKV/AVI/TS, HEVC (incl. 10-bit HDR), VP9, AV1, MPEG-2/4, VC-1, and AC3/EAC3 sound. Not DTS or
 // TrueHD (Samsung dropped DTS in 2018), not 10-bit H.264, not Dolby Vision without an HDR10 base layer.
+// A Fire TV says itself what it decodes (Android's codec list, firetv.ts `FireCaps`): sticks differ a lot (HEVC,
+// AV1, 4K, Dolby sound only through an AV receiver...).
 // The server's own rules for browsers are in server/bams/stream.py `plan`; these replace them for the TV.
 
 import type { FileInfo } from "./api";
-import { hasAvplay } from "./engine";
+import { hasAvplay, hasExo } from "./engine";
+import { fireInfo } from "./firetv";
 import { prefs } from "./prefs";
 
-type Caps = { containers: Set<string>; video: Set<string>; audio: Set<string>; h264HighBit: boolean; dvProfile5: boolean };
+type Caps = {
+  containers: Set<string>; video: Set<string>; audio: Set<string>; h264HighBit: boolean; dvProfile5: boolean;
+  /** the largest picture each video codec decodes (Fire TV: a 1080p stick takes no 4K), when known */
+  size?: Record<string, { w: number; h: number }>;
+};
 
 const TV: Caps = {
   containers: new Set(["MKV", "MP4", "AVI", "TS", "WebM", "WMV", "MPEG", "FLV"]),
@@ -26,7 +33,18 @@ const BROWSER: Caps = {
   dvProfile5: false,
 };
 
+// ExoPlayer's file readers (no ASF/WMV); codecs come from the device
+const FIRE_CONTAINERS = new Set(["MKV", "MP4", "WebM", "TS", "AVI", "MPEG", "FLV", "OGG"]);
+
+function fireCaps(): Caps | null {
+  const f = fireInfo()?.caps;
+  if (!f) return null;
+  return { containers: FIRE_CONTAINERS, video: new Set(Object.keys(f.video)), audio: new Set(f.audio),
+    h264HighBit: f.h264HighBit, dvProfile5: f.dvProfile5, size: f.video };
+}
+
 export function caps(): Caps {
+  if (hasExo()) return fireCaps() ?? BROWSER;
   const c = hasAvplay() ? TV : BROWSER;
   if (prefs.dts && hasAvplay()) return { ...c, audio: new Set([...c.audio, "DTS"]) };
   return c;
@@ -50,6 +68,10 @@ export function plan(file: FileInfo, audio: number, burn: string | null): Plan {
       return { mode: "convert", why: "10-bit H.264" };
     }
     if (v.dv_profile === 5 && !c.dvProfile5) return { mode: "convert", why: "Dolby Vision without HDR10" };
+    const max = c.size?.[v.codec];
+    if (max && v.width && v.height && (Math.min(v.width, v.height) > Math.min(max.w, max.h) || Math.max(v.width, v.height) > Math.max(max.w, max.h))) {
+      return { mode: "convert", why: `${v.height}p ${v.codec}: bigger than this device decodes` };
+    }
   }
   const container = p.container ?? "";
   const track = p.audio[audio];
@@ -57,6 +79,14 @@ export function plan(file: FileInfo, audio: number, burn: string | null): Plan {
   if (container && !c.containers.has(container)) return { mode: "remux", why: `${container} file` };
   if (!audioOk) return { mode: "remux", why: `${track.codec} sound` };
   return { mode: "direct", why: "plays as-is" };
+}
+
+/** The tallest picture a conversion may have (the server converts to H.264): what this device decodes, on a Fire
+ *  TV; elsewhere as large as the server makes it. */
+export function convertHeight(): number | undefined {
+  const h264 = caps().size?.["H.264"];
+  if (!h264) return undefined;
+  return Math.max(480, Math.min(h264.w, h264.h));
 }
 
 /** Of a title's files (versions), the one to play: available, plays as-is if any does, then the biggest. */

@@ -132,24 +132,34 @@ bams/
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
 │           └── Settings.tsx   Admins: libraries, unrecognized files, TMDB, music, playback, accounts. Viewers: their account only
 │
-├── tv/                       ── Samsung TV app (Tizen web app, React + Vite + TS; tv/README.md) ─────────
+├── tv/                       ── Samsung TV app (Tizen web app, React + Vite + TS; tv/README.md; also the Fire TV app's page) ──
 │   ├── tizen/config.xml       Manifest (app id BAMSmedia1.BAMS, privileges, pointing-device-support off) + icon.png
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
 │   ├── scripts/test.mjs       `npm test`: builds tv/test into one page, runs it in headless Chrome/Edge (CHROME_PATH) at 1920×1080, prints results
-│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), harness.ts (test/eq/mount), run.ts, index.html
+│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
 │       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
 │       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback); MusicProvider in main.tsx
 │       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting; other servers of this TV (extras: apiFor/mediaFor(rid), checkExtras, sources() for everywhere.ts)
 │       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
 │       ├── hold.ts            Holding OK: on a [data-hold] element a long press sends "contextmenu" instead of a click (key-up before HOLD_MS = press; repeats = hold, for remotes without key-ups); App.tsx calls okDown/okUp
-│       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo)
-│       ├── engine.ts          AvplayEngine (webapis.avplay) / VideoEngine (<video> + hls.js) behind one interface
-│       ├── plan.ts            What the TV decodes (TV caps vs BROWSER caps) → direct / remux / convert; pickFile, pickAudio
+│       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo; on a Fire TV the bridge's)
+│       ├── firetv.ts          Fire TV bridge: window.BamsAndroid (device info + FireCaps, exit, player calls) and window.bamsHost (keys, player events); no-op elsewhere
+│       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface
+│       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, BROWSER caps) → direct / remux / convert; convertHeight, pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── Rail.tsx · Cards.tsx · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
 │       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Library, Detail, Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
+├── firetv/                   ── Fire TV app (Fire OS 6+): Android shell around the tv/ page (firetv/README.md) ──
+│   ├── build.mjs              `cd tv && npm run firetv [-- --install --device <ip> --run --release]`: Gradle build, adb install, release APK → dist/BAMS-FireTV-<v>.apk
+│   ├── app/build.gradle.kts   copies tv/dist into assets/www each build; version from tv/package.json; release signing from keystore.properties (git-ignored)
+│   ├── app/src/main/java/media/bams/firetv/
+│   │   ├── MainActivity.kt    full-screen WebView over ExoPlayer's view; see-through page while playing; Back/OK/media keys → page (Samsung key codes); OK on a text box = simulated tap (keyboard)
+│   │   ├── Bridge.kt          window.BamsAndroid: device name/model/IP/version + caps, exit, player load/play/pause/seek/stop
+│   │   ├── Video.kt           ExoPlayer (one per load) under the page; events back to the page (firetv.ts FirePlayerEvent)
+│   │   └── Caps.kt            what this device decodes (Android codec list + audio output) in BAMS probe names, with sizes
+│   └── art.py                 launcher icons + TV banner from the logo (Pillow)
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
 │   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
@@ -311,7 +321,9 @@ runs on the file-name guess with no duration (no HLS, no timeline, no saved posi
 - HEVC/AV1/VP9 are pass-through on the server (only the browser knows if it decodes them). `Player.tsx`
   `canDecode()` asks `MediaSource.isTypeSupported` (and `dvh1` for Dolby Vision profile 5); if no, or the video
   errors / has no picture, it switches to the conversion from the current position. Picking a size in the quality
-  menu converts any video (choice kept in `localStorage` `bams.quality`).
+  menu converts any video: sizes up to the file's own (the 16:9 box it fills), 4K/1440p only when
+  `/api/status.video_encoder.hardware`; the choice is kept in `localStorage` `bams.quality` and, from another video,
+  only shrinks bigger files.
 - No FFmpeg → every mode falls back to `"file"` (best effort). FFmpeg's stderr (`-loglevel error`) is logged.
 - Audio: `file_info.audio_tracks` (labels via `subtitles.language`); every converting endpoint takes the track
   (`audio`) and a channel wish (`ch`/`channels` 6 → `stream.audio_channels`: 5.1 AAC 384k if the track has ≥ 6
@@ -650,6 +662,9 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | What the TV plays as-is / how | `tv/src/plan.ts` (`TV` caps), `tv/src/screens/Player.tsx` `begin` (copy-HLS in TS on the TV) |
 | TV remote navigation | `tv/src/nav.ts` (`move`, `reveal`, `settleFocus`), key handling in `tv/src/App.tsx`, player keys + controls fade (`wake`, `OSD_HIDE`) in `Player.tsx`; tests `tv/test/nav.test.ts` (`cd tv && npm test`) |
 | Build / sign / install the TV app | `tv/README.md`, `tv/scripts/wgt.mjs`, `tv/tizen/config.xml` |
+| Build / sign / install the Fire TV app | `firetv/README.md`, `firetv/build.mjs`, `firetv/app/build.gradle.kts` (release key: `firetv/keystore.properties`, git-ignored) |
+| What a Fire TV plays as-is / how | `firetv/.../Caps.kt` (device caps) → `tv/src/plan.ts` `fireCaps`/`convertHeight`; player `Video.kt` ↔ `ExoEngine` (`tv/src/engine.ts`); keys `MainActivity.kt` |
+| Web player quality menu sizes | `QUALITIES`, `qualityName`, `srcSize`/`maxSize`/`fullSize` in `web/src/pages/Player.tsx` (server side `stream._box`, `QUALITIES`) |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |
 | Password / session rules | `auth.py` (`MIN_PASSWORD`, `SESSION_DAYS`, `_SCRYPT`, `Throttle`) |
 | Wrong-password waits / lockout / sign-in log | `security.py` (`wait_after`, `MAX_WAIT`, `DEFAULT_THRESHOLD`, `AUTH_LOG_KEEP`), login flow `app.auth_login` |

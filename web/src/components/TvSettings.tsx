@@ -42,7 +42,7 @@ export function TvSettings({ code: initial = "" }: { code?: string }) {
   return (
     <section className="lib-card settings-card" id="tv">
       <div className="lib-head"><h3>Your TVs</h3></div>
-      <p className="muted">To sign in the BAMS app on a Samsung TV, enter the code it shows. The TV then uses your
+      <p className="muted">To sign in the BAMS app on a Samsung TV or a Fire TV, enter the code it shows. The TV then uses your
         account (its own watch history is yours).</p>
       <form className="key-row" onSubmit={link}>
         <input className="text-input" placeholder="Code from the TV, e.g. K7P 2QX" value={code} maxLength={12}

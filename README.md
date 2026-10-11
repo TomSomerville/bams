@@ -65,6 +65,7 @@ Building the installers: [deploy/README.md](deploy/README.md).
 | `web/public/help/tmdb.html` | Step-by-step TMDB key guide with screenshots, served by BAMS at `/help/tmdb.html` |
 | `web/` | React + Vite + TypeScript UI, served by the server from `web/dist` |
 | `tv/` | Samsung TV app (Tizen web app): build, sign and install notes in `tv/README.md` |
+| `firetv/` | Fire TV app (Fire OS): an Android shell around the `tv/` app with ExoPlayer; notes in `firetv/README.md` |
 | `branding/logo/` | Logo files. `*-transparent.png` are cut-outs for dark backgrounds |
 | `tools/brand_art/rework.py` | Redraws the logo set through local ComfyUI (Qwen Image 2.1 edit) and rebuilds the cut-outs |
 

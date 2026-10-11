@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFor, mediaFor, refreshTicket, type FileInfo, type ItemDetail, type SubtitleSearch, type SubtitleTrack } from "../api";
 import { useNav } from "../App";
-import { AvplayEngine, hasAvplay, VideoEngine, type Engine } from "../engine";
+import { AvplayEngine, ExoEngine, hasAvplay, hasExo, VideoEngine, type Engine } from "../engine";
 import { clock, sxe } from "../format";
 import Icon from "../Icon";
 import { setKeyHandler } from "../keys";
 import { focus, focusFirst } from "../nav";
-import { pickAudio, pickFile, plan, type Mode } from "../plan";
+import { caps, convertHeight, pickAudio, pickFile, plan, type Mode } from "../plan";
 import { prefs, setPref } from "../prefs";
 import { isBack, KEY } from "../tizen";
 import { defaultLanguage, languageName, OS_LANGUAGES } from "../../../web/src/subtitleLangs";
@@ -18,8 +18,8 @@ const SEEK_SETTLE = 700; // ms after the last left/right press before the seek i
 const UP_NEXT = 10;      // seconds before the next episode starts by itself
 const SLEEP_MORE = 2;    // sleep mode on an episode: this one, then this many more, then playback stops (as on the web)
 
-/** The player: the file as-is when the TV can (AVPlay decodes MKV/HEVC/AC3...), else an HLS session from the
- *  server (sound converted, or everything converted). Saves the position like the web player does.
+/** The player: the file as-is when the TV can (AVPlay decodes MKV/HEVC/AC3..., a Fire TV what its decoders take),
+ *  else an HLS session from the server (sound converted, or everything converted). Saves the position like the web player does.
  *  `rid`: the item is on another of this TV's servers (api.ts); everything then goes to that one. */
 export default function Player({ id, resume, rid, sleep: sleeping }: { id: number; resume: boolean; rid?: number;
   /** sleep mode: episodes still to play after this one (0 = stop after it), carried over from the last episode */
@@ -96,9 +96,12 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         url = media(f.stream_url);
       } else {
         if (!f.playback.hls_url) throw new Error("The server can't convert video (FFmpeg wasn't found there).");
+        // a Fire TV takes fMP4 (which keeps Dolby Vision); Dolby sound is copied when the device plays it
+        const track = f.probe?.audio[s.audio];
         const r = await api.post<{ id: string; playlist: string }>(f.playback.hls_url, {
-          remux: how.mode !== "convert", ts: true, passthrough: hasAvplay(), audio: s.audio, channels: 6, start: at,
-          burn: burn ?? undefined,
+          remux: how.mode !== "convert", ts: !hasExo(), audio: s.audio, channels: 6, start: at,
+          passthrough: hasAvplay() || (hasExo() && !!track && caps().audio.has(track.codec)),
+          height: how.mode === "convert" ? convertHeight() : undefined, burn: burn ?? undefined,
         });
         s.session = r.id;
         url = media(r.playlist);
@@ -148,7 +151,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
       onError: (m: string) => fail(m),
       onBuffering: (b: boolean) => setBuffering(b),
     };
-    engine.current = hasAvplay() ? new AvplayEngine(ev) : new VideoEngine(videoRef.current!, ev);
+    engine.current = hasAvplay() ? new AvplayEngine(ev) : hasExo() ? new ExoEngine(ev) : new VideoEngine(videoRef.current!, ev);
     api.get<ItemDetail>(`/api/items/${id}`).then((d) => {
       const f = pickFile(d.files);
       if (!f) throw new Error("No file of this is available right now (drive offline or moved).");
@@ -359,7 +362,8 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
 
   return (
     <div className={`player ${osd ? "" : "hide-cursor"}`}>
-      {hasAvplay() ? <object className="avplayer" type="application/avplayer" /> : <video ref={videoRef} className="video" />}
+      {/* Fire TV: ExoPlayer draws under the WebView, nothing to put here */}
+      {hasAvplay() ? <object className="avplayer" type="application/avplayer" /> : hasExo() ? null : <video ref={videoRef} className="video" />}
 
       {cue && <div className={`subtitle ${osd ? "raised" : ""}`} dangerouslySetInnerHTML={{ __html: cue.text }} />}
       {buffering && !error && <div className="player-center"><div className="spinner" /></div>}

@@ -3,6 +3,24 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.12.0 (2026-10-11)
+
+### New
+- **BAMS on Fire TV.** An app for Fire TV devices on Fire OS 6 or later (Fire TV Stick 4K / 4K Max / Lite / 3rd
+  gen, the Cube, TVs with Fire TV built in): `BAMS-FireTV-0.12.0.apk`. It's the Samsung TV app with Android's
+  video player underneath: it finds your server, signs in with a code (Settings → Your TVs on the web) and plays
+  what the Fire TV decodes straight from the file, the rest through the server. To install it, turn on **ADB
+  debugging** on the Fire TV and install the APK from a computer ([firetv/README.md](firetv/README.md)). The Fire
+  TV Stick 4K Select (2025) and Fire TV Stick HD (2026) run Vega OS, which can't install it.
+- **1080p and 4K in the web player's Quality menu.** The menu now lists sizes up to the video's own size, so a
+  1080p video offers 1080p and a 4K video offers 4K (converted by the server). Picking the video's own size is a way
+  to play it when the original won't play in your browser. 4K and 1440p are only offered when the server converts
+  on a graphics card (it stops at 1080p on the CPU). A size you picked on another video only makes bigger videos
+  smaller, so picking 1080p once doesn't convert every 1080p video after it.
+
+Update the server with the new installer. The Samsung TV app (`BAMS-SamsungTV-0.12.0.wgt`) has no changes you'd
+notice; installing it keeps the TV's version in step.
+
 ## 0.11.1 (2026-10-11)
 
 ### Changed

@@ -1,7 +1,7 @@
 import type Hls from "hls.js"; // loaded on demand (it's most of the bundle), only when a video goes over HLS
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ApiError, type ItemDetail, type Probe, type SubtitleTrack } from "../api";
+import { ApiError, type ItemDetail, type Probe, type ServerStatus, type SubtitleTrack } from "../api";
 import FindSubtitles from "../components/FindSubtitles";
 import Icon from "../components/Icon";
 import { fmtClock, PLAY_LABEL, sxe } from "../format";
@@ -14,9 +14,9 @@ import { useApi } from "../useApi";
 //                than the first (a browser plays only the first). Over HLS (POST hls_url {remux}: segments cut
 //                at the file's keyframes), so the browser seeks by itself; if that isn't possible, the live
 //                stream /remux?t=, which restarts to seek (`offset` = where it really starts, from /seek).
-//  "transcode" - FFmpeg converts the video to H.264 too: video no browser decodes, a smaller quality, "Auto"
-//                quality (several sizes, hls.js picks), or picture subtitles burned in. Over HLS, else the
-//                live fMP4 stream /transcode?t= (starts exactly at t).
+//  "transcode" - FFmpeg converts the video to H.264 too: video no browser decodes, a picked quality (smaller, or
+//                the file's own size), "Auto" quality (several sizes, hls.js picks), or picture subtitles burned
+//                in. Over HLS, else the live fMP4 stream /transcode?t= (starts exactly at t).
 // The server can't know what this browser decodes, so HEVC/AV1/VP9 arrive as "file"/"remux". The player
 // converts when the browser says it can't decode them, or when it fails to. Likewise Dolby audio: on a device
 // that decodes AC3/EAC3 itself (TV browsers, Safari, Edge, Chromecast...) the remux copies it as it is
@@ -26,6 +26,7 @@ type Mode = "file" | "remux" | "transcode";
 type Quality = "auto" | number | null;
 
 const QUALITIES = [2160, 1440, 1080, 720, 480, 360];
+const qualityName = (h: number) => h === 2160 ? "4K" : `${h}p`;
 const FULL = 99999;  // "Full size": converted (the browser can't play the original) at the largest size
 const SPEED_MIN = 0.1, SPEED_MAX = 3;
 const SKIP_FORWARD = 30, SKIP_BACK = 10;  // seconds (buttons and arrow keys)
@@ -139,6 +140,8 @@ function Player({ id }: { id: string }) {
   const [fallback, setFallback] = useState(false); // switched to the transcode after the browser failed to decode
   const [copyFailed, setCopyFailed] = useState(false); // remux over HLS didn't work: use the live remux
   const [quality, setQuality] = useState<Quality>(storedQuality);
+  const [picked, setPicked] = useState(false); // the quality was chosen in this player, not remembered from another
+  const [bigOk, setBigOk] = useState(true);    // the server converts above 1080p (a GPU encoder; the CPU stops there)
   const [audio, setAudio] = useState(0);
   const [sub, setSub] = useState<string | null>(null);
   const [surround, setSurround] = useState(() => pref(KEYS.surround) === "1");
@@ -187,10 +190,17 @@ function Player({ id }: { id: string }) {
   const subTrack = subTracks.find((s) => s.id === sub) ?? null;
   const burn = subTrack?.image ? subTrack.id : null;  // painted on by the server: embedded or a VobSub sidecar
   const decodable = useMemo(() => canDecode(file?.probe?.video), [file]);
-  const srcHeight = file?.probe?.video?.height ?? 0;
+  // the 16:9 frame the picture fills, as the server sizes conversions (stream._box): 1920x800 scope films are 1080p
+  const srcSize = Math.max(file?.probe?.video?.height ?? 0, (file?.probe?.video?.width ?? 0) * 9 / 16);
   const canConvert = !!(pb?.hls_url || pb?.transcode_url);  // only with FFmpeg on the server
-  const qualities = canConvert ? QUALITIES.filter((h) => h < srcHeight) : [];
-  const height = typeof quality === "number" && qualities.includes(quality) ? quality : null; // a remembered 720p means nothing for a 480p file
+  const maxSize = bigOk ? 2160 : 1080;  // the largest frame the server's encoder makes
+  // up to the file's own size (with some leeway: 1912x1072 is 1080p), never more than the server makes
+  const qualities = canConvert ? QUALITIES.filter((h) => h <= maxSize && h <= srcSize * 1.05) : [];
+  const fullSize = qualities.find((h) => h >= Math.min(srcSize, maxSize) * 0.95) ?? null;  // the one that is the whole picture
+  // picked here, a size applies even at the file's own size (converted, e.g. when the original won't play here);
+  // remembered from another video it's a cap: a file that isn't bigger plays as it is
+  const height = typeof quality === "number" && qualities.includes(quality) && (picked || quality < srcSize * 0.95)
+    ? quality : null;
   const mustConvert = !!pb && (pb.mode === "transcode" || fallback || !decodable || burn !== null);
   const auto = height === null && (quality === "auto" || (quality === null && mustConvert));
   const mode: Mode = !pb ? "file"
@@ -237,6 +247,13 @@ function Player({ id }: { id: string }) {
     if (at) setResumed(at);
     setReady(true);
   }, [item?.id, file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Whether the server makes sizes above 1080p (4K needs a GPU encoder), for the quality menu.
+  useEffect(() => {
+    let gone = false;
+    call.get<ServerStatus>("/api/status").then((s) => { if (!gone) setBigOk(!!s.video_encoder?.hardware); }).catch(() => {});
+    return () => { gone = true; };
+  }, [rid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The live remux can only start on a keyframe: ask where a stream requested at reqT really starts.
   useEffect(() => {
@@ -464,9 +481,10 @@ function Player({ id }: { id: string }) {
   };
   const pickQuality = (q: Quality) => {
     setMenu(null);
-    if (q === quality) return;
+    if (q === quality && (picked || typeof q !== "number" || q === height)) return;  // already playing that way
     continueAt(pos);
     setQuality(q);
+    setPicked(true);
     setPref(KEYS.quality, q === null ? null : String(q));
   };
   const pickAudio = (i: number) => {
@@ -578,9 +596,10 @@ function Player({ id }: { id: string }) {
         why: `${acodec} audio converted to AAC by the server; the video is passed through untouched` }
     : mode !== "transcode" ? null
     : burn !== null ? { text: "Subtitles burned in", why: "Picture subtitles can only be shown by painting them into a converted video" }
-    : mustConvert ? { text: `${vcodec} → H.264${height ? ` ${height}p` : auto ? " (auto)" : ""}`, why: `This browser can't decode ${vcodec} video, so the server converts it to H.264 while streaming` }
-    : { text: auto ? "Auto (converted)" : `${height}p (converted)`, why: "Converted by the server (quality menu)" };
-  const qualityLabel = height ? `${height}p` : auto ? "Auto" : mode === "transcode" ? "Full size" : "Original";
+    : mustConvert ? { text: `${vcodec} → H.264${height ? ` ${qualityName(height)}` : auto ? " (auto)" : ""}`, why: `This browser can't decode ${vcodec} video, so the server converts it to H.264 while streaming` }
+    : { text: auto || !height ? "Auto (converted)" : `${qualityName(height)} (converted)`, why: "Converted by the server (quality menu)" };
+  const qualityLabel = height ? qualityName(height) : auto ? "Auto"
+    : mode === "transcode" ? (fullSize ? qualityName(fullSize) : "Full size") : "Original";
   const surroundSource = audioTracks.some((a) => (a.channels ?? 0) >= 6);
   const nextUp = upNext !== null && item.next_id;
 
@@ -800,10 +819,11 @@ function Player({ id }: { id: string }) {
             <Menu label={qualityLabel} title="Quality" open={menu === "quality"} setOpen={(o) => setMenu(o ? "quality" : null)}>
               {!mustConvert && <Choice on={mode !== "transcode"} onClick={() => pickQuality(null)} note="as-is">Original</Choice>}
               <Choice on={auto} onClick={() => pickQuality(mustConvert ? null : "auto")} note="adapts">Auto</Choice>
-              {mustConvert && <Choice on={mode === "transcode" && !auto && !height} onClick={() => pickQuality(FULL)}
-                note="converted">Full size</Choice>}
+              {mustConvert && fullSize === null && <Choice on={mode === "transcode" && !auto && !height}
+                onClick={() => pickQuality(FULL)} note="converted">Full size</Choice>}
               {qualities.map((h) => (
-                <Choice key={h} on={height === h} onClick={() => pickQuality(h)} note="converted">{h}p</Choice>
+                <Choice key={h} on={height === h || (h === fullSize && mode === "transcode" && !auto && !height)}
+                  onClick={() => pickQuality(h)} note="converted">{qualityName(h)}</Choice>
               ))}
             </Menu>
           )}

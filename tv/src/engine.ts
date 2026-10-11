@@ -1,10 +1,13 @@
-// Two ways to play video behind one interface:
+// Three ways to play video behind one interface:
 // - AVPlay, Samsung's native player (webapis.avplay): hardware decoding of what the TV supports (MKV, HEVC, AC3...),
 //   drawn on the video layer under the page through an <object type="application/avplayer">.
+// - ExoPlayer on a Fire TV (firetv/ Video.kt, through the bridge in firetv.ts): Android's decoders, drawn under the
+//   app's see-through WebView.
 // - <video> (+ hls.js for HLS), for developing in a browser, and on a TV without AVPlay.
 // Times are in seconds everywhere outside this file.
 
 import Hls from "hls.js";
+import { onFirePlayer, onFireTv, type FirePlayerEvent } from "./firetv";
 import { onTv } from "./tizen";
 
 export type EngineEvents = {
@@ -15,7 +18,7 @@ export type EngineEvents = {
 };
 
 export interface Engine {
-  readonly kind: "avplay" | "video";
+  readonly kind: "avplay" | "exo" | "video";
   load(url: string, start: number, hls: boolean): Promise<void>;
   play(): void;
   pause(): void;
@@ -30,6 +33,9 @@ export interface Engine {
 }
 
 export const hasAvplay = () => onTv() && !!window.webapis?.avplay;
+export const hasExo = onFireTv;
+/** Video is drawn by the device under the page (AVPlay, ExoPlayer), not by a <video> element. */
+export const nativeVideo = () => hasAvplay() || hasExo();
 
 // ---------------------------------------------------------------- AVPlay
 
@@ -152,6 +158,114 @@ export class AvplayEngine implements Engine {
   destroy() {
     this.stop();
     document.removeEventListener("visibilitychange", this.onVis);
+  }
+}
+
+// ---------------------------------------------------------------- ExoPlayer (Fire TV)
+
+export class ExoEngine implements Engine {
+  readonly kind = "exo";
+  private bridge = window.BamsAndroid!;
+  private t = 0;
+  private d: number | null = null;
+  private isPaused = true;
+  private loaded = false;
+  private loadId = 0;
+  private waiting: { resolve: () => void; reject: (e: Error) => void } | null = null;
+
+  constructor(private ev: EngineEvents) {
+    onFirePlayer((e) => this.event(e));
+  }
+
+  private event(e: FirePlayerEvent) {
+    if (e.id !== this.loadId || !this.loaded) return;  // from the stream before (a reload, a stop)
+    switch (e.type) {
+      case "ready":
+        this.waiting?.resolve();
+        this.waiting = null;
+        break;
+      case "time":
+        this.t = e.t;
+        this.d = e.d;
+        this.isPaused = e.paused;
+        this.ev.onTime(e.t);
+        break;
+      case "buffering":
+        this.ev.onBuffering(e.on);
+        break;
+      case "ended":
+        this.isPaused = true;
+        this.ev.onEnd();
+        break;
+      case "error":
+        // an error while loading fails load(); later ones go to the player screen (which falls back)
+        if (this.waiting) {
+          this.waiting.reject(new Error(e.message));
+          this.waiting = null;
+        } else {
+          this.ev.onError(e.message);
+        }
+        break;
+    }
+  }
+
+  /** Resolves once ExoPlayer has the stream ready (and its audio tracks known), at `start`. */
+  load(url: string, start: number, hls: boolean): Promise<void> {
+    this.stop();
+    this.t = start;
+    this.d = null;
+    this.ev.onBuffering(true);
+    return new Promise<void>((resolve, reject) => {
+      this.waiting = { resolve, reject };
+      this.loadId++;
+      this.loaded = true;
+      this.bridge.load(url, Math.max(0, Math.floor(start * 1000)), hls, this.loadId);
+      this.isPaused = false;
+    });
+  }
+
+  play() {
+    if (!this.loaded) return;
+    this.bridge.play();
+    this.isPaused = false;
+  }
+
+  pause() {
+    if (!this.loaded) return;
+    this.bridge.pause();
+    this.isPaused = true;
+  }
+
+  paused() { return this.isPaused; }
+
+  seek(t: number): Promise<void> {
+    this.t = Math.max(0, t);
+    this.bridge.seek(Math.floor(this.t * 1000));
+    return Promise.resolve();
+  }
+
+  time() { return this.t; }
+  duration() { return this.d && this.d > 0 ? this.d : null; }
+
+  selectAudio(n: number): boolean {
+    try {
+      return this.bridge.selectAudio(n);
+    } catch {
+      return false;
+    }
+  }
+
+  stop() {
+    this.waiting = null;
+    if (!this.loaded) return;
+    this.bridge.stop();
+    this.loaded = false;
+    this.isPaused = true;
+  }
+
+  destroy() {
+    this.stop();
+    onFirePlayer(null);
   }
 }
 

@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+# release signing (README: "Release builds"): never commit the key or its passwords
+keystore.properties
+*.jks
+*.keystore
