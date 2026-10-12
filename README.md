@@ -155,5 +155,3 @@ Or build it from source instead: `cd tv && npm install && npm run build && npm r
 
 Linked TVs are listed under **Settings → Your TVs** on the web, where you can sign one out. To update the app later,
 repeat step 4 with the new `.wgt` (same certificate, so your sign-in and settings stay).
-
-<!-- Test push from GinjaNinja88's setup, 2026-10-12. Safe to remove. -->
