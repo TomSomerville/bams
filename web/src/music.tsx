@@ -33,6 +33,8 @@ type Music = {
   jump: (index: number) => void;
   /** Move a queued track to another place (drag to reorder). The current track keeps playing. */
   move: (from: number, to: number) => void;
+  /** Take a queued track out (not the one playing). */
+  remove: (i: number) => void;
   seek: (t: number) => void;
   setVolume: (v: number) => void;
   stop: () => void;
@@ -229,6 +231,13 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     setIndex(i);
   }, []);
 
+  const remove = useCallback((i: number) => {
+    const list = q.current;
+    if (i < 0 || i >= list.length || i === idx.current) return;
+    setQueue(list.filter((_, k) => k !== i));
+    if (i < idx.current) setIndex(idx.current - 1);
+  }, []);
+
   const next = useCallback(() => {
     if (idx.current + 1 < q.current.length) startAt(idx.current + 1);
     else {
@@ -328,9 +337,9 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const duration = current?.duration ?? 0;
   const value = useMemo<Music>(() => ({
     queue, index, current, playing, time, duration, volume, error,
-    playTracks, playItem, toggle, pause, next, prev, jump, move, seek, setVolume, stop,
+    playTracks, playItem, toggle, pause, next, prev, jump, move, remove, seek, setVolume, stop,
   }), [queue, index, current, playing, time, duration, volume, error,
-      playTracks, playItem, toggle, pause, next, prev, jump, move, seek, setVolume, stop]);
+      playTracks, playItem, toggle, pause, next, prev, jump, move, remove, seek, setVolume, stop]);
 
   // Only the active element's events count; the other one is just loading the next track.
   const mine = (n: number) => n === active.current;

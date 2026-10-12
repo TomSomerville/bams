@@ -3,6 +3,19 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.16.0 (2026-10-12)
+
+### Added
+- **Play Random.** A *Play Random* button on every library page (next to the count), on each show (next to Fix
+  match) and on each artist. It plays up to 100 random episodes, movies or tracks from there (Specials left out).
+- **Up next for videos.** While a random selection plays, the list button in the player's controls opens *Up next*:
+  drag a row by its grip (or use the arrow keys) to reorder, click one to jump to it, **×** to take it out. The player
+  goes on to the next video in that list instead of the next episode.
+- **Remove from the music queue.** The music queue's rows have a **×** too (not the track that's playing).
+
+Update the server with the new installer. The TV apps are unchanged: `BAMS-SamsungTV-0.13.0.wgt` and
+`BAMS-FireTV-0.13.0.apk` from the 0.13.0 release are still current.
+
 ## 0.15.0 (2026-10-12)
 
 ### Changed

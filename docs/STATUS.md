@@ -391,6 +391,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-12: Play Random, video Up next, remove from queues (release 0.16.0)
+- **What / why:** owner: a "Play Random" button on each library, show and artist that plays a random selection, "with
+  the same playlist edit functionality as music has", then "add a delete option to the playlist".
+  `GET /api/libraries/{id}/random` and `GET /api/items/{id}/random` (show/season → episodes, artist/album → tracks;
+  `limit` default 100; only items with an available file; season 0 left out). Music goes to the music queue; videos to
+  the new video queue (`web/src/random.tsx`, sessionStorage, per tab), which the player follows (`nextId` in
+  `Player.tsx` replaces `item.next_id` while the item is in the queue) and shows as a reorderable *Up next* panel.
+  Both queues got a remove (×) button; the playing entry can't be removed.
+- **Files:** `server/bams/app.py` (`_random_videos`, `_random_tracks`, two routes), `web/src/random.tsx` (new),
+  `web/src/pages/{Player,Library,Detail,Music}.tsx`, `web/src/music.tsx` (`remove`), `components/NowPlaying.tsx`,
+  `main.tsx`, `styles.css`; `tests/test_watch.py::test_play_random`.
+- **Verified:** 335 server tests; `tsc` + build; in a sandbox (:8485, generated clips) Play Random on the TV and Music
+  libraries, Up next panel, removing rows (music 8→7, video 20→19). Owner tried it and approved.
+- **Left open:** not on the Samsung/Fire TV apps yet. The credits countdown applies to episodes only (movies go on at
+  the end).
+
 ### 2026-10-12: "Download locally" instead of automatic copies, downloads in cache/subtitles (release 0.15.0)
 - **What / why:** owner: "By default subtitles should go to cache/subtitles. … Next to each subtitle under 'Already on
   this video' should be a 'Download locally' button. Clicking this button will download the subtitle file, move it to

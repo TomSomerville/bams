@@ -28,6 +28,10 @@ function QueueList() {
             <span className="muted">{q.artist}</span>
             <span className="muted np-q-time">{fmtClock(q.duration)}</span>
           </button>
+          {i !== m.index && (
+            <button type="button" className="icon-btn subtle np-q-remove" onClick={() => m.remove(i)}
+              aria-label={`Remove ${q.title}`} title="Remove from the queue"><Icon name="close" size={14} /></button>
+          )}
         </li>
       ))}
     </ol>

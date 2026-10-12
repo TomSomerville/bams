@@ -1547,6 +1547,51 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             })
         return out
 
+    # -- Play Random: a random selection of a library, show or artist (web: random.tsx)
+    _HAS_FILE = """EXISTS (SELECT 1 FROM file_items fi JOIN files f ON f.id=fi.file_id
+                           WHERE fi.item_id=v.id AND f.available)"""
+
+    def _random_videos(con, where: str, args: tuple, limit: int) -> list[dict]:
+        """Movies/episodes with a file to play, in random order (Specials left out), as a video play queue."""
+        rows = con.execute(f"""
+            SELECT v.id, v.kind, v.title, v.season_number, v.episode_number, v.runtime, v.year,
+                   COALESCE(v.still, v.poster, sh.poster) AS art, sh.title AS show_title
+            FROM items v LEFT JOIN items se ON se.id=v.parent_id AND v.kind='episode'
+                         LEFT JOIN items sh ON sh.id=se.parent_id
+            WHERE {where} AND {_HAS_FILE} AND (v.kind='movie' OR COALESCE(v.season_number, 1) > 0)
+            ORDER BY RANDOM() LIMIT ?""", (*args, limit)).fetchall()
+        return [{"id": r["id"], "kind": r["kind"], "title": r["title"], "show": r["show_title"],
+                 "season_number": r["season_number"], "episode_number": r["episode_number"],
+                 "runtime": r["runtime"], "year": r["year"], "art": _img(r["art"])} for r in rows]
+
+    def _random_tracks(con, where: str, args: tuple, limit: int) -> list[dict]:
+        ids = [x[0] for x in con.execute(f"""
+            SELECT t.id FROM items t JOIN items al ON al.id=t.parent_id JOIN items ar ON ar.id=al.parent_id
+            WHERE t.kind='track' AND {where} ORDER BY RANDOM() LIMIT ?""", (*args, limit))]
+        return [t for t in _queue(con, ids) if t["available"]]
+
+    @app.get("/api/libraries/{lib_id}/random")
+    def library_random(lib_id: int, limit: int = Query(100, ge=1, le=1000), con=Depends(db)):
+        """A random selection from a whole library: tracks (music) or movies/episodes, in play order."""
+        lib = library.get(con, lib_id)
+        if lib["type"] == "music":
+            return {"type": "music", "tracks": _random_tracks(con, "t.library_id=?", (lib_id,), limit)}
+        kind = "movie" if lib["type"] == "movie" else "episode"
+        return {"type": "video", "items": _random_videos(con, "v.library_id=? AND v.kind=?", (lib_id, kind), limit)}
+
+    @app.get("/api/items/{item_id}/random")
+    def item_random(item_id: int, limit: int = Query(100, ge=1, le=1000), con=Depends(db)):
+        """A random selection of a show's episodes (or a season's), or an artist's (album's) tracks."""
+        r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
+        if not r or r["kind"] not in ("show", "season", "artist", "album"):
+            raise HTTPException(404, "no such show/season/artist/album")
+        if r["kind"] == "artist":
+            return {"type": "music", "tracks": _random_tracks(con, "ar.id=?", (item_id,), limit)}
+        if r["kind"] == "album":
+            return {"type": "music", "tracks": _random_tracks(con, "al.id=?", (item_id,), limit)}
+        where = "se.parent_id=?" if r["kind"] == "show" else "se.id=?"
+        return {"type": "video", "items": _random_videos(con, f"v.kind='episode' AND {where}", (item_id,), limit)}
+
     # -- playlists (imported from .m3u/.m3u8/.pls files in music libraries; see playlists.py)
     def _playlist_summary(con, r: sqlite3.Row) -> dict:
         covers = [_img(c[0]) for c in con.execute(
