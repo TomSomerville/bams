@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type OpenSubtitlesStatus } from "../api";
+import { api, type OpenSubtitlesStatus, type SaveCheck } from "../api";
 import Icon from "./Icon";
 import PasswordInput from "./PasswordInput";
 
@@ -36,6 +36,7 @@ export default function OpenSubtitlesSettings() {
       </p>
       {st && <KeyForm st={st} setSt={setSt} />}
       {st?.configured && <AccountForm st={st} setSt={setSt} />}
+      {st?.configured && <SaveBeside st={st} setSt={setSt} />}
       {msg && <p className={`key-msg ${msg.ok ? "ok" : "bad"}`}>{msg.text}</p>}
     </section>
   );
@@ -200,6 +201,77 @@ function AccountForm({ st, setSt }: { st: OpenSubtitlesStatus; setSt: (s: OpenSu
       {msg && <p className={`key-msg ${msg.ok ? "ok" : "bad"}`}>{msg.text}</p>}
       <p className="fine-print">The key and password are kept in this server's database, like the TMDB key, so the
         server can sign in again each day. Subtitles from OpenSubtitles.com.</p>
+    </div>
+  );
+}
+
+/** A copy of each downloaded subtitle next to its video ("Episode.en.srt"), so other players (Jellyfin, VLC...) have
+ *  it too. On by default (owner, 2026-10-12); the only thing BAMS ever writes in your media folders, and it never
+ *  overwrites, renames or deletes anything there. */
+function SaveBeside({ st, setSt }: { st: OpenSubtitlesStatus; setSt: (s: OpenSubtitlesStatus) => void }) {
+  const [check, setCheck] = useState<SaveCheck | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!st.save_beside) return setCheck(null);
+    api.get<SaveCheck>("/api/settings/opensubtitles-save").then(setCheck).catch((e) => setErr(e.message));
+  }, [st.save_beside]);
+
+  const toggle = async () => {
+    setErr(null);
+    try {
+      setSt(await api.put<OpenSubtitlesStatus>("/api/settings/opensubtitles-save", { enabled: !st.save_beside }));
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  const copy = (text: string) => {
+    navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
+      () => {});
+  };
+
+  const blocked = check?.roots.filter((r) => r.exists && r.writable === false) ?? [];
+  return (
+    <div className="os-account">
+      <h4>Copies next to your videos</h4>
+      <p className="muted">Each subtitle you download is also saved next to its video, for example{" "}
+        <code>Episode name.en.srt</code>, so other players such as Jellyfin or VLC find it too. This is the only thing
+        BAMS ever writes in your media folders: it only adds new subtitle files and never changes, renames or deletes
+        anything there (a second English one becomes <code>.en.2.srt</code>). Removing a subtitle in BAMS leaves its copy.</p>
+      <div className="key-row">
+        <button className={`btn small ${st.save_beside ? "ghost" : "primary"}`} onClick={toggle}>
+          {st.save_beside ? "Turn off" : "Turn on"}</button>
+        <span className="muted">{st.save_beside ? "On: copies are saved next to the videos." : "Off: downloads stay inside BAMS only."}</span>
+      </div>
+      {st.save_beside && check && check.roots.length > 0 && (
+        <ul className="os-folders">
+          {check.roots.map((r) => (
+            <li key={r.path}><code>{r.path}</code>{" "}
+              {!r.exists ? <span className="root-badge bad">offline / not found</span>
+                : r.writable === false ? <span className="root-badge warn">BAMS can't save here</span>
+                : r.writable ? <span className="root-badge ok">can save here</span>
+                : <span className="muted">(Windows: depends on the service account's permissions)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {st.save_beside && blocked.length > 0 && (check?.fix ? (
+        <div className="os-fix">
+          <p className="muted">This Linux server only lets BAMS write in its own data folder. To allow subtitle copies
+            in the folders above, run this once in a terminal on the server (it asks for your password):</p>
+          <pre><code>{check.fix}</code></pre>
+          <button className="btn ghost small" onClick={() => copy(check.fix!)}>{copied ? "Copied" : "Copy command"}</button>
+        </div>
+      ) : (
+        <p className="muted">The account BAMS runs as isn't allowed to write in those folders. Give it write permission
+          there, or turn this off.</p>
+      ))}
+      {st.save_beside && st.save_error && (
+        <p className="key-msg warn">Last copy not saved{st.save_error.folder ? ` in ${st.save_error.folder}` : ""}:{" "}
+          {st.save_error.why}</p>
+      )}
+      {err && <p className="key-msg bad">{err}</p>}
     </div>
   );
 }

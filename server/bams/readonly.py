@@ -1,7 +1,10 @@
 """Read-only access to media folders.
 
 BAMS must never modify a media folder: no writes, renames, deletes, permission or timestamp
-changes, and no sidecar files (artwork, .nfo, thumbnails). Three layers enforce that:
+changes, and no sidecar files (artwork, .nfo, thumbnails). One exception, the owner's decision of 2026-10-12:
+`create_sidecar` may create a NEW subtitle file next to a video (OpenSubtitles downloads, a setting that's on by
+default). It creates only (an existing file is never opened for writing), only `.srt`, only in the video's own
+folder; every other write stays refused, even while it runs. Three layers enforce the rest:
 
 1. Every media read goes through this module, which only opens files read-only.
 2. A process-wide audit hook (sys.addaudithook) refuses any write-type operation whose target is
@@ -73,12 +76,30 @@ def _is_write_open(mode: object, flags: object) -> bool:
     return isinstance(flags, int) and bool(flags & _WRITE_FLAGS)
 
 
+# The one write create_sidecar is making on this thread right now: its target, normalised. Nothing else is let through.
+_allowed = threading.local()
+
+
+def _sidecar_write(event: str, args: tuple) -> bool:
+    """Is this create_sidecar's own write: an exclusive create ("x" mode) of its target, or removing that same file
+    after a failed write? Only on the thread making it."""
+    target = getattr(_allowed, "target", None)
+    if target is None or not args or _norm(args[0]) != target:
+        return False
+    if event == "open":
+        return len(args) >= 2 and isinstance(args[1], str) and "x" in args[1]
+    return event == "os.remove"
+
+
 def _hook(event: str, args: tuple) -> None:
     if not _roots:
         return
     if event == "open":
-        if len(args) >= 3 and _is_write_open(args[1], args[2]) and is_protected(args[0]):
+        if len(args) >= 3 and _is_write_open(args[1], args[2]) and is_protected(args[0]) \
+                and not _sidecar_write(event, args):
             raise ReadOnlyViolation(f"BAMS is read-only on media folders; refused to write {args[0]!r}")
+        return
+    if event == "os.remove" and _sidecar_write(event, args):
         return
     idx = _PATH_EVENTS.get(event)
     if idx is not None:
@@ -108,6 +129,33 @@ def set_protected_roots(paths: list[str] | list[Path]) -> None:
 
 def protected_roots() -> tuple[str, ...]:
     return _roots
+
+
+SIDECAR_EXTS = (".srt",)
+
+
+def create_sidecar(video: Path, name: str, data: bytes) -> Path:
+    """The one write BAMS makes in a media folder (owner, 2026-10-12): a NEW subtitle file `name` in `video`'s own
+    folder. Exclusive create: if the name is taken, nothing is written (FileExistsError) and the file there is never
+    opened for writing. `name` must be a plain file name ending in .srt; ValueError otherwise. A write that fails
+    half-way removes its own new file. Everything else stays refused by the audit hook while it runs. The OS can
+    still say no (a read-only mount, the Linux service's sandbox): that OSError is the caller's to report."""
+    if (not name.lower().endswith(SIDECAR_EXTS) or os.path.basename(name) != name or "/" in name or "\\" in name
+            or name.startswith(".")):
+        raise ValueError(f"not a subtitle file name: {name!r}")
+    target = Path(video).parent / name
+    _allowed.target = _norm(target)
+    try:
+        with open(target, "xb") as f:
+            try:
+                f.write(data)
+            except BaseException:
+                f.close()
+                os.remove(target)  # our own half-written file, nothing else
+                raise
+    finally:
+        _allowed.target = None
+    return target
 
 
 # ---------------------------------------------------------------- read helpers

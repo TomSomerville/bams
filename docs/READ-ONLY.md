@@ -2,7 +2,15 @@
 
 BAMS only ever **reads** the folders you add as Movies / TV Shows / Music libraries. It never
 renames, moves, deletes, re-tags or touches them, and never drops artwork, `.nfo` or thumbnail
-files next to your media. Everything BAMS learns goes into its own data folder:
+files next to your media. Everything BAMS learns goes into its own data folder.
+
+**One exception (since 0.14.0, the owner's decision):** a subtitle you download from OpenSubtitles while playing is
+also saved next to its video as a **new** `.srt` file (`Episode name.en.srt`), so other players find it too. BAMS
+only ever *adds* such files: it never overwrites one that's there (it picks `.en.2.srt` instead), and never renames,
+changes or deletes anything. It's a setting (Settings → Playback → OpenSubtitles → Copies next to your videos), on by
+default; turn it off and BAMS writes nothing in media folders at all. The OS still decides (below).
+
+BAMS's own data folder:
 
 | OS | Data folder (default) |
 |---|---|
@@ -19,7 +27,9 @@ files next to your media. Everything BAMS learns goes into its own data folder:
 2. **In-process guard.** At startup BAMS installs a Python audit hook that **refuses** any
    write-type operation inside a media folder, whoever in the process attempts it: open for
    write/append, create, delete, rename, mkdir/rmdir, chmod/chown, timestamp changes, copies,
-   creating databases. The hook can't be removed once installed. `server/tests/test_readonly.py`
+   creating databases. The hook can't be removed once installed. Its only opening is the subtitle copy above:
+   `readonly.create_sidecar` creates one new `.srt` in the video's folder ("exclusive create": it fails rather than
+   open a file that exists), and only that call, on that thread, for that one path, gets through. `server/tests/test_readonly.py`
    attempts each of these and checks that every attempt fails and the folder stays byte-for-byte
    identical after a full scan.
 3. **The operating system.** This is the real wall. Run BAMS as an account that only *has*
@@ -58,6 +68,18 @@ nas:/media   /mnt/media  nfs   ro,_netdev  0 0
 
 Check: `sudo -u bams touch /mnt/media/x` must fail.
 
+**Allowing subtitle copies (Linux service).** The sandbox above also stops the subtitle copies. To allow them in your
+TV and movie folders only, add them to the service's writable paths. Settings → Playback → OpenSubtitles shows this
+command with your folders filled in:
+
+```bash
+sudo mkdir -p /etc/systemd/system/bams.service.d && printf '%s\n' '[Service]' 'ReadWritePaths=-/mnt/media/TV -/mnt/media/Movies' | sudo tee /etc/systemd/system/bams.service.d/20-subtitles.conf && sudo systemctl daemon-reload && sudo systemctl restart bams
+```
+
+(`-`: a folder that's missing at start-up, like an unmounted drive, doesn't stop the service.) The account BAMS runs as
+also needs write permission there, and a share mounted `ro` stays read-only whatever systemd allows. Updates keep the
+file; `sudo rm /etc/systemd/system/bams.service.d/20-subtitles.conf` and a restart take the permission away again.
+
 ### Windows
 
 The installer runs BAMS as the `BAMS` service under **LocalSystem** (owner decision, 2026-10-08: starts at boot
@@ -75,8 +97,13 @@ UNC path (`\\nas\media\TV`), because a service can't see drive letters mapped in
 
 Check: as that account, creating a file in the media folder must fail with "Access is denied".
 
+Subtitle copies on Windows: under LocalSystem they just work. Under a read-only account they fail ("isn't allowed to
+write in that folder" in the player and Settings); grant that account **Write** (not Modify) on the folders where you
+want them, or turn the setting off.
+
 ## What BAMS reports
 
 `GET /api/libraries` shows, per folder: `exists`, `readable`, and on Linux `os_write_access`
-(`true` means the OS *would* let BAMS write, so tighten the permissions). On Windows that check
-can't see ACLs, so it reports `null`; use the `icacls` check above.
+(`true` means the OS *would* let BAMS write: for a TV/movie folder that's what subtitle copies need, for a music
+folder tighten the permissions). On Windows that check can't see ACLs, so it reports `null`; use the `icacls` check
+above. `GET /api/settings/opensubtitles-save` reports the same per TV/movie folder, with the Linux command.

@@ -75,6 +75,13 @@ remembers your choices) and shows **Install**; on Linux the software installer s
 few seconds, updates, and starts again. If the database needs changes, BAMS makes them on its first start and
 keeps a backup in its data folder (`backups`). What's new: [CHANGELOG.md](../CHANGELOG.md).
 
+### Subtitle copies next to your videos (Linux)
+
+Since 0.14.0 BAMS also saves each subtitle you download from OpenSubtitles next to its video. On Linux the BAMS
+service may only write in its own data folder, so it needs your permission once: open **Settings → Playback →
+OpenSubtitles**, copy the command shown under *Copies next to your videos* and run it in a terminal on the server.
+Details: [READ-ONLY.md](READ-ONLY.md#allowing-subtitle-copies-linux-service). Don't want copies? Turn them off there.
+
 ## Uninstalling
 
 - **Windows:** Settings → Apps → BAMS → Uninstall. It asks whether to delete BAMS's own data as well (default: keep

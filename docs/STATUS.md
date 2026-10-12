@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-12** (release 0.13.2).
+Last updated: **2026-10-12** (release 0.14.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -26,7 +26,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O2 | Media in local/mounted folders; a service crawls and indexes it every N minutes/hours **and on demand** | ✅ per-library interval + Scan now |
 | O3 | Identify and categorise media (look it up "like Plex", via naming conventions) | ✅ guessit parser + TMDB matching; music: tags/folders + MusicBrainz |
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
-| O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests |
+| O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests. One owner-made exception (0.14.0): new `.srt` copies of downloaded subtitles next to videos (create-only, setting on by default) |
 | O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.4.0) |
 | O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
@@ -153,6 +153,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **Remove from Continue Watching** takes out the **title** (the movie, or the episode's whole show) for that account until there's **later activity** on it (`continue_hidden.hidden_at` vs the deciding row's `updated_at`; opened < "started" threshold doesn't count). A long press (web: or right-click; TV: holding OK) opens a menu with Remove / Cancel rather than removing at once | Owner: "Long press… to remove it from continue watching. If the show is later watched, it will get added back in." Hiding one episode would just show the next; the menu step guards against a stray hold while scrolling a row on a phone |
 | 10-11 | OpenSubtitles is searched by the title's **TMDB id** (show id + season/episode for episodes), else IMDb, plus the file's **moviehash** (BAMS's `quick_hash` is their hash); by name only when that finds nothing | Their advice; the hash puts subtitles made for the exact file first ("made for this file") |
 | 10-11 | **Sleep mode** = this episode **and 2 more**, then stop (a movie: stop at its end); toggled in the player, per viewing, not saved | Tester request ("finish the current episode, play 2 more, and then stop"). Carried to the next episode in the navigation state |
+| 10-12 | **Downloaded subtitles are also saved next to the video** ("Episode.en.srt"), **on by default**, a setting to turn it off; **create-only** (`readonly.create_sidecar`: exclusive create of a new `.srt` in the video's folder, a taken name gets `.2`, identical file reused); removing a download **leaves its copy** | Owner: "it downloads a local copy to the episode's directory so you always have the subtitles", then chose opt-out and "leave the copy". The first exception to rule 1 / O5 (media read-only): kept as narrow as possible (one function, one thread, one path, no overwrite/rename/delete) so the guarantee that BAMS can't damage media still holds |
+| 10-12 | The Linux service's sandbox stays as shipped; Settings shows the **`ReadWritePaths=-<folder>` drop-in** the admin runs once (sudo) for their TV/movie folders | Library folders are only known at run time and the `.deb` can't loosen the kernel's read-only wall by itself; a drop-in survives upgrades and is easy to undo |
 | 10-11 | **"Keep" takes a file off the Unrecognized list** (`files.manual.kept`): hand-identified files as well as Auto fill's guesses (saved as a hand identification) | Owner: identified files stayed listed for good, so the list never emptied. A kept file is still identified by hand: rescans keep it, `DELETE /identify` forgets it |
 | 10-11 | **The OpenSubtitles key box rules out only what can't be a key** (spaces, under 8 or over 4096 characters); a pasted sign-in token (a JWT whose `exp` is under 30 days away) is refused with a pointer to the API consumers page | Owner's paste was refused by the 0.10.0 check (16–64 letters, digits, `-`, `_`), which guessed a format nobody documents. What they had pasted was a 24-hour sign-in token, so a clear message beats a vague one |
 | 10-11 | **Hyphenated words in names are read whole** (`parse._read`): when guessit's title cuts through one, it's read again with the hyphen protected. In file names "Show-01" stays episode 1 and an all-lowercase "grp-title.2010" keeps its group; a movie folder's name wins when the file's lost its front | Tester: "Catch-22" was "Catch" (guessit read "-22" as the episode; "Ant-" in "Ant-Man.2015" as a release group). Dry run over the owner's 4,391 real paths: nothing else changed |
@@ -229,6 +231,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
   encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead, VobSub `.idx/.sub` sidecars
   (one track per language) burned in too.
+- **Subtitle copies next to videos** (0.14.0): each OpenSubtitles download is also saved as `Episode.en.srt` in the
+  video's folder (create-only, setting on by default, Linux needs a `ReadWritePaths` drop-in shown in Settings).
 - **OpenSubtitles** (0.10.0, `opensubtitles.py`): each server's own API key + optional account (Settings → Playback);
   "Check OpenSubtitles" in the web and TV players searches by TMDB/IMDb id + moviehash; a picked subtitle is
   downloaded into the data dir and becomes a track (`d<n>`) of that file for everyone; removable.
@@ -385,6 +389,43 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-12: Subtitle copies next to the videos (release 0.14.0)
+- **What / why:** owner: "when you download the subtitles for a show… downloads a local copy to the episode's directory
+  so you always have the subtitles". That's the first write BAMS makes in a media folder (rule 1 / O5), so the owner
+  was asked first and chose: on by default with a setting to turn it off (they picked opt-out over the proposed
+  opt-in), create-only, and removing a download leaves its copy. `readonly.create_sidecar(video, name, data)`: a plain
+  `.srt` name in the video's folder, `open(…, "xb")` (exclusive create), its own half-written file removed on a failed
+  write; the audit hook lets exactly that through (`_allowed.target`, thread-local, path-exact, "x" mode or that
+  file's removal) and refuses everything else as before. `opensubtitles.keep_beside` after each download (and on a
+  re-pick, so earlier downloads or failed copies get one): `save_beside` names it `<stem>.<lang>[.sdh][.n].srt`
+  ("pt-BR" style), reuses an identical file, records `subtitle_downloads.sidecar` (schema v13), failures go to the
+  player (`save_error`) and Settings (`opensubtitles_save_error`) without failing the download. `listing()` hides
+  BAMS's own copies from the player's track list (the download has the better label). Settings: `PUT/GET
+  /api/settings/opensubtitles-save` (on/off; per TV/movie folder whether the OS lets BAMS write, checked with
+  `os.access`, and on a Linux systemd service the `ReadWritePaths=-…` drop-in command). Web: "Copies next to your
+  videos" in the OpenSubtitles card (toggle, folders, command with Copy, last failure), the player's note after a pick
+  says where the copy went, the library card's "writable" badge is no longer a warning for TV/movie folders.
+- **Files:** `server/bams/readonly.py` (`create_sidecar`, `_sidecar_write`, `_allowed`, `SIDECAR_EXTS`),
+  `opensubtitles.py` (`SAVE_SETTING`, `save_beside_on`, `_beside_name`, `save_beside`, `_save_problem`, `_video`,
+  `keep_beside`, `save_check`, `set_save_beside`, `listing`, `status`, `download`), `db.py` (v13), `app.py` (routes,
+  `get_item` → `listing`); tests `test_readonly.py` (+2: the one write and nothing else, the door is exclusive-create
+  of one path), `test_opensubtitles.py` (copy saved and media otherwise byte-identical, no second copy on a re-pick,
+  the owner's own file never overwritten → `.en.2.srt`, `.sdh`, removal leaves the copy as a sidecar, setting off/on
+  and the re-pick saving it, a read-only folder: download still works + `save_error` + the systemd command),
+  `test_auth.py` (v13), `test_watchlist.py` (its migration check follows `SCHEMA_VERSION` instead of pinning 12); web
+  `api.ts`, `components/OpenSubtitlesSettings.tsx` (`SaveBeside`), `FindSubtitles.tsx`,
+  `pages/Settings.tsx`, `styles.css`; docs: CLAUDE.md rule 1 + pitfalls, READ-ONLY.md, INSTALL.md, STATUS, CODEBASE,
+  CHANGELOG; VERSION 0.14.0.
+- **Verified:** 334 server tests (clean worktree of the release commit too). Scratch server (:8498, DB copy, generated
+  Catch-22 clips, the fake OpenSubtitles): a pick on S01E03 wrote `Catch-22 S01E03.en.srt` next to it through the
+  running server (audit hook installed), the videos untouched, the player listed the subtitle once; Settings showed the
+  section and the folders. The `ReadWritePaths` syntax was checked against the owner's server's own `systemd.exec`
+  manual (systemd 255: allow-list under `ProtectSystem=strict`, may repeat, "-" = ignore if missing); the drop-in
+  itself hasn't been run on a real service yet (it needs the owner's sudo).
+- **Left open:** the owner's server needs the drop-in command (Settings shows it) before copies are saved there;
+  the TV apps show no note about the copy (they still save it: it's server-side); downloads made before 0.14.0 get a
+  copy only when picked again.
 
 ### 2026-10-12: OpenSubtitles account sign-in error, VIP account on the owner's server, tools committed (release 0.13.2)
 - **What / why:** owner: "Tester cannot log into open subtitles with their account credentials" (screenshot: "OpenSubtitles

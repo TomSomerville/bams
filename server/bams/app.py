@@ -1117,6 +1117,18 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             except opensubtitles.OpenSubtitlesError as e:
                 raise os_error(e) from None
 
+    @app.put("/api/settings/opensubtitles-save", dependencies=ADMIN)
+    def put_opensubtitles_save(body: ToggleIn, con=Depends(db)):
+        """Also save each downloaded subtitle next to its video ("Episode.en.srt"): on by default (owner,
+        2026-10-12). The one write BAMS makes in media folders, new files only (readonly.create_sidecar)."""
+        return opensubtitles.set_save_beside(con, body.enabled)
+
+    @app.get("/api/settings/opensubtitles-save", dependencies=ADMIN)
+    def get_opensubtitles_save(con=Depends(db)):
+        """Whether the OS lets BAMS save copies in each TV/movie library folder (checked without writing), and on a
+        Linux service the command that allows it."""
+        return opensubtitles.save_check(con)
+
     @app.delete("/api/settings/opensubtitles", dependencies=ADMIN)
     def delete_opensubtitles(con=Depends(db)):
         """Stop using the OpenSubtitles account (downloads go back to 5 a day per IP)."""
@@ -1388,7 +1400,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         d["files"] = [file_info(f, with_subtitles=playable, music_out=mo) for f in rows]
         if playable:
             for f in d["files"]:
-                f["subtitles"] += opensubtitles.tracks(con, f["id"])
+                f["subtitles"] = opensubtitles.listing(con, f["id"], f["subtitles"])  # + downloaded, without copies
             d["opensubtitles"] = opensubtitles.api_key(con) is not None  # the player offers "Check OpenSubtitles"
         watch.annotate(con, me["id"], [d, *d["children"], *d["ancestors"]])
         if r["kind"] == "episode":

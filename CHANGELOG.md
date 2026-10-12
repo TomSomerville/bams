@@ -3,6 +3,24 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.14.0 (2026-10-12)
+
+### New
+- **Downloaded subtitles are also saved next to the video**, for example `Episode name.en.srt`, so you keep them
+  and other players (Jellyfin, VLC...) find them too. This is on by default; turn it off under **Settings → Playback →
+  OpenSubtitles → Copies next to your videos**.
+  - It's the only thing BAMS ever writes in your media folders, and it only **adds** subtitle files: it never
+    overwrites one that's already there (a second English one becomes `.en.2.srt`), and never renames, changes or
+    deletes anything. Removing a subtitle in BAMS leaves its copy; BAMS then lists it as one of the video's own.
+  - After you pick a subtitle, the player says where the copy went (or why it couldn't be saved).
+  - **Linux:** the BAMS service may only write in its own data folder, so the copies need your permission once.
+    Settings → Playback → OpenSubtitles lists your TV and movie folders and shows the one command to run on the
+    server (it asks for your password). Until then subtitles still work inside BAMS, just without the copy.
+  - Picking a subtitle you downloaded before saves its copy too, so earlier downloads can be copied the same way.
+
+Update the server with the new installer (the database is backed up and upgraded by itself). The TV apps are
+unchanged: `BAMS-SamsungTV-0.13.0.wgt` and `BAMS-FireTV-0.13.0.apk` from the 0.13.0 release are still current.
+
 ## 0.13.2 (2026-10-12)
 
 ### Fixed
