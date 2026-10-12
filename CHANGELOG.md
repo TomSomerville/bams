@@ -3,6 +3,14 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## TV apps 0.14.0 (2026-10-12)
+
+### Added
+- **Play Random on the TV** (Samsung and Fire TV): on library, show and artist screens, as on the web (needs a server
+  on 0.16.0 or later).
+- **Up next on the TV:** in the player while a random selection plays, and from a new queue button on the music bar.
+  Each row has ▲ / ▼ to move it and ✕ to take it out; OK on a row plays it.
+
 ## 0.16.0 (2026-10-12)
 
 ### Added

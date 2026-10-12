@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFor, type ItemSummary } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import { Poster } from "../Cards";
+import { PlayRandomButton } from "../random";
 import { MusicLibrary } from "./Music";
 
 const SORTS = [
@@ -65,6 +66,7 @@ function VideoLibrary({ id, rid, name }: { id: number; rid?: number; name?: stri
             </button>
           ))}
         </div>
+        {items !== null && items.length > 0 && <PlayRandomButton chip path={`/api/libraries/${id}/random`} rid={rid} />}
       </div>
       {err && <p className="error big">{err}</p>}
       {items === null && !err && <div className="spinner" />}

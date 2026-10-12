@@ -9,6 +9,9 @@ import { Square } from "../Cards";
 import { clock } from "../format";
 import Icon from "../Icon";
 import { useMusic } from "../music";
+import { focusId } from "../nav";
+import { QueuePanel } from "../Queue";
+import { PlayRandomButton } from "../random";
 
 const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists" } as const;
 type Tab = keyof typeof TABS;
@@ -45,6 +48,7 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
           ))}
         </div>
         {count !== undefined && <span className="muted big">{count}</span>}
+        <PlayRandomButton chip path={`/api/libraries/${id}/random`} rid={rid} />
       </div>
       {err && <p className="error big">{err}</p>}
       {items === null && lists === null && !err && <div className="spinner" />}
@@ -144,6 +148,7 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
             <button className="btn" data-fid="mshuffle" onClick={() => void music.playItem(playId, rid, { shuffle: true })}>
               <Icon name="shuffle" size={30} /> Shuffle
             </button>
+            {item.kind === "artist" && <PlayRandomButton path={`/api/items/${item.id}/random`} rid={rid} />}
             {artist && <button className="btn" data-fid="martist" onClick={() => nav.push({ name: "detail", id: artist.id, rid })}>{artist.title}</button>}
           </div>
         </div>
@@ -202,11 +207,13 @@ export function PlaylistScreen({ id, rid }: { id: number; rid?: number }) {
  *  media keys do the same from anywhere (App.tsx). */
 export function NowPlaying() {
   const m = useMusic();
+  const [queue, setQueue] = useState(false);
   const t = m.current;
   if (!t) return null;
   const media = mediaFor(t.rid);
   const pct = m.duration ? Math.min(100, (m.time / m.duration) * 100) : 0;
   return (
+    <>
     <div className="now-playing" data-group data-cover>
       {t.poster ? <img className="np-cover" src={media(t.poster) ?? undefined} alt="" /> : <div className="np-cover no-art" />}
       <div className="np-text">
@@ -220,7 +227,14 @@ export function NowPlaying() {
         <Icon name={m.playing ? "pause" : "play"} />
       </button>
       <button className="round" data-fid="np-next" onClick={m.next} disabled={m.index + 1 >= m.queue.length} aria-label="Next"><Icon name="next" /></button>
+      <button className="round" data-fid="np-queue" onClick={() => setQueue(true)} aria-label="Up next"><Icon name="list" /></button>
       <button className="round" data-fid="np-stop" onClick={m.stop} aria-label="Stop"><Icon name="stop" /></button>
     </div>
+    {queue && (
+      <QueuePanel at={m.index} onJump={m.jump} onMove={m.move} onRemove={m.remove}
+        rows={m.queue.map((x, i) => ({ key: `${x.id}-${i}`, title: x.title, sub: [x.artist, x.album].filter(Boolean).join("  ·  ") }))}
+        onClose={() => { setQueue(false); setTimeout(() => focusId("np-queue")); }} />
+    )}
+    </>
   );
 }

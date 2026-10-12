@@ -309,6 +309,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   (`web/src/everywhere.ts`). Music (0.7.0): music libraries, artist/album/playlist pages, a music bar, media keys.
 - Watch list (0.13.0): rail entry under Home (`screens/Watchlist.tsx`, every server's entries; hold OK: take one
   off), the Home row, a watch list button on detail screens, hold OK on an episode to add/remove it (`ListMenu.tsx`).
+- Play Random (TV 0.14.0): on libraries, shows and artists (`random.tsx`); "Up next" (`Queue.tsx`: ▲ ▼ move, ✕ remove,
+  OK plays) for the random video queue in the player and for the music queue (a queue button on the music bar).
 
 ### Fire TV app (`firetv/`, 0.12.0, Android shell around `tv/`)
 - Fire OS 6+ (Fire TV Stick 4K / 4K Max / Lite / 3rd gen, Cube, Fire TV TVs). The `tv/` page in a full-screen WebView
@@ -391,6 +393,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-12: Play Random and Up next on the TV apps (TV 0.14.0)
+- **What / why:** owner: "lets update the TV apps with this same functionality" (0.16.0's Play Random). Buttons on the
+  library (chip in the head), show (after the watch list button) and artist (after Shuffle) screens. Video queue in
+  `tv/src/random.tsx` (module store + `useSyncExternalStore`, sessionStorage); the player's `nextOf()` reads it before
+  `item.next_id` (Next, countdown, sleep mode). `tv/src/Queue.tsx` "Up next": a remote can't drag, so each row has
+  ▲ / ▼ / ✕ buttons, focus follows the moved row; used by the player (pill "Up next") and the music bar (new queue
+  button; `music.tsx` got `jump`/`move`/`remove`). Icons `list`, `up`, `down`, `close`.
+- **Files:** `tv/src/random.tsx`, `tv/src/Queue.tsx` (new), `tv/src/music.tsx`, `Icon.tsx`, `styles.css`,
+  `screens/{Player,Library,Detail,Music}.tsx`, `tv/test/nav.test.ts` (Up next case), `tv/package.json` 0.14.0.
+- **Verified:** `tsc`; TV test page in the browser pane at 1920×1080 (no Chrome/Edge on that PC): 36/38, the 2 rail
+  tests fail identically without these changes (pane quirk); the dev TV app against a sandbox server with remote
+  key events: random queue, move/remove/jump, Next follows the queue, music queue remove, Back.
+- **Left open:** the signed `.wgt` / `.apk` weren't built (made on a PC without the Samsung certificate and Fire TV
+  release key); build them on the owner's PC (`tv/README.md`, `firetv/README.md`) and attach to the release. Not tried
+  on a real TV.
+
 ### 2026-10-12: Play Random, video Up next, remove from queues (release 0.16.0)
 - **What / why:** owner: a "Play Random" button on each library, show and artist that plays a random selection, "with
   the same playlist edit functionality as music has", then "add a delete option to the playlist".
@@ -404,8 +422,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   `main.tsx`, `styles.css`; `tests/test_watch.py::test_play_random`.
 - **Verified:** 335 server tests; `tsc` + build; in a sandbox (:8485, generated clips) Play Random on the TV and Music
   libraries, Up next panel, removing rows (music 8→7, video 20→19). Owner tried it and approved.
-- **Left open:** not on the Samsung/Fire TV apps yet. The credits countdown applies to episodes only (movies go on at
-  the end).
+- **Left open:** the credits countdown applies to episodes only (movies go on at the end). TV apps: see the next entry.
 
 ### 2026-10-12: "Download locally" instead of automatic copies, downloads in cache/subtitles (release 0.15.0)
 - **What / why:** owner: "By default subtitles should go to cache/subtitles. … Next to each subtitle under 'Already on

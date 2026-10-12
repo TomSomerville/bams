@@ -26,6 +26,10 @@ type Music = {
   next: () => void;
   prev: () => void;
   stop: () => void;
+  /** Up next (Queue.tsx): play queue place `i`, move a track, take one out (not the one playing) */
+  jump: (i: number) => void;
+  move: (from: number, to: number) => void;
+  remove: (i: number) => void;
 };
 
 const Ctx = createContext<Music | null>(null);
@@ -172,8 +176,37 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     setPlaying(false);
   }, []);
 
+  const jump = useCallback((i: number) => {
+    if (i >= 0 && i < q.current.length) startAt(i);
+  }, [startAt]);
+
+  const move = useCallback((from: number, to: number) => {
+    const list = [...q.current];
+    if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
+    const [t] = list.splice(from, 1);
+    list.splice(to, 0, t);
+    let i = idx.current;
+    if (from === i) i = to;
+    else if (from < i && to >= i) i--;
+    else if (from > i && to <= i) i++;
+    q.current = list;
+    setQueue(list);  // same track, new place: it keeps playing
+    idx.current = i;
+    setIndex(i);
+  }, []);
+
+  const remove = useCallback((i: number) => {
+    if (i < 0 || i >= q.current.length || i === idx.current) return;
+    q.current = q.current.filter((_, k) => k !== i);
+    setQueue(q.current);
+    if (i < idx.current) {
+      idx.current--;
+      setIndex(idx.current);
+    }
+  }, []);
+
   const value = useMemo<Music>(() => ({
-    queue, index, current, playing, time, duration, error, playTracks, playItem, toggle, pause, next, prev, stop,
-  }), [queue, index, current, playing, time, duration, error, playTracks, playItem, toggle, pause, next, prev, stop]);
+    queue, index, current, playing, time, duration, error, playTracks, playItem, toggle, pause, next, prev, stop, jump, move, remove,
+  }), [queue, index, current, playing, time, duration, error, playTracks, playItem, toggle, pause, next, prev, stop, jump, move, remove]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
