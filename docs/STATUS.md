@@ -405,9 +405,11 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** `tsc`; TV test page in the browser pane at 1920×1080 (no Chrome/Edge on that PC): 36/38, the 2 rail
   tests fail identically without these changes (pane quirk); the dev TV app against a sandbox server with remote
   key events: random queue, move/remove/jump, Next follows the queue, music queue remove, Back.
-- **Left open:** the signed `.wgt` / `.apk` weren't built (made on a PC without the Samsung certificate and Fire TV
-  release key); build them on the owner's PC (`tv/README.md`, `firetv/README.md`) and attach to the release. Not tried
-  on a real TV.
+- **Released:** on the owner's PC, `npm test` 38/38 (headless Chrome), signed `BAMS-SamsungTV-0.14.0.wgt` and
+  `BAMS-FireTV-0.14.0.apk` (release key, same certificate as 0.12.0/0.13.0) attached to the **v0.16.0** release with
+  an updated `SHA256SUMS.txt` and notes. Not a release of its own: the in-app updater reads GitHub's *latest* release
+  for the `.exe`/`.deb` (`updates.LATEST_URL`), so a TV-only release would hide the server installers.
+- **Left open:** not tried on a real TV.
 
 ### 2026-10-12: Play Random, video Up next, remove from queues (release 0.16.0)
 - **What / why:** owner: a "Play Random" button on each library, show and artist that plays a random selection, "with

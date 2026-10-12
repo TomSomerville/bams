@@ -21,8 +21,8 @@ accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating
   goes on to the next video in that list instead of the next episode.
 - **Remove from the music queue.** The music queue's rows have a **×** too (not the track that's playing).
 
-Update the server with the new installer. The TV apps are unchanged: `BAMS-SamsungTV-0.13.0.wgt` and
-`BAMS-FireTV-0.13.0.apk` from the 0.13.0 release are still current.
+Update the server with the new installer, then the TV apps with `BAMS-SamsungTV-0.14.0.wgt` and
+`BAMS-FireTV-0.14.0.apk` (TV apps 0.14.0 above), attached to the same 0.16.0 release.
 
 ## 0.15.0 (2026-10-12)
 
