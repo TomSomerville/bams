@@ -4,11 +4,12 @@ BAMS only ever **reads** the folders you add as Movies / TV Shows / Music librar
 renames, moves, deletes, re-tags or touches them, and never drops artwork, `.nfo` or thumbnail
 files next to your media. Everything BAMS learns goes into its own data folder.
 
-**One exception (since 0.14.0, the owner's decision):** a subtitle you download from OpenSubtitles while playing is
-also saved next to its video as a **new** `.srt` file (`Episode name.en.srt`), so other players find it too. BAMS
-only ever *adds* such files: it never overwrites one that's there (it picks `.en.2.srt` instead), and never renames,
-changes or deletes anything. It's a setting (Settings → Playback → OpenSubtitles → Copies next to your videos), on by
-default; turn it off and BAMS writes nothing in media folders at all. The OS still decides (below).
+**One exception (the owner's decision):** when you press **Download locally** next to a subtitle you downloaded from
+OpenSubtitles (player → Subtitles → Check OpenSubtitles → *Already on this video*), BAMS saves it next to the video as
+a **new** `.srt` file with the video's name (`Episode name.srt`), so other players find it too. BAMS only ever *adds*
+such files: it never overwrites one that's there (it picks `Episode name.en.srt` instead), and never renames, changes
+or deletes anything. Nothing is written unless someone presses the button (0.14.0 did it after every download; 0.15.0
+keeps downloads in BAMS's cache). The OS still decides (below).
 
 BAMS's own data folder:
 

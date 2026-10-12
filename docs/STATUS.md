@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-12** (release 0.14.0).
+Last updated: **2026-10-12** (release 0.15.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -26,7 +26,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | O2 | Media in local/mounted folders; a service crawls and indexes it every N minutes/hours **and on demand** | ✅ per-library interval + Scan now |
 | O3 | Identify and categorise media (look it up "like Plex", via naming conventions) | ✅ guessit parser + TMDB matching; music: tags/folders + MusicBrainz |
 | O4 | **Everything open-licensed and legal** | ✅ see PLAN.md §5, §8 |
-| O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests. One owner-made exception (0.14.0): new `.srt` copies of downloaded subtitles next to videos (create-only, setting on by default) |
+| O5 | **Crawler only uses read-only access** to media folders | ✅ 3 layers, docs/READ-ONLY.md, tests. One owner-made exception: "Download locally" saves a downloaded subtitle next to its video as a new `.srt` (create-only; 0.15.0, automatic in 0.14.0) |
 | O6 | Runs on **Windows and Debian/Ubuntu/Mint** | ✅ double-click installers: Windows `.exe` (service) and `.deb` (systemd), both update in place (v0.4.0) |
 | O12 | Users + login, each with their own watch state; resume, watched, Continue Watching | ✅ |
 | O7 | **Each user pastes their own TMDB key**; no shared key; a warning banner links to the setting until it's set | ✅ |
@@ -153,6 +153,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **Remove from Continue Watching** takes out the **title** (the movie, or the episode's whole show) for that account until there's **later activity** on it (`continue_hidden.hidden_at` vs the deciding row's `updated_at`; opened < "started" threshold doesn't count). A long press (web: or right-click; TV: holding OK) opens a menu with Remove / Cancel rather than removing at once | Owner: "Long press… to remove it from continue watching. If the show is later watched, it will get added back in." Hiding one episode would just show the next; the menu step guards against a stray hold while scrolling a row on a phone |
 | 10-11 | OpenSubtitles is searched by the title's **TMDB id** (show id + season/episode for episodes), else IMDb, plus the file's **moviehash** (BAMS's `quick_hash` is their hash); by name only when that finds nothing | Their advice; the hash puts subtitles made for the exact file first ("made for this file") |
 | 10-11 | **Sleep mode** = this episode **and 2 more**, then stop (a movie: stop at its end); toggled in the player, per viewing, not saved | Tester request ("finish the current episode, play 2 more, and then stop"). Carried to the next episode in the navigation state |
+| 10-12 | **0.15.0 replaces the automatic copy with a button**: downloads go to `cache/subtitles/opensubtitles/`; "Download locally" (dialog → *Already on this video*) saves one next to the video as **`<video stem>.srt`** (the video's own name; taken → `<stem>.<lang>[.sdh].srt`, then numbers), create-only as before; who downloaded it or an admin | Owner: "By default subtitles should go to cache/subtitles… a 'Download locally' button… rename the subtitle file to the same name as the video file". The owner first wrote ".vtt", then "whatevertheextensionis": the file is written as the SRT it is, which is what other players read |
 | 10-12 | **Downloaded subtitles are also saved next to the video** ("Episode.en.srt"), **on by default**, a setting to turn it off; **create-only** (`readonly.create_sidecar`: exclusive create of a new `.srt` in the video's folder, a taken name gets `.2`, identical file reused); removing a download **leaves its copy** | Owner: "it downloads a local copy to the episode's directory so you always have the subtitles", then chose opt-out and "leave the copy". The first exception to rule 1 / O5 (media read-only): kept as narrow as possible (one function, one thread, one path, no overwrite/rename/delete) so the guarantee that BAMS can't damage media still holds |
 | 10-12 | The Linux service's sandbox stays as shipped; Settings shows the **`ReadWritePaths=-<folder>` drop-in** the admin runs once (sudo) for their TV/movie folders | Library folders are only known at run time and the `.deb` can't loosen the kernel's read-only wall by itself; a drop-in survives upgrades and is easy to undo |
 | 10-11 | **"Keep" takes a file off the Unrecognized list** (`files.manual.kept`): hand-identified files as well as Auto fill's guesses (saved as a hand identification) | Owner: identified files stayed listed for good, so the list never emptied. A kept file is still identified by hand: rescans keep it, `DELETE /identify` forgets it |
@@ -231,8 +232,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - **Subtitles:** `subtitles.py`: embedded + sidecar tracks with language labels, WebVTT conversion (cached, any sidecar
   encoding, `?shift=` for live streams), picture subtitles burned in with a 30 s lead, VobSub `.idx/.sub` sidecars
   (one track per language) burned in too.
-- **Subtitle copies next to videos** (0.14.0): each OpenSubtitles download is also saved as `Episode.en.srt` in the
-  video's folder (create-only, setting on by default, Linux needs a `ReadWritePaths` drop-in shown in Settings).
+- **Download locally** (0.15.0): a downloaded subtitle saved next to its video as `<video name>.srt` on request
+  (create-only; Linux needs a `ReadWritePaths` drop-in shown in Settings). Downloads stay in `cache/subtitles`.
 - **OpenSubtitles** (0.10.0, `opensubtitles.py`): each server's own API key + optional account (Settings → Playback);
   "Check OpenSubtitles" in the web and TV players searches by TMDB/IMDb id + moviehash; a picked subtitle is
   downloaded into the data dir and becomes a track (`d<n>`) of that file for everyone; removable.
@@ -389,6 +390,33 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-12: "Download locally" instead of automatic copies, downloads in cache/subtitles (release 0.15.0)
+- **What / why:** owner: "By default subtitles should go to cache/subtitles. … Next to each subtitle under 'Already on
+  this video' should be a 'Download locally' button. Clicking this button will download the subtitle file, move it to
+  the same location as the video file, and rename the subtitle file to the same name as the video file". Downloads now
+  go to `cache/subtitles/opensubtitles/` (`opensubtitles.FOLDER`; older rows keep their `path`; nothing empties
+  `cache/`). The 0.14.0 automatic copy (`keep_beside`, `save_beside`, the `opensubtitles_save_beside` setting and
+  `PUT /api/settings/opensubtitles-save`, `save_error`) is gone. `POST /api/files/{id}/subtitles/d<n>/local` →
+  `opensubtitles.save_locally`: `<video stem>.srt` first (`_local_names`; taken by another subtitle →
+  `<stem>.<lang>[.sdh].srt` → numbers; identical file reused), through `readonly.create_sidecar` as before, recorded in
+  `subtitle_downloads.sidecar` (tracks carry `sidecar`); who downloaded it or an admin (403), refused by the OS → 409
+  with the reason. The owner wrote ".vtt" then "whatevertheextensionis": the file keeps its own format (SRT, `.srt`).
+  Web: the button in `FindSubtitles.tsx` ("Saved as …" afterwards), Settings' section explains the button and keeps
+  the folder check + Linux command (`GET /api/settings/opensubtitles-save`). TV apps: no button (not asked).
+- **Files:** `server/bams/opensubtitles.py` (`FOLDER`, `SaveError`, `_local_names`, `_write_beside`, `save_locally`,
+  `tracks` → `sidecar`, `download`, `status`), `app.py` (`save_subtitle_locally`, PUT route removed); tests
+  `test_opensubtitles.py` (downloads in the cache with the media untouched; Download locally: `<stem>.srt`, once, listed
+  once, a taken name → `.en.sdh.srt`, the owner's own `.fr.srt` never overwritten → `.fr.2.srt`, removal leaves the copy,
+  rights; a read-only folder → 409 + the Linux command; the fake now sends different text per subtitle); web
+  `api.ts`, `components/FindSubtitles.tsx`, `OpenSubtitlesSettings.tsx`, `pages/Settings.tsx`, `styles.css`; docs
+  CLAUDE.md (rule 1, pitfalls), READ-ONLY.md, INSTALL.md, FORMATS.md, STATUS, CODEBASE, CHANGELOG; VERSION 0.15.0.
+- **Verified:** server tests (full suite) and a clean worktree of the release commit; web + TV `tsc`. Scratch server
+  (:8498, DB copy, generated clips, the fake OpenSubtitles): a download left the episode folder untouched; the dialog
+  listed it under *Already on this video* with **Download locally**; clicking it wrote `Catch-22 S01E04.srt` next to
+  `Catch-22 S01E04.mkv` and the row then read "Saved as Catch-22 S01E04.srt".
+- **Left open:** no button in the TV apps; 0.14.0 copies already made (`*.en.srt`) stay as they are; the owner's server
+  still needs the drop-in command for its folders.
 
 ### 2026-10-12: Subtitle copies next to the videos (release 0.14.0)
 - **What / why:** owner: "when you download the subtitles for a show… downloads a local copy to the episode's directory

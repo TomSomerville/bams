@@ -77,10 +77,10 @@ keeps a backup in its data folder (`backups`). What's new: [CHANGELOG.md](../CHA
 
 ### Subtitle copies next to your videos (Linux)
 
-Since 0.14.0 BAMS also saves each subtitle you download from OpenSubtitles next to its video. On Linux the BAMS
-service may only write in its own data folder, so it needs your permission once: open **Settings → Playback →
-OpenSubtitles**, copy the command shown under *Copies next to your videos* and run it in a terminal on the server.
-Details: [READ-ONLY.md](READ-ONLY.md#allowing-subtitle-copies-linux-service). Don't want copies? Turn them off there.
+The player's **Download locally** saves a subtitle you downloaded from OpenSubtitles next to its video. On Linux the
+BAMS service may only write in its own data folder, so it needs your permission once: open **Settings → Playback →
+OpenSubtitles**, copy the command shown under *Saving subtitles next to your videos* and run it in a terminal on the
+server. Details: [READ-ONLY.md](READ-ONLY.md#allowing-subtitle-copies-linux-service).
 
 ## Uninstalling
 

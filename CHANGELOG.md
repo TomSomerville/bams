@@ -3,6 +3,20 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.15.0 (2026-10-12)
+
+### Changed
+- **Subtitles are saved next to a video only when you ask.** Downloaded subtitles now stay in BAMS's cache (the
+  automatic copy next to every video from 0.14.0 is gone, and so is its setting). To keep one with the video, open
+  Subtitles → **Check OpenSubtitles** while playing and press **Download locally** next to it under *Already on this
+  video*. It's saved in the video's folder with the video's name: `Chernobyl - S01E02 - Please remain calm.mkv` gets
+  `Chernobyl - S01E02 - Please remain calm.srt`. BAMS never overwrites a file there: if that name is taken, it adds
+  the language (`….en.srt`). The button then shows the name it was saved as.
+- On Linux this still needs the one-time permission shown in Settings → Playback → OpenSubtitles.
+
+Update the server with the new installer. The TV apps are unchanged: `BAMS-SamsungTV-0.13.0.wgt` and
+`BAMS-FireTV-0.13.0.apk` from the 0.13.0 release are still current.
+
 ## 0.14.0 (2026-10-12)
 
 ### New

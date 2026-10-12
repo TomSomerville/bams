@@ -651,6 +651,7 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .find-subs-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .find-subs-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .find-subs-row > span.on { color: var(--cyan); font-weight: 600; }
+.find-subs-row > span.find-subs-saved { flex: 0 1 auto; font-size: 12px; }
 .find-subs-list .match-text strong { overflow-wrap: anywhere; }
 .find-subs-list .tag { margin-left: 6px; }
 .find-subs-foot { padding: 0 18px 16px; margin-top: 4px; }

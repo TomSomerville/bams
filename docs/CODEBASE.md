@@ -238,7 +238,7 @@ web UI, `/docs`.
 | `scans` | scan history | `trigger`, `status` ok\|partial\|error, `stats` JSON |
 | `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`), v9: `must_change_password` (0/1), `totp_secret` (base32, NULL = two-step off), `totp_last` (time step of the last code used) |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
-| `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `subtitles/opensubtitles/<ext_id>.srt`, shared by files that picked the same one), `added_by`, `added_at`, `sidecar` (v13: the copy's file name next to the video, NULL = none) |
+| `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `cache/subtitles/opensubtitles/<ext_id>.srt`, before 0.15.0 `subtitles/opensubtitles/…`; shared by files that picked the same one), `added_by`, `added_at`, `sidecar` (v13: the name "Download locally" saved it under next to the video, NULL = none) |
 | `continue_hidden` | titles a user took out of Continue Watching (v11) | (`user_id`, `item_id` = a movie or a show), `hidden_at`: out while the title's latest activity is not newer |
 | `watchlist` | each user's watch list (v12) | (`user_id`, `item_id` = a movie, show, season or episode), `added_at`; apps merge several servers' lists by it. Cascades with the user/item; `items.merge_titles` moves entries (`_move_watchlist`) |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
@@ -393,13 +393,14 @@ stream number, or `(sidecar .idx, k)`. The overlay reads `[1:s:n]` from a second
 `SUB_LEAD` (30 s) earlier, or the .idx (always, even from 0). Both outputs keep the file's clock with `-copyts
 -start_at_zero` (the fMP4 transcode then `-output_ts_offset -t`); the .idx has no start time, so it needs no offset.
 
-### 4.3f½ Subtitle copies next to the video (`opensubtitles.keep_beside` → `readonly.create_sidecar`)
-After every download (and every re-pick of one with no copy yet), when `settings.opensubtitles_save_beside` isn't
-"0" (default on): `save_beside(video, language, hi, bytes)` tries `<stem>.<lang>[.sdh].srt`, then `.2`… (a name that's
-taken is skipped; one with identical bytes is reused) through `readonly.create_sidecar`, the audit hook's one opening
-(thread-local target, `open(…, "xb")` only). Disk first, then a short write: `subtitle_downloads.sidecar` = the name,
-`opensubtitles_save_error` cleared; on OSError (EROFS = the Linux service's sandbox, EACCES = permissions, the video
-offline) `save_error` goes to the player's answer and the setting, and the download still counts. `listing()` drops
+### 4.3f½ "Download locally" (`opensubtitles.save_locally` → `readonly.create_sidecar`)
+Downloads live in `data/cache/subtitles/opensubtitles/<id>.srt` (0.15.0). The dialog's **Download locally** (who
+downloaded it, or an admin) → `POST /api/files/{id}/subtitles/d<n>/local` → `save_locally`: `_local_names` gives
+`<video stem>.srt`, then `<stem>.<lang>[.sdh].srt`, then numbers; `_write_beside` skips taken names (reuses one with
+identical bytes) and creates through `readonly.create_sidecar`, the audit hook's one opening (thread-local target,
+`open(…, "xb")` only). Disk first, then a short write: `subtitle_downloads.sidecar` = the name (`tracks()` returns it;
+the dialog shows "Saved as …"). OSError (EROFS = the Linux service's sandbox, EACCES = permissions, the video offline)
+→ `SaveError` → 409 with the reason. `listing()` drops
 BAMS's own copies from the player's tracks (`get_item`). `save_check()` (Settings): `os.access(W_OK)` per TV/movie root
 (`null` on Windows) and, under systemd (`INVOCATION_ID`), the `ReadWritePaths=-…` drop-in command for the blocked ones.
 
@@ -414,7 +415,7 @@ found → by name (`query`, year). Results with one file only; `hash_match` firs
 already has it. `POST …/opensubtitles {file_id}` → `download`: a subtitle this file has is returned as it is; one the
 server has for another file is reused (no download); else `sign_in` (the account's token, cached per key + account,
 refused credentials kept in `_refused` and not retried) → `/download` (a refused token is re-made once) → the link →
-UTF-8 text checked to be a subtitle → `data/subtitles/opensubtitles/<id>.srt` → a `subtitle_downloads` row →
+UTF-8 text checked to be a subtitle → `data/cache/subtitles/opensubtitles/<id>.srt` → a `subtitle_downloads` row →
 the track (`tracks()`: "d<row id>", label language · release · SDH) + `remaining`. The `.vtt` route converts it like a
 sidecar (`subtitles.webvtt(src=)`). Errors: no key/refused key or account → 409, quota (406/429) → 429, else 502.
 `DELETE /api/files/{id}/subtitles/d<n>`: whoever downloaded it or an admin; the file goes once no row uses it.
@@ -613,7 +614,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track (embedded `e<n>`, sidecar `x<n>`, downloaded `d<n>`) as WebVTT (400 for picture tracks) | Player |
 | `PUT /api/settings/opensubtitles-key {key}` · `DELETE` · `POST …/test` (admin; state in `GET /api/settings` → `opensubtitles` `{configured, last4, verified_at, user, account, error}`) | the server's OpenSubtitles API key: checked first (400 refused; spaces/too short/a pasted sign-in token refused without asking them, `opensubtitles._sign_in_token`), never returned | OpenSubtitlesSettings |
 | `PUT /api/settings/opensubtitles {username, password}` · `DELETE` (admin) | the optional OpenSubtitles account (signed in first; 400 refused; 409 without a key) | OpenSubtitlesSettings |
-| `PUT /api/settings/opensubtitles-save {enabled}` · `GET` (admin) → status / `{roots: [{library, path, exists, writable}], fix}` | copies of downloads next to their videos on/off (default on; state in `opensubtitles.save_beside`, last failure `save_error`) / can BAMS write in each TV/movie folder + the Linux drop-in command | OpenSubtitlesSettings (`SaveBeside`) |
+| `GET /api/settings/opensubtitles-save` (admin) → `{roots: [{library, path, exists, writable}], fix}` | can "Download locally" write in each TV/movie folder + the Linux drop-in command | OpenSubtitlesSettings (`SaveBeside`) |
+| `POST /api/files/{id}/subtitles/d<n>/local` → `{saved}` | "Download locally": save a downloaded subtitle next to its video as `<stem>.srt` (403 not yours/admin, 404, 409 the OS refused) | FindSubtitles |
 | `GET /api/files/{id}/opensubtitles?languages=` → `{what, by, results, account}` · `POST /api/files/{id}/opensubtitles {file_id, language, release, hearing_impaired}` → `{track, remaining, message}` | search for a file / download one as its track (409 no key, 429 daily limit, 502 OpenSubtitles failed) | FindSubtitles, TV Player |
 | `DELETE /api/files/{id}/subtitles/d<n>` | remove a downloaded subtitle (who downloaded it, or an admin) | FindSubtitles |
 | `GET /api/items/{id}/folders` (admin) → `{folders: [{path, files, missing}], more}` | a show's folders / a movie's files on the server | FixMatch |
@@ -731,7 +733,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Add a music metadata source | `musicbrainz.py` (client) + `music_match.py` (apply) + credit in `pages/Music.tsx` `About` |
 | Add a DB column/table | `db.SCHEMA` + `SCHEMA_VERSION` + migration step |
 | Anything that touches media files | **only** through `readonly.py`; never write (the one exception: `readonly.create_sidecar` for subtitle copies); keep `test_readonly.py` green |
-| Subtitle copies next to videos (names, when, the setting, the Linux command) | `opensubtitles._beside_name`, `save_beside`, `keep_beside`, `save_check`, `SAVE_SETTING`; the write itself `readonly.create_sidecar` |
+| "Download locally" (names, rights, the Linux command) | `opensubtitles._local_names`, `_write_beside`, `save_locally`, `save_check`; route `save_subtitle_locally` in `app.py`; the write itself `readonly.create_sidecar` |
 | Theme / colours | `:root` tokens at the top of `web/src/styles.css` |
 | Release a new version | bump `config.VERSION`, `deploy/build.py all` (deploy/README.md) |
 | Change what the installers install / ask | Windows `deploy/windows/bams.iss`; Linux `deploy/linux/debian/postinst` (+ `prerm`/`postrm`) |

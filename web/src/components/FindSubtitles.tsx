@@ -46,17 +46,31 @@ export default function FindSubtitles({ fileId, call, subLang, tracks, current, 
     setBusy(r.file_id);
     setErr(null);
     try {
-      const d = await call.post<{ track: SubtitleTrack; remaining: number | null; message: string | null;
-        saved?: string | null; save_error?: string | null }>(
+      const d = await call.post<{ track: SubtitleTrack; remaining: number | null; message: string | null }>(
         `/api/files/${fileId}/opensubtitles`,
         { file_id: r.file_id, language: r.language, release: r.release, hearing_impaired: r.hearing_impaired });
-      const left = d.remaining != null ? `${d.remaining} OpenSubtitles download${d.remaining === 1 ? "" : "s"} left today` : null;
-      const copy = d.saved ? `Saved next to the video as ${d.saved}` : d.save_error ? `Not saved next to the video: ${d.save_error}` : null;
-      onUse(d.track, [copy, left].filter(Boolean).join(" · ") || null);
+      onUse(d.track, d.remaining != null ? `${d.remaining} OpenSubtitles download${d.remaining === 1 ? "" : "s"} left today` : null);
     } catch (e) {
       setErr(e instanceof ApiError && e.status === 429
         ? `${e.message} Subtitles already downloaded still work.` : (e as Error).message);
       setBusy(null);
+    }
+  };
+
+  // "Download locally": the subtitle saved next to the video under the video's name (Episode.srt); who downloaded
+  // it or an admin. saved[track id] = the file name it got.
+  const [saved, setSaved] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const saveLocally = async (t: SubtitleTrack) => {
+    setErr(null);
+    setSaving(t.id);
+    try {
+      const d = await call.post<{ saved: string }>(`/api/files/${fileId}/subtitles/${t.id}/local`);
+      setSaved((s) => ({ ...s, [t.id]: d.saved }));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSaving(null);
     }
   };
 
@@ -101,6 +115,11 @@ export default function FindSubtitles({ fileId, call, subLang, tracks, current, 
                 <span className={t.id === current ? "on" : ""}>{t.label}</span>
                 <button className="btn ghost small" onClick={() => onUse(t, null)} disabled={t.id === current}>
                   {t.id === current ? "In use" : "Use"}</button>
+                {saved[t.id] || t.sidecar
+                  ? <span className="muted find-subs-saved" title="Saved next to the video">Saved as {saved[t.id] || t.sidecar}</span>
+                  : <button className="btn ghost small" onClick={() => saveLocally(t)} disabled={saving !== null}
+                      title="Save this subtitle next to the video, with the video's name">
+                      {saving === t.id ? "Saving…" : "Download locally"}</button>}
                 <button className="btn ghost small danger" onClick={() => remove(t)}>Remove</button>
               </div>
             ))}

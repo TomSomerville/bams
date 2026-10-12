@@ -1117,16 +1117,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             except opensubtitles.OpenSubtitlesError as e:
                 raise os_error(e) from None
 
-    @app.put("/api/settings/opensubtitles-save", dependencies=ADMIN)
-    def put_opensubtitles_save(body: ToggleIn, con=Depends(db)):
-        """Also save each downloaded subtitle next to its video ("Episode.en.srt"): on by default (owner,
-        2026-10-12). The one write BAMS makes in media folders, new files only (readonly.create_sidecar)."""
-        return opensubtitles.set_save_beside(con, body.enabled)
-
     @app.get("/api/settings/opensubtitles-save", dependencies=ADMIN)
     def get_opensubtitles_save(con=Depends(db)):
-        """Whether the OS lets BAMS save copies in each TV/movie library folder (checked without writing), and on a
-        Linux service the command that allows it."""
+        """Whether the OS lets "Download locally" save subtitles in each TV/movie library folder (checked without
+        writing), and on a Linux service the command that allows it."""
         return opensubtitles.save_check(con)
 
     @app.delete("/api/settings/opensubtitles", dependencies=ADMIN)
@@ -1920,6 +1914,21 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if not me["is_admin"] and t["added_by"] != me["id"]:
             raise HTTPException(403, "Only an admin or whoever downloaded it can remove it.")
         opensubtitles.remove(con, paths.root, t["index"])
+
+    @app.post("/api/files/{file_id}/subtitles/{track}/local")
+    def save_subtitle_locally(file_id: int, track: str, con=Depends(db), me=Depends(current_user)):
+        """The player's "Download locally": save a downloaded subtitle ("d<n>") next to its video under the video's
+        name ("Episode.srt"; "Episode.en.srt" if that's taken). Who downloaded it, or an admin. Never overwrites
+        (readonly.create_sidecar, the one write BAMS makes in media folders)."""
+        t = next((x for x in opensubtitles.tracks(con, file_id) if x["id"] == track), None)
+        if not t:
+            raise HTTPException(404, "no such downloaded subtitle")
+        if not me["is_admin"] and t["added_by"] != me["id"]:
+            raise HTTPException(403, "Only an admin or whoever downloaded it can save it next to the video.")
+        try:
+            return {"saved": opensubtitles.save_locally(con, paths.root, file_id, t["index"])}
+        except opensubtitles.SaveError as e:
+            raise HTTPException(409, str(e)) from None
 
     def _probe_of(file_id: int) -> tuple[Path, dict]:
         con = connect(paths.db)

@@ -10,10 +10,11 @@ Their API (https://opensubtitles.stoplight.io/docs/opensubtitles-api/e3750fd63a1
     settings table, like the key); BAMS signs in with it and keeps the 24-hour token in memory. Credentials it
     refused are not tried again until they change (their login is rate limited).
   - User-Agent "BAMS v<version>"; at most 5 requests a second per IP; follow redirects.
-  - Subtitles arrive as UTF-8 SRT. They're kept in the data dir (`subtitles/opensubtitles/<id>.srt`) and listed with
-    the file's own tracks as "d<n>" (table subtitle_downloads). A copy is also saved next to the video
-    ("Episode.en.srt", so other players find it too) unless the admin turns that off: the one write BAMS makes in a
-    media folder (owner's decision 2026-10-12, readonly.create_sidecar: new files only, never overwriting).
+  - Subtitles arrive as UTF-8 SRT. They're kept in the data dir (`cache/subtitles/opensubtitles/<id>.srt`; before
+    0.15.0 `subtitles/opensubtitles/`, rows keep their path) and listed with the file's own tracks as "d<n>" (table
+    subtitle_downloads). The player's "Download locally" saves one next to its video under the video's name
+    ("Episode.srt", save_locally): the one write BAMS makes in a media folder (owner's decisions 2026-10-12,
+    readonly.create_sidecar: new files only, never overwriting).
 
 Network calls happen outside transactions; tests pass a `transport=` (httpx.MockTransport).
 """
@@ -46,11 +47,9 @@ log = logging.getLogger(__name__)
 API = "https://api.opensubtitles.com/api/v1"
 CONSUMERS_URL = "https://www.opensubtitles.com/en/consumers"  # where an account makes an API key ("API consumers")
 KEY_SETTING = "opensubtitles_key"
-SAVE_SETTING = "opensubtitles_save_beside"   # "0" = don't save copies next to videos; on by default (owner, 2026-10-12)
-SAVE_ERROR_SETTING = "opensubtitles_save_error"  # the last copy that couldn't be saved: {at, folder, why}
 USER_AGENT = f"BAMS v{VERSION}"
 PROVIDER = "opensubtitles"
-FOLDER = "subtitles/opensubtitles"  # under the data dir
+FOLDER = "cache/subtitles/opensubtitles"  # under the data dir (owner, 0.15.0); nothing ever empties cache/
 MAX_BYTES = 5_000_000               # a subtitle file is a few hundred KB; anything bigger isn't one
 _MIN_INTERVAL = 0.25                # 4 requests a second, under their 5 per IP
 _LOGIN_INTERVAL = 1.0               # /login: 1 a second
@@ -268,8 +267,7 @@ def status(con: sqlite3.Connection) -> dict:
     return {"configured": key is not None, "last4": key[-4:] if key else None,
             "verified_at": get_setting(con, "opensubtitles_verified_at") if key else None,
             "user": acc[0] if acc else None,
-            "account": jload(get_setting(con, "opensubtitles_account")) if acc else None, "error": refused,
-            "save_beside": save_beside_on(con), "save_error": jload(get_setting(con, SAVE_ERROR_SETTING))}
+            "account": jload(get_setting(con, "opensubtitles_account")) if acc else None, "error": refused}
 
 
 def save_key(con: sqlite3.Connection, client: Client) -> dict:
@@ -463,26 +461,28 @@ def search(con: sqlite3.Connection, client: Client, file_id: int, languages: str
 
 # ------------------------------------------------------------------ a copy next to the video
 
-def save_beside_on(con: sqlite3.Connection) -> bool:
-    return get_setting(con, SAVE_SETTING, "1") != "0"
+class SaveError(Exception):
+    """Why a subtitle couldn't be saved next to its video (written for the person who pressed the button)."""
 
 
-def _beside_name(stem: str, language: str | None, hearing_impaired: bool, n: int) -> str:
-    """"Episode.en.srt", "Episode.en.sdh.srt", then "Episode.en.2.srt"...: what BAMS, Jellyfin and Plex read as a
-    subtitle of that video in that language ("pt-br" is written "pt-BR", as they expect)."""
+def _local_names(stem: str, language: str | None, hearing_impaired: bool):
+    """"Episode.srt" (the video's own name, what the owner asked for), then, when that's taken by another subtitle,
+    "Episode.en.srt" / "Episode.en.sdh.srt", then "Episode.en.2.srt"...: names BAMS, Jellyfin and Plex all read as a
+    subtitle of that video ("pt-br" written "pt-BR", as they expect)."""
+    yield f"{stem}.srt"
     lang = re.sub(r"[^a-z0-9-]", "", (language or "").lower())[:12].strip("-") or "und"
     if "-" in lang:
         a, _, b = lang.partition("-")
         lang = f"{a}-{b.upper()}"
-    return f"{stem}.{lang}{'.sdh' if hearing_impaired else ''}{f'.{n}' if n > 1 else ''}.srt"
+    tag = f"{lang}{'.sdh' if hearing_impaired else ''}"
+    for n in range(1, 20):
+        yield f"{stem}.{tag}{f'.{n}' if n > 1 else ''}.srt"
 
 
-def save_beside(video: Path, language: str | None, hearing_impaired: bool, data: bytes) -> str:
-    """Save a downloaded subtitle next to its video through readonly.create_sidecar (a new file only: a name that's
-    taken gets the next number). A file there with the same bytes is used as it is. Returns the file name; OSError
-    when the OS refuses (a read-only mount, the service's sandbox, permissions)."""
-    for n in range(1, 21):
-        name = _beside_name(video.stem, language, hearing_impaired, n)
+def _write_beside(video: Path, names, data: bytes) -> str:
+    """The first free name of `names` next to `video`, through readonly.create_sidecar (new files only). A file there
+    with the same bytes is used as it is. OSError when the OS refuses."""
+    for name in names:
         there = video.parent / name
         if os.path.lexists(there):
             try:
@@ -498,7 +498,32 @@ def save_beside(video: Path, language: str | None, hearing_impaired: bool, data:
             return name
         except FileExistsError:
             continue
-    raise OSError(errno.EEXIST, "there are already 20 subtitle files with that name next to the video")
+    raise OSError(errno.EEXIST, "there are already too many subtitle files with that name next to the video")
+
+
+def save_locally(con: sqlite3.Connection, data_dir: Path, file_id: int, row_id: int) -> str:
+    """The player's "Download locally" (owner, 0.15.0): a downloaded subtitle saved next to its video under the video's
+    name ("Chernobyl - S01E02 - Please remain calm.srt"). Never overwrites: a name that's taken by another subtitle
+    gets the language ("….en.srt"). Recorded in subtitle_downloads.sidecar, so the player doesn't list it twice. The
+    disk work happens before the short write that records it. SaveError when it can't be done."""
+    r = con.execute("SELECT * FROM subtitle_downloads WHERE id=? AND file_id=?", (row_id, file_id)).fetchone()
+    if not r:
+        raise LookupError("no such downloaded subtitle")
+    if r["sidecar"]:
+        return r["sidecar"]
+    video = _video(con, file_id)
+    try:
+        if video is None:
+            raise OSError(errno.ENOENT, "the video isn't reachable right now (drive offline, or moved)")
+        name = _write_beside(video, _local_names(video.stem, r["language"], bool(r["hearing_impaired"])),
+                             (data_dir / r["path"]).read_bytes())
+    except (OSError, ValueError) as e:
+        log.warning("OpenSubtitles: couldn't save subtitle %s next to %s: %s", r["ext_id"], video, e)
+        raise SaveError(f"Couldn't save it next to the video: {_save_problem(e)}.") from None
+    with Tx(con):
+        con.execute("UPDATE subtitle_downloads SET sidecar=? WHERE id=?", (name, row_id))
+    log.info("OpenSubtitles: saved %s next to its video", name)
+    return name
 
 
 def _save_problem(e: Exception) -> str:
@@ -518,33 +543,8 @@ def _video(con: sqlite3.Connection, file_id: int) -> Path | None:
     return Path(r["root"]) / r["rel_path"] if r and r["available"] else None
 
 
-def keep_beside(con: sqlite3.Connection, data_dir: Path, file_id: int, row_id: int) -> tuple[str | None, str | None]:
-    """A downloaded subtitle's copy next to its video, saved now if the setting is on and there's none yet:
-    (file name, None), or (None, why not). The disk work happens before the short write that records it."""
-    r = con.execute("SELECT * FROM subtitle_downloads WHERE id=?", (row_id,)).fetchone()
-    if r["sidecar"] or not save_beside_on(con):
-        return r["sidecar"], None
-    video = _video(con, file_id)
-    try:
-        if video is None:
-            raise OSError(errno.ENOENT, "the video isn't reachable right now (drive offline, or moved)")
-        name = save_beside(video, r["language"], bool(r["hearing_impaired"]), (data_dir / r["path"]).read_bytes())
-    except (OSError, ValueError) as e:
-        why = _save_problem(e)
-        log.warning("OpenSubtitles: couldn't save subtitle %s next to %s: %s", r["ext_id"], video, e)
-        with Tx(con):
-            set_setting(con, SAVE_ERROR_SETTING, jdump({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                                        "folder": str(video.parent) if video else None, "why": why}))
-        return None, why
-    with Tx(con):
-        con.execute("UPDATE subtitle_downloads SET sidecar=? WHERE id=?", (name, row_id))
-        set_setting(con, SAVE_ERROR_SETTING, None)
-    log.info("OpenSubtitles: saved %s next to its video", name)
-    return name, None
-
-
 def save_check(con: sqlite3.Connection) -> dict:
-    """Settings: can BAMS save copies in each TV/movie library folder (the OS's answer, checked without writing; on
+    """Settings: can "Download locally" save subtitles in each TV/movie library folder (the OS's answer, checked without writing; on
     Windows only the read-only flag is visible, so `null`)? `fix`: the command that allows it when the Linux
     service's sandbox (ProtectSystem=strict) is what says no."""
     out = []
@@ -563,14 +563,6 @@ def save_check(con: sqlite3.Connection) -> dict:
         fix = (f"sudo mkdir -p {os.path.dirname(conf)} && printf '%s\n' '[Service]' {shlex.quote(rw)} | sudo tee {conf}"
                " && sudo systemctl daemon-reload && sudo systemctl restart bams")
     return {"roots": out, "fix": fix}
-
-
-def set_save_beside(con: sqlite3.Connection, on: bool) -> dict:
-    with Tx(con):
-        set_setting(con, SAVE_SETTING, "1" if on else "0")
-        if not on:
-            set_setting(con, SAVE_ERROR_SETTING, None)
-    return status(con)
 
 
 def listing(con: sqlite3.Connection, file_id: int, own: list[dict]) -> list[dict]:
@@ -595,7 +587,8 @@ def tracks(con: sqlite3.Connection, file_id: int) -> list[dict]:
                     "label": " · ".join(filter(None, [name or r["language"] or "Subtitles", release,
                                                       "SDH" if r["hearing_impaired"] else None])),
                     "forced": False, "sdh": bool(r["hearing_impaired"]), "image": False, "ext_id": r["ext_id"],
-                    "added_by": r["added_by"], "url": f"/api/files/{file_id}/subtitles/d{r['id']}.vtt"})
+                    "added_by": r["added_by"], "sidecar": r["sidecar"],  # saved next to the video as (or None)
+                    "url": f"/api/files/{file_id}/subtitles/d{r['id']}.vtt"})
     return out
 
 
@@ -622,10 +615,9 @@ def download(con: sqlite3.Connection, client: Client, data_dir: Path, file_id: i
         raise LookupError("no such file")
     mine = con.execute("SELECT id FROM subtitle_downloads WHERE file_id=? AND provider=? AND ext_id=?",
                        (file_id, PROVIDER, ext)).fetchone()
-    if mine:  # picked before: just that track (and its copy next to the video, if that failed or was off before)
-        saved, why = keep_beside(con, data_dir, file_id, mine["id"])
+    if mine:  # picked before: just that track
         return {"track": next(t for t in tracks(con, file_id) if t["index"] == mine["id"]), "remaining": None,
-                "message": None, "saved": saved, "save_error": why}
+                "message": None}
     rel = f"{FOLDER}/{ext}.srt"
     dest = data_dir / rel
     remaining = message = None
@@ -656,9 +648,8 @@ def download(con: sqlite3.Connection, client: Client, data_dir: Path, file_id: i
             (file_id, PROVIDER, ext, (language or "")[:16] or None, (release or "")[:200] or None,
              int(bool(hearing_impaired)), rel, user_id, datetime.now(timezone.utc).isoformat(timespec="seconds")))
     row_id = cur.lastrowid
-    saved, why = keep_beside(con, data_dir, file_id, row_id)
     return {"track": next(t for t in tracks(con, file_id) if t["index"] == row_id), "remaining": remaining,
-            "message": message, "saved": saved, "save_error": why}
+            "message": message}
 
 
 def remove(con: sqlite3.Connection, data_dir: Path, row_id: int) -> None:
