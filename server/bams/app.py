@@ -1573,11 +1573,12 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     def _unrecognized(con, lib_id: int | None) -> list[dict]:
         """Files the parser couldn't place (each with a hint about why), files placed by a best guess (auto fill,
-        `guessed`: to review), and files identified by hand."""
+        `guessed`: to review), and files identified by hand, except the ones the admin kept (`manual.kept`)."""
         rows = con.execute(f"""SELECT f.*, lr.path AS root, l.name AS library_name, l.type AS library_type
                                FROM files f JOIN library_roots lr ON lr.id=f.root_id JOIN libraries l ON l.id=f.library_id
                                WHERE (f.id NOT IN (SELECT file_id FROM file_items) OR f.manual IS NOT NULL
                                       OR json_extract(f.parse, '$.guessed'))
+                                     AND json_extract(f.manual, '$.kept') IS NULL
                                {"AND f.library_id=?" if lib_id is not None else ""}
                                ORDER BY l.name COLLATE NOCASE, f.rel_path""", (() if lib_id is None else (lib_id,)))
         out = []
@@ -1691,6 +1692,21 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         with Tx(con):
             identify.store(con, file_id, {"skip": True})
         return {"recognized": False}
+
+    @app.put("/api/files/{file_id}/keep", dependencies=ADMIN)
+    def keep_file(file_id: int, con=Depends(db)):
+        """This file's hand identification (or auto fill's guess, saved as one) is right: take it off the
+        Unrecognized list. Kept across rescans; DELETE /identify forgets it."""
+        f = con.execute("SELECT l.type FROM files f JOIN libraries l ON l.id=f.library_id WHERE f.id=?",
+                        (file_id,)).fetchone()
+        if not f:
+            raise HTTPException(404, "no such file")
+        if f["type"] == "music":
+            raise HTTPException(400, "Music is identified from its tags.")
+        with Tx(con):
+            if not identify.keep(con, file_id):
+                raise HTTPException(409, "Nothing to keep: identify the file first.")
+        return {"kept": True}
 
     @app.delete("/api/files/{file_id}/identify", dependencies=ADMIN)
     def unidentify_file(file_id: int, con=Depends(db)):

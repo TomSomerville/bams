@@ -245,7 +245,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   `test_groups_shows_seasons_episodes` do. Guesses must never turn a movie in its own folder into a fake show
   (`test_movie_in_tv_library_is_flagged`), but a film under a show's folder is that show's Specials, even in its own
   subfolder (`Daria Complete Series/Daria Is It College Yet 2002 …/…avi`). "Don't place" is `files.manual = {skip: true}`: code reading `manual` must
-  expect it (no title).
+  expect it (no title). "Keep" adds `kept: true` to a hand identification (it then leaves the Unrecognized list).
 - **guessit splits names at hyphens**: a folder "Catch-22" read as "Catch" + episode 22, "Ant-Man.2015" as release
   group "Ant" + "Man". In `parse.py` always read names through `parse._read(text, kind, folder=)`, never `guessit()`
   directly: it re-reads a hyphenated word the title was cut through with the hyphen protected (`_protect`). In a
@@ -254,6 +254,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Downloaded subtitles ("d<n>" tracks)** live in the data dir (`subtitles/opensubtitles/`, table
   `subtitle_downloads`), not next to the video. `subtitles.tracks()` lists only the file's own tracks: code that
   needs every track adds `opensubtitles.tracks(con, file_id)` (as `get_item` and the `.vtt` route do).
+- **Don't guess the OpenSubtitles key's format**: their docs don't give one, and a 16–64 character check refused the
+  owner's paste. `valid_key_format` only rules out spaces and silly lengths; a JWT with an `exp` (a sign-in token, 24 h)
+  is refused with an explanation (`_sign_in_token`); everything else is OpenSubtitles' call (`Client.check`).
 - **OpenSubtitles answers a wrong API key with 403 "You cannot consume this service"** on searches (`/infos/formats`
   works with any key, so it can't check one). `Client.check()` uses a small search; searching never counts against
   the download limit, downloads do (also when picked from the TV).

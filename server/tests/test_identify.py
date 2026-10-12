@@ -32,6 +32,10 @@ def _file(c, name):
     return next(f for f in c.get("/api/unrecognized").json() if f["path"].endswith(name))
 
 
+def _names(c):
+    return [f["path"].rsplit("/", 1)[-1] for f in c.get("/api/unrecognized").json()]
+
+
 def test_identify_unrecognised_file_and_keep_it(tv):
     app, c, lib_id, paths = tv
     files = c.get("/api/unrecognized").json()
@@ -49,9 +53,13 @@ def test_identify_unrecognised_file_and_keep_it(tv):
     assert ep["ancestors"][0]["title"] == "Show"  # joined the existing show, not a new one
     assert c.get(f"/api/libraries/{lib_id}").json()["files"]["unrecognized"] == 1
     assert _file(c, "clip0042.mkv")["manual"]["episodes"] == [2]  # still listed, as identified by hand
+    # Keep: it's right, so it leaves the list (the identification stays)
+    assert c.put(f"/api/files/{clip['id']}/keep").json() == {"kept": True}
+    assert _names(c) == ["random stuff.mkv"]
 
     # an extra (no episode number), then a rescan that re-reads every file: both identifications stay
     rnd = _file(c, "random stuff.mkv")
+    assert c.put(f"/api/files/{rnd['id']}/keep").status_code == 409  # nothing to keep yet
     assert c.put(f"/api/files/{rnd['id']}/identify",
                  json={"title": "Show", "year": 2010, "season": 0, "episode_title": "Gag Reel"}).status_code == 200
 
@@ -63,6 +71,7 @@ def test_identify_unrecognised_file_and_keep_it(tv):
     assert names == [{"season": 0, "episodes": [{"n": None, "title": "Gag Reel"}]},
                      {"season": 1, "episodes": [{"n": 1, "title": "Pilot"}, {"n": 2, "title": "The Second One"}]}]
     assert c.get(f"/api/libraries/{lib_id}").json()["files"]["unrecognized"] == 0
+    assert _names(c) == ["random stuff.mkv"]  # the kept one stays off the list
 
     # undo: unrecognised again, and the extra it made is gone
     assert c.delete(f"/api/files/{rnd['id']}/identify").json() == {"recognized": False}
@@ -76,11 +85,13 @@ def test_identify_rules(tv):
     assert c.put(f"/api/files/{clip['id']}/identify", json={"title": "Show"}).status_code == 422  # season needed
     assert c.put(f"/api/files/{clip['id']}/identify", json={"title": "", "season": 1}).status_code == 422
     assert c.put("/api/files/99999/identify", json={"title": "Show", "season": 1}).status_code == 404
+    assert c.put("/api/files/99999/keep").status_code == 404
     assert c.post("/api/identify/lookup", json={"link": "https://www.themoviedb.org/tv/456", "library_id": lib_id}
                   ).status_code == 409  # no TMDB key
     kid = signed_in(app, "Kid", admin=False)
     assert kid.get("/api/unrecognized").status_code == 403
     assert kid.put(f"/api/files/{clip['id']}/identify", json={"title": "Show", "season": 1}).status_code == 403
+    assert kid.put(f"/api/files/{clip['id']}/keep").status_code == 403
 
 
 def test_autofill_places_by_guess_and_can_be_reviewed(tmp_path):
@@ -109,11 +120,13 @@ def test_autofill_places_by_guess_and_can_be_reviewed(tmp_path):
         assert hello["guessed"] and hello["hint"] is None and hello["guess"]["title"] == "Korean Lessons"
         assert not listed["random stuff.mkv"]["guessed"] and listed["random stuff.mkv"]["hint"]
 
-        # keep a guess (saved as a hand identification), skip another; a rescan that re-reads every file keeps both
+        # keep a guess (saved as a hand identification, off the list), skip another; a rescan that re-reads every
+        # file keeps both
         part3 = listed["Random.Show.Part.3.720p.x264.mkv"]
         assert part3["guess"] == {"title": "Random Show", "year": None, "season": 1, "episodes": [3], "episode_title": None}
-        assert c.put(f"/api/files/{part3['id']}/identify", json=part3["guess"]).status_code == 200
+        assert c.put(f"/api/files/{part3['id']}/keep").json() == {"kept": True}
         assert c.put(f"/api/files/{hello['id']}/skip").json() == {"recognized": False}
+        assert c.put(f"/api/files/{hello['id']}/keep").status_code == 409  # left out: nothing to keep
         con = connect(paths.db)
         con.execute("UPDATE files SET parse=json_set(parse, '$.v', 0)")
         con.close()
@@ -122,7 +135,8 @@ def test_autofill_places_by_guess_and_can_be_reviewed(tmp_path):
         listed = {f["path"].rsplit("/", 1)[-1]: f for f in c.get("/api/unrecognized").json()}
         assert listed["Hello and goodbye.mp4"]["manual"] == {"skip": True}
         assert c.get(f"/api/libraries/{lib_id}").json()["files"]["unrecognized"] == 1  # a skipped file isn't "to do"
-        assert listed["Random.Show.Part.3.720p.x264.mkv"]["manual"]["episodes"] == [3]
+        assert "Random.Show.Part.3.720p.x264.mkv" not in listed
+        assert ("Random Show", 1, 3, "Episode 3") in placed()
         assert c.get(f"/api/libraries/{lib_id}").json()["files"]["guessed"] == 0
         # undoing the skip places it by guess again
         assert c.delete(f"/api/files/{hello['id']}/identify").json() == {"recognized": True}

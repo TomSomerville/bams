@@ -80,8 +80,26 @@ def api_key(con: sqlite3.Connection) -> str | None:
 
 
 def valid_key_format(key: str) -> bool:
-    """Their keys are a few dozen letters and digits; anything with spaces or far off that isn't one."""
-    return bool(re.fullmatch(r"[A-Za-z0-9_-]{16,64}", key.strip()))
+    """Only rules out what can't be a key (spaces, a few characters, a whole page): what a key looks like isn't
+    documented, so OpenSubtitles decides (save_key asks them). A 64-character limit refused a real paste once."""
+    return bool(re.fullmatch(r"[!-~]{8,4096}", key.strip()))
+
+
+def _sign_in_token(key: str) -> str | None:
+    """Why a pasted value is a sign-in token rather than an API key, or None. Their sign-in tokens (JWTs from
+    /login, also what the website hands out) carry an `exp` a day away; an API key doesn't expire."""
+    parts = key.strip().split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        exp = float(json.loads(base64.urlsafe_b64decode(parts[1] + "=="))["exp"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    when = datetime.fromtimestamp(exp, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    if exp > time.time() + 30 * 86400:
+        return None  # lives for months: not a sign-in token, let OpenSubtitles judge it
+    return (f"That's an OpenSubtitles sign-in token (it {'expired' if exp < time.time() else 'expires'} {when}), not an "
+            f"API key. The API key is on {CONSUMERS_URL}: open the consumer you made and copy its API key.")
 
 
 # Process-wide: requests spaced out, the signed-in account's token, credentials OpenSubtitles refused.
@@ -245,6 +263,8 @@ def status(con: sqlite3.Connection) -> dict:
 def save_key(con: sqlite3.Connection, client: Client) -> dict:
     """Settings: keep the client's key once OpenSubtitles accepted it (InvalidKey: it isn't kept). When they can't be
     reached, it's kept unchecked, like the TMDB key."""
+    if why := _sign_in_token(client.key):
+        raise InvalidKey(why)
     verified = None
     try:
         client.check()

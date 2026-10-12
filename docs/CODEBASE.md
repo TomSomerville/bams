@@ -50,7 +50,7 @@ bams/
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
 │   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; every name is read through `_read` (guessit, with hyphenated words kept whole: `_protect`); `_show_dir`/`_show_dir_at` pick the folder that names the show (`title_folder` for Fix match); `guess()` = Auto fill's best guess when the rules can't place a file
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
-│   │   ├── identify.py        Files identified by hand (files.manual, {skip} = don't place): parsed_for() (scanner), from_name() (rules, then Auto fill guess), store(), replace_unplaced(), TMDB/IMDb link lookup, names for suggestions
+│   │   ├── identify.py        Files identified by hand (files.manual, {skip} = don't place, kept = off the Unrecognized list): parsed_for() (scanner), from_name() (rules, then Auto fill guess), store(), keep(), replace_unplaced(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
 │   │   ├── tmdb.py            TMDB HTTP client (Bearer or api_key), throttle/retry, image cache download
 │   │   ├── probe.py           ffprobe discovery + JSON → compact summary (codecs, resolution, HDR + DV profile, sar +
@@ -516,6 +516,9 @@ suggestions (`Combo.tsx`). A pasted link → `POST /api/identify/lookup` → `id
 `PUT /api/files/{id}/identify` → `identify.store` (in one transaction: `files.manual`, `parse` rewritten from it incl.
 `ids.tmdb`, relink, orphan cleanup) → `matcher.match_title` with the TMDB id (or a search if the title is still
 pending). `DELETE` clears it and re-parses from the name. `PUT /api/files/{id}/skip` stores `{skip: true}` (never placed).
+`PUT /api/files/{id}/keep` → `identify.keep`: the hand identification gets `kept: true` (an Auto fill guess is stored
+as one first); `_unrecognized` leaves kept files out, so the list empties as files are confirmed. 409 when there's
+nothing to keep (unplaced, or "Don't place").
 
 **Auto fill** (`parse.guess`): files the rules can't place are placed by a best guess and listed with `guessed: true`
 (review: Keep = PUT /identify with the guess, Change = the form, Don't place = /skip). A film (title + year) under a
@@ -581,6 +584,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/unrecognized` · `GET /api/libraries/{id}/unrecognized` (admin) | unplaced files (`hint`, `guess`), files placed by Auto fill (`guessed: true`) + hand-identified/skipped ones (`manual`), with `library_*` | Identify.tsx |
 | `GET /api/files/{id}/guess` (admin) | the form's "Best guess": forced guess → `{title, year, season, episodes, episode_title}` / `{title, year, edition}`; 422 nothing to go on | Identify.tsx |
 | `PUT /api/files/{id}/skip` (admin) | don't place this file (`files.manual = {skip: true}`; `DELETE …/identify` undoes) | Identify.tsx |
+| `PUT /api/files/{id}/keep` (admin) → `{kept: true}` | its hand identification (or guess) is right: off the Unrecognized list for good (409 nothing to keep, 400 music) | Identify.tsx |
 | `PUT /api/settings/autofill {enabled}` (admin; state in `GET /api/settings` → `autofill`) | Auto fill on/off; re-places unplaced/guessed files at once | Identify.tsx `AutofillSettings` |
 | `PUT /api/files/{id}/identify {title, year, season, episodes, episode_title, edition, tmdb_id}` · `DELETE` (admin) | identify a file by hand / forget it → `{item_id, title_id, note}` / `{recognized}` | Identify.tsx |
 | `POST /api/identify/lookup {link, library_id}` · `GET /api/libraries/{id}/names` (admin) | TMDB/IMDb link → fields (409 without a key, 400 wrong type/unreadable) · names in a library for suggestions | Identify.tsx |
@@ -593,7 +597,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, passthrough?, start?}` → `{id, playlist, variants, copy, channels, passthrough}` | open an HLS session (503 at the limit, 409 if not probed / no keyframes, 422 unknown `burn` track) | Player |
 | `GET /api/hls/{sid}/index.m3u8` · `/{v}/index.m3u8` · `/{v}/init.mp4` · `/{v}/{k}.ts\|m4s` · `DELETE /api/hls/{sid}` | master / variant playlist / copy header / segment (made on demand; 409 superseded, 504 too slow) / close | Player (hls.js) |
 | `GET /api/files/{id}/subtitles/{track}.vtt?shift=` | a text subtitle track (embedded `e<n>`, sidecar `x<n>`, downloaded `d<n>`) as WebVTT (400 for picture tracks) | Player |
-| `PUT /api/settings/opensubtitles-key {key}` · `DELETE` · `POST …/test` (admin; state in `GET /api/settings` → `opensubtitles` `{configured, last4, verified_at, user, account, error}`) | the server's OpenSubtitles API key: checked first (400 refused), never returned | OpenSubtitlesSettings |
+| `PUT /api/settings/opensubtitles-key {key}` · `DELETE` · `POST …/test` (admin; state in `GET /api/settings` → `opensubtitles` `{configured, last4, verified_at, user, account, error}`) | the server's OpenSubtitles API key: checked first (400 refused; spaces/too short/a pasted sign-in token refused without asking them, `opensubtitles._sign_in_token`), never returned | OpenSubtitlesSettings |
 | `PUT /api/settings/opensubtitles {username, password}` · `DELETE` (admin) | the optional OpenSubtitles account (signed in first; 400 refused; 409 without a key) | OpenSubtitlesSettings |
 | `GET /api/files/{id}/opensubtitles?languages=` → `{what, by, results, account}` · `POST /api/files/{id}/opensubtitles {file_id, language, release, hearing_impaired}` → `{track, remaining, message}` | search for a file / download one as its track (409 no key, 429 daily limit, 502 OpenSubtitles failed) | FindSubtitles, TV Player |
 | `DELETE /api/files/{id}/subtitles/d<n>` | remove a downloaded subtitle (who downloaded it, or an admin) | FindSubtitles |
@@ -637,7 +641,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
 | `test_watchlist.py` | the watch list: add/list/remove (newest first, `show`/`season_id`), video kinds only, `watchlist` flags on lists and pages, per account (+ removed with the account), 401, merges keep entries, deleted items leave, `watchlist_name` pref, v12 migration |
 | `test_watch.py` | progress / 90% rule / play count, mark show watched, Continue Watching + next episode (seasons, specials, `season_id`, `last_watched_at`), taking a title out until it's watched again, per user, merges keep state, threshold settings, per-user prefs, Home rows pref (order, dedupe, validation) |
-| `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB; Auto fill: guesses placed + listed, keep, skip, rescan keeps both, setting off/on |
+| `test_identify.py` | unrecognised list + names, identify (episode / extra), rescan keeps it, undo, validation + viewer 403, TMDB/IMDb link lookup against a fake TMDB; Auto fill: guesses placed + listed, keep, skip, rescan keeps both, setting off/on; Keep (hand-identified and guessed files leave the list, 409/404/403) |
 | `test_opensubtitles.py` | against a fake OpenSubtitles (`app.state.opensubtitles_transport`): search by TMDB id + season/episode + the file's hash (sorted, lowercase), by name for a movie without ids, the key like TMDB's (refused/not kept, never returned, test, removed = off), account refused/kept, token reused and re-made, download into the data dir (media untouched), no second download, quota 429, removal rights |
 | `test_subtitles.py` | language names, sidecar matching + labels, VobSub sidecar listing (languages from the .idx, lone .idx/.sub ignored), shift, real SRT/cp1252 sidecar through the API (media untouched), a hand-written PGS track and a VobSub sidecar burned in (HLS from 0 and mid-line, live stream mid-line) |
 | `vobsub.py` (helper) | writes `.idx` + `.sub` pairs from 2-bit bitmaps (pictures split over 2048-byte packs), for tests and test media |

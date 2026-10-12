@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-11** (release 0.11.1).
+Last updated: **2026-10-11** (release 0.13.1).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -153,6 +153,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **Remove from Continue Watching** takes out the **title** (the movie, or the episode's whole show) for that account until there's **later activity** on it (`continue_hidden.hidden_at` vs the deciding row's `updated_at`; opened < "started" threshold doesn't count). A long press (web: or right-click; TV: holding OK) opens a menu with Remove / Cancel rather than removing at once | Owner: "Long press… to remove it from continue watching. If the show is later watched, it will get added back in." Hiding one episode would just show the next; the menu step guards against a stray hold while scrolling a row on a phone |
 | 10-11 | OpenSubtitles is searched by the title's **TMDB id** (show id + season/episode for episodes), else IMDb, plus the file's **moviehash** (BAMS's `quick_hash` is their hash); by name only when that finds nothing | Their advice; the hash puts subtitles made for the exact file first ("made for this file") |
 | 10-11 | **Sleep mode** = this episode **and 2 more**, then stop (a movie: stop at its end); toggled in the player, per viewing, not saved | Tester request ("finish the current episode, play 2 more, and then stop"). Carried to the next episode in the navigation state |
+| 10-11 | **"Keep" takes a file off the Unrecognized list** (`files.manual.kept`): hand-identified files as well as Auto fill's guesses (saved as a hand identification) | Owner: identified files stayed listed for good, so the list never emptied. A kept file is still identified by hand: rescans keep it, `DELETE /identify` forgets it |
+| 10-11 | **The OpenSubtitles key box rules out only what can't be a key** (spaces, under 8 or over 4096 characters); a pasted sign-in token (a JWT whose `exp` is under 30 days away) is refused with a pointer to the API consumers page | Owner's paste was refused by the 0.10.0 check (16–64 letters, digits, `-`, `_`), which guessed a format nobody documents. What they had pasted was a 24-hour sign-in token, so a clear message beats a vague one |
 | 10-11 | **Hyphenated words in names are read whole** (`parse._read`): when guessit's title cuts through one, it's read again with the hyphen protected. In file names "Show-01" stays episode 1 and an all-lowercase "grp-title.2010" keeps its group; a movie folder's name wins when the file's lost its front | Tester: "Catch-22" was "Catch" (guessit read "-22" as the episode; "Ant-" in "Ant-Man.2015" as a release group). Dry run over the owner's 4,391 real paths: nothing else changed |
 | 10-11 | **Another server's library order is kept per browser** (dragged in the sidebar, `bams.servers` → `order`), by anyone; this server's own order stays the admin's, shared by everyone. This server's libraries sit under its **name** in the sidebar, like other servers' | Owner: "allow me to drag and re-arrange the library order on other servers" and "This should say your server name, not Libraries". Kept where that browser's names and hidden flags for the server already are: no admin rights needed there, nothing changes for its other users |
 | 10-11 | **Fix match lists the title's folders** (shows: the folder above the season folders, as the parser picks it, with file counts; movies: their files), admins only | Tester request: check the right folder is being fixed. Server paths are admin information (`/api/status` hides them from viewers too) |
@@ -182,7 +184,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   "Series N" marker is the season's, not the show's; hyphenated names kept whole ("Catch-22", "Ant-Man", "9-1-1",
   `parse._read`). ~65 real-world cases in `tests/test_parse.py`.
 - **Identify by hand** (`identify.py`): unrecognised files listed with hints; an admin pastes a TMDB/IMDb link or
-  enters title/year/season/episodes; kept in `files.manual` across rescans; undo; "Don't place" (`{skip: true}`).
+  enters title/year/season/episodes; kept in `files.manual` across rescans; undo; "Don't place" (`{skip: true}`);
+  "Keep" (`{…, kept: true}`, 0.13.1) takes a hand-identified or guessed file off the Unrecognized list.
 - **Auto fill** (0.9.0, `parse.guess`): what the rules can't place is placed by a best guess from folders and name
   (on by default, Settings → Unrecognized files → Auto fill); guesses are listed for review (Keep / Change / Don't place).
 - **Grouping:** `item_keys` aliases so differently-named folders of one show (e.g. "Bobs Burgers S01-S08…" and
@@ -382,6 +385,27 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-11: Keep for hand-identified files, OpenSubtitles key check (release 0.13.1)
+- **What / why:** (1) Another session's finished work, documented here at release: "Keep" in the Unrecognized list
+  now also works on files identified by hand. `PUT /api/files/{id}/keep` (admin) → `identify.keep`: a hand
+  identification gets `kept: true`; an Auto fill guess is stored as a hand identification with `kept: true`; an
+  unplaced or "Don't place" file → 409. `_unrecognized` leaves kept files out. Web `Identify.tsx`: Keep shown on
+  guessed and hand-identified rows, calls `/keep`. (2) Owner: "subtitle api key has underscores and stuff but it
+  wont accept it". The 0.10.0 format check (16–64 of `[A-Za-z0-9_-]`) was a guess; it now accepts 8–4096 printable
+  characters without spaces and OpenSubtitles decides (`Client.check`). The owner's paste was actually a sign-in
+  token (JWT, `exp` a day away, already expired): `opensubtitles._sign_in_token` refuses such a value in `save_key`
+  with "That's an OpenSubtitles sign-in token (it expired …), not an API key" + the consumers link, without sending it.
+- **Files:** `server/bams/identify.py` (`keep`), `app.py` (`/keep`, `_unrecognized`), `opensubtitles.py`
+  (`valid_key_format`, `_sign_in_token`, `save_key`); tests `test_identify.py` (keep: hand-identified, guessed,
+  nothing to keep 409, 404, viewer 403, rescan keeps it off the list), `test_opensubtitles.py` (long key with dots
+  goes to OpenSubtitles; sign-in tokens, fresh and expired, refused without a request); web
+  `components/Identify.tsx`; CHANGELOG, VERSION 0.13.1.
+- **Verified:** 330 server tests in the main checkout and again in a clean worktree of the release commit; web
+  `tsc` + build. The owner's key itself was never read or replayed: only the expiry visible in their screenshot was
+  converted to a date.
+- **Left open:** a kept file can't be un-kept from the web (it's off the list; only `DELETE
+  /api/files/{id}/identify` forgets it). The real OpenSubtitles API key's format is still undocumented.
 
 ### 2026-10-11: Watch list across every server (release 0.13.0)
 - **What / why:** owner: "implement a watchlist feature. ALL files I should be able to add… 'My Watch List' will be its
