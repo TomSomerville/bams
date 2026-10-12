@@ -238,7 +238,7 @@ function FileRow({ f, onChange }: { f: UnrecognizedFile; onChange: () => void })
     }
   };
   const undo = act(() => api.del(`/api/files/${f.id}/identify`));
-  const keep = act(() => api.put(`/api/files/${f.id}/identify`, fromGuess(f.guess)));  // the guess, kept as a hand identification
+  const keep = act(() => api.put(`/api/files/${f.id}/keep`, {}));  // right as it is: off the list (a guess is saved as a hand identification)
   const skip = act(() => api.put(`/api/files/${f.id}/skip`, {}));
 
   return (
@@ -249,8 +249,8 @@ function FileRow({ f, onChange }: { f: UnrecognizedFile; onChange: () => void })
         <span className="spacer" />
         {canEdit && !editing && <button className="btn ghost small" onClick={() => { setEditing(true); setMsg(null); }}>
           <Icon name="edit" size={14} /> {f.manual && !skipped ? "Edit" : guessed ? "Change" : "Identify"}</button>}
-        {guessed && !editing && <button className="btn ghost small" onClick={keep}
-          title="The guess is right: keep it as it is, like a hand identification">Keep</button>}
+        {(guessed || (f.manual && !skipped)) && !editing && <button className="btn ghost small" onClick={keep}
+          title="This is right: keep it as it is and take it off this list">Keep</button>}
         {canEdit && !f.manual && !editing && <button className="btn ghost small" onClick={skip}
           title="Don't place this file anywhere (kept across rescans)">Don't place</button>}
         {f.manual && !editing && <button className="btn ghost small" onClick={undo}
@@ -317,7 +317,7 @@ export function AutofillSettings({ onChange }: { onChange?: () => void }) {
   );
 }
 
-/** Files the scanner couldn't identify (and ones identified by hand), for one library or all of them. */
+/** Files the scanner couldn't identify (and guessed or hand-identified ones until they're kept), for one library or all of them. */
 export function UnrecognizedFiles({ libraryId, reloadKey, onChange }: { libraryId?: number; reloadKey?: unknown; onChange?: () => void }) {
   const [files, setFiles] = useState<UnrecognizedFile[] | null>(null);
   const [err, setErr] = useState<string | null>(null);

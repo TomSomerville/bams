@@ -3,6 +3,22 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.13.1 (2026-10-11)
+
+### Changed
+- **Keep in the Unrecognized list now works on files you identified by hand too**, not only on Auto fill's guesses.
+  Pressing **Keep** says "this is right": the file leaves the list and stays where it is, across rescans. A kept
+  guess is saved as a hand identification.
+
+### Fixed
+- **The OpenSubtitles API key box refused real keys** that were long or had dots in them ("That doesn't look like an
+  OpenSubtitles API key"). It now accepts anything without spaces and lets OpenSubtitles say whether the key works.
+  Pasting an OpenSubtitles sign-in token by mistake (it expires after a day) now says so and points to the page with
+  the real API key (opensubtitles.com → your profile → **API consumers**).
+
+Update the server with the new installer. The TV apps are unchanged: `BAMS-SamsungTV-0.13.0.wgt` and
+`BAMS-FireTV-0.13.0.apk` from the 0.13.0 release are still current.
+
 ## 0.13.0 (2026-10-11)
 
 ### New

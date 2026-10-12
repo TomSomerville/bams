@@ -71,6 +71,23 @@ def store(con: sqlite3.Connection, file_id: int, manual: dict | None) -> list[in
     return targets
 
 
+def keep(con: sqlite3.Connection, file_id: int) -> bool:
+    """The admin's "Keep" in the Unrecognized list: the file's hand identification (or auto fill's guess, saved as
+    one) is right, so it's marked `kept` and drops off the list. Call inside a transaction. False: nothing to keep
+    (an unplaced or left-out file)."""
+    f = con.execute("SELECT f.manual, f.parse, l.type FROM files f JOIN libraries l ON l.id=f.library_id WHERE f.id=?",
+                    (file_id,)).fetchone()
+    m, p = jload(f["manual"]), jload(f["parse"]) or {}
+    if m and not m.get("skip"):
+        con.execute("UPDATE files SET manual=? WHERE id=?", (jdump({**m, "kept": True}), file_id))
+        return True
+    if not m and p.get("guessed"):
+        fields = ("title", "year", "edition") if f["type"] == "movie" else ("title", "year", "season", "episodes", "episode_title")
+        store(con, file_id, {**{k: p[k] for k in fields if p.get(k) is not None}, "kept": True})
+        return True
+    return False
+
+
 def replace_unplaced(con: sqlite3.Connection) -> int:
     """After auto fill is switched on or off: re-place every file the naming rules couldn't place (and that
     wasn't identified by hand) in the TV and Movies libraries. String work only. Returns how many are placed now."""

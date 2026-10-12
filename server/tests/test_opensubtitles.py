@@ -137,6 +137,17 @@ def test_each_server_has_its_own_key_like_tmdb(os_env):
     r = c.put("/api/settings/opensubtitles-key", json={"key": "WrongKey0123456789abcdef"})
     assert r.status_code == 400 and "didn't accept the API key" in r.json()["detail"]
     assert c.put("/api/settings/opensubtitles-key", json={"key": "not a key"}).status_code == 400
+    # what a key looks like is up to OpenSubtitles: long, with dots and underscores, it's still theirs to judge
+    calls = len(fake.calls)
+    r = c.put("/api/settings/opensubtitles-key", json={"key": "Ab_c-d." * 20 + "x.y.z.w"})
+    assert r.status_code == 400 and "didn't accept the API key" in r.json()["detail"] and len(fake.calls) == calls + 1
+    # a sign-in token pasted by mistake (owner, 0.13.0): told what it is, not sent anywhere
+    for exp, word in ((time.time() + 86400, "expires"), (time.time() - 7200, "expired")):
+        claims = base64.urlsafe_b64encode(json.dumps({"id": 1, "exp": int(exp)}).encode()).decode().rstrip("=")
+        r = c.put("/api/settings/opensubtitles-key", json={"key": f"eyJhbGciOiJIUzI1NiJ9.{claims}.n-sOft_wSU-x"})
+        assert r.status_code == 400 and f"sign-in token (it {word}" in r.json()["detail"], r.text
+        assert "opensubtitles.com/en/consumers" in r.json()["detail"]
+    assert len(fake.calls) == calls + 1
     assert c.get("/api/settings").json()["opensubtitles"]["last4"] == KEY[-4:]
     viewer = signed_in(c.app, "Kid", admin=False)
     assert viewer.put("/api/settings/opensubtitles-key", json={"key": KEY}).status_code == 403
