@@ -181,6 +181,10 @@ class Client:
         if r.status_code == 401 and login:
             raise LoginRefused(f"OpenSubtitles didn't accept that name and password ({_message(r)}).")
         if r.status_code == 403 and not token:  # their answer to a key they don't know: "You cannot consume this service"
+            if login:  # refused before the name and password were looked at: they're not what's wrong (tester, 0.13.1)
+                raise InvalidKey(f"OpenSubtitles refused this server's API key ({_message(r)}), so it couldn't sign in to "
+                                 f"the account; the name and password weren't checked. Press Test next to the key; if "
+                                 f"it's refused too, paste the API key again from {CONSUMERS_URL}.", 403)
             raise InvalidKey(f"OpenSubtitles didn't accept the API key ({_message(r)}).", 403)
         if r.status_code in (406, 429) and path == "/download":
             raise QuotaReached(_message(r))
