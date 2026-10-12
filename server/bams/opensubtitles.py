@@ -10,8 +10,10 @@ Their API (https://opensubtitles.stoplight.io/docs/opensubtitles-api/e3750fd63a1
     settings table, like the key); BAMS signs in with it and keeps the 24-hour token in memory. Credentials it
     refused are not tried again until they change (their login is rate limited).
   - User-Agent "BAMS v<version>"; at most 5 requests a second per IP; follow redirects.
-  - Subtitles arrive as UTF-8 SRT. They're kept in the data dir (`subtitles/opensubtitles/<id>.srt`), never next to
-    the video, and listed with the file's own tracks as "d<n>" (table subtitle_downloads).
+  - Subtitles arrive as UTF-8 SRT. They're kept in the data dir (`subtitles/opensubtitles/<id>.srt`) and listed with
+    the file's own tracks as "d<n>" (table subtitle_downloads). A copy is also saved next to the video
+    ("Episode.en.srt", so other players find it too) unless the admin turns that off: the one write BAMS makes in a
+    media folder (owner's decision 2026-10-12, readonly.create_sidecar: new files only, never overwriting).
 
 Network calls happen outside transactions; tests pass a `transport=` (httpx.MockTransport).
 """
@@ -19,12 +21,15 @@ Network calls happen outside transactions; tests pass a `transport=` (httpx.Mock
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
 import logging
 import os
 import re
+import shlex
 import sqlite3
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -32,7 +37,7 @@ from pathlib import Path
 
 import httpx
 
-from . import subtitles
+from . import readonly, subtitles
 from .config import VERSION
 from .db import Tx, get_setting, jdump, jload, set_setting
 
@@ -41,6 +46,8 @@ log = logging.getLogger(__name__)
 API = "https://api.opensubtitles.com/api/v1"
 CONSUMERS_URL = "https://www.opensubtitles.com/en/consumers"  # where an account makes an API key ("API consumers")
 KEY_SETTING = "opensubtitles_key"
+SAVE_SETTING = "opensubtitles_save_beside"   # "0" = don't save copies next to videos; on by default (owner, 2026-10-12)
+SAVE_ERROR_SETTING = "opensubtitles_save_error"  # the last copy that couldn't be saved: {at, folder, why}
 USER_AGENT = f"BAMS v{VERSION}"
 PROVIDER = "opensubtitles"
 FOLDER = "subtitles/opensubtitles"  # under the data dir
@@ -261,7 +268,8 @@ def status(con: sqlite3.Connection) -> dict:
     return {"configured": key is not None, "last4": key[-4:] if key else None,
             "verified_at": get_setting(con, "opensubtitles_verified_at") if key else None,
             "user": acc[0] if acc else None,
-            "account": jload(get_setting(con, "opensubtitles_account")) if acc else None, "error": refused}
+            "account": jload(get_setting(con, "opensubtitles_account")) if acc else None, "error": refused,
+            "save_beside": save_beside_on(con), "save_error": jload(get_setting(con, SAVE_ERROR_SETTING))}
 
 
 def save_key(con: sqlite3.Connection, client: Client) -> dict:
@@ -453,6 +461,127 @@ def search(con: sqlite3.Connection, client: Client, file_id: int, languages: str
 
 # ------------------------------------------------------------------ downloading, the file's tracks
 
+# ------------------------------------------------------------------ a copy next to the video
+
+def save_beside_on(con: sqlite3.Connection) -> bool:
+    return get_setting(con, SAVE_SETTING, "1") != "0"
+
+
+def _beside_name(stem: str, language: str | None, hearing_impaired: bool, n: int) -> str:
+    """"Episode.en.srt", "Episode.en.sdh.srt", then "Episode.en.2.srt"...: what BAMS, Jellyfin and Plex read as a
+    subtitle of that video in that language ("pt-br" is written "pt-BR", as they expect)."""
+    lang = re.sub(r"[^a-z0-9-]", "", (language or "").lower())[:12].strip("-") or "und"
+    if "-" in lang:
+        a, _, b = lang.partition("-")
+        lang = f"{a}-{b.upper()}"
+    return f"{stem}.{lang}{'.sdh' if hearing_impaired else ''}{f'.{n}' if n > 1 else ''}.srt"
+
+
+def save_beside(video: Path, language: str | None, hearing_impaired: bool, data: bytes) -> str:
+    """Save a downloaded subtitle next to its video through readonly.create_sidecar (a new file only: a name that's
+    taken gets the next number). A file there with the same bytes is used as it is. Returns the file name; OSError
+    when the OS refuses (a read-only mount, the service's sandbox, permissions)."""
+    for n in range(1, 21):
+        name = _beside_name(video.stem, language, hearing_impaired, n)
+        there = video.parent / name
+        if os.path.lexists(there):
+            try:
+                if there.stat().st_size == len(data):
+                    with readonly.open_ro(there) as f:
+                        if f.read(len(data) + 1) == data:
+                            return name
+            except OSError:
+                pass
+            continue
+        try:
+            readonly.create_sidecar(video, name, data)
+            return name
+        except FileExistsError:
+            continue
+    raise OSError(errno.EEXIST, "there are already 20 subtitle files with that name next to the video")
+
+
+def _save_problem(e: Exception) -> str:
+    """Why a copy couldn't be saved, for the player and Settings."""
+    err = getattr(e, "errno", None)
+    if err == errno.EROFS:
+        return ("this server lets BAMS write only in its own data folder; Settings → Playback → OpenSubtitles shows "
+                "how to allow it for your library folders")
+    if err in (errno.EACCES, errno.EPERM):
+        return "the account BAMS runs as isn't allowed to write in that folder"
+    return getattr(e, "strerror", None) or str(e)
+
+
+def _video(con: sqlite3.Connection, file_id: int) -> Path | None:
+    r = con.execute("""SELECT f.rel_path, f.available, lr.path root FROM files f
+                       JOIN library_roots lr ON lr.id=f.root_id WHERE f.id=?""", (file_id,)).fetchone()
+    return Path(r["root"]) / r["rel_path"] if r and r["available"] else None
+
+
+def keep_beside(con: sqlite3.Connection, data_dir: Path, file_id: int, row_id: int) -> tuple[str | None, str | None]:
+    """A downloaded subtitle's copy next to its video, saved now if the setting is on and there's none yet:
+    (file name, None), or (None, why not). The disk work happens before the short write that records it."""
+    r = con.execute("SELECT * FROM subtitle_downloads WHERE id=?", (row_id,)).fetchone()
+    if r["sidecar"] or not save_beside_on(con):
+        return r["sidecar"], None
+    video = _video(con, file_id)
+    try:
+        if video is None:
+            raise OSError(errno.ENOENT, "the video isn't reachable right now (drive offline, or moved)")
+        name = save_beside(video, r["language"], bool(r["hearing_impaired"]), (data_dir / r["path"]).read_bytes())
+    except (OSError, ValueError) as e:
+        why = _save_problem(e)
+        log.warning("OpenSubtitles: couldn't save subtitle %s next to %s: %s", r["ext_id"], video, e)
+        with Tx(con):
+            set_setting(con, SAVE_ERROR_SETTING, jdump({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                                        "folder": str(video.parent) if video else None, "why": why}))
+        return None, why
+    with Tx(con):
+        con.execute("UPDATE subtitle_downloads SET sidecar=? WHERE id=?", (name, row_id))
+        set_setting(con, SAVE_ERROR_SETTING, None)
+    log.info("OpenSubtitles: saved %s next to its video", name)
+    return name, None
+
+
+def save_check(con: sqlite3.Connection) -> dict:
+    """Settings: can BAMS save copies in each TV/movie library folder (the OS's answer, checked without writing; on
+    Windows only the read-only flag is visible, so `null`)? `fix`: the command that allows it when the Linux
+    service's sandbox (ProtectSystem=strict) is what says no."""
+    out = []
+    for r in con.execute("""SELECT l.name, r.path FROM library_roots r JOIN libraries l ON l.id=r.library_id
+                            WHERE l.type IN ('show', 'movie') ORDER BY l.name COLLATE NOCASE, r.path"""):
+        p = Path(r["path"])
+        exists = p.is_dir()
+        writable = (os.access(p, os.W_OK) if sys.platform != "win32" else None) if exists else False
+        out.append({"library": r["name"], "path": r["path"], "exists": exists, "writable": writable})
+    fix = None
+    blocked = [x["path"] for x in out if x["exists"] and x["writable"] is False]
+    if blocked and sys.platform.startswith("linux") and os.environ.get("INVOCATION_ID"):  # a systemd service
+        conf = "/etc/systemd/system/bams.service.d/20-subtitles.conf"
+        # "-": a folder that's missing at start-up (an unmounted drive) doesn't stop the service
+        rw = "ReadWritePaths=" + " ".join(f'"-{b}"' if " " in b else f"-{b}" for b in blocked)
+        fix = (f"sudo mkdir -p {os.path.dirname(conf)} && printf '%s\n' '[Service]' {shlex.quote(rw)} | sudo tee {conf}"
+               " && sudo systemctl daemon-reload && sudo systemctl restart bams")
+    return {"roots": out, "fix": fix}
+
+
+def set_save_beside(con: sqlite3.Connection, on: bool) -> dict:
+    with Tx(con):
+        set_setting(con, SAVE_SETTING, "1" if on else "0")
+        if not on:
+            set_setting(con, SAVE_ERROR_SETTING, None)
+    return status(con)
+
+
+def listing(con: sqlite3.Connection, file_id: int, own: list[dict]) -> list[dict]:
+    """A file's subtitle tracks for the player: its own (subtitles.tracks) and its downloaded ones, without the copies
+    BAMS saved next to the video (they're the same subtitle as their download, which has the better label). A copy
+    whose download was removed stays: it's an ordinary sidecar then."""
+    saved = {r[0] for r in con.execute(
+        "SELECT sidecar FROM subtitle_downloads WHERE file_id=? AND sidecar IS NOT NULL", (file_id,))}
+    return [t for t in own if not (t.get("source") == "file" and t.get("file") in saved)] + tracks(con, file_id)
+
+
 def tracks(con: sqlite3.Connection, file_id: int) -> list[dict]:
     """The file's downloaded subtitles, as subtitles.tracks() lists a file's own ("d<row id>")."""
     out = []
@@ -493,9 +622,10 @@ def download(con: sqlite3.Connection, client: Client, data_dir: Path, file_id: i
         raise LookupError("no such file")
     mine = con.execute("SELECT id FROM subtitle_downloads WHERE file_id=? AND provider=? AND ext_id=?",
                        (file_id, PROVIDER, ext)).fetchone()
-    if mine:
+    if mine:  # picked before: just that track (and its copy next to the video, if that failed or was off before)
+        saved, why = keep_beside(con, data_dir, file_id, mine["id"])
         return {"track": next(t for t in tracks(con, file_id) if t["index"] == mine["id"]), "remaining": None,
-                "message": None}
+                "message": None, "saved": saved, "save_error": why}
     rel = f"{FOLDER}/{ext}.srt"
     dest = data_dir / rel
     remaining = message = None
@@ -526,12 +656,14 @@ def download(con: sqlite3.Connection, client: Client, data_dir: Path, file_id: i
             (file_id, PROVIDER, ext, (language or "")[:16] or None, (release or "")[:200] or None,
              int(bool(hearing_impaired)), rel, user_id, datetime.now(timezone.utc).isoformat(timespec="seconds")))
     row_id = cur.lastrowid
+    saved, why = keep_beside(con, data_dir, file_id, row_id)
     return {"track": next(t for t in tracks(con, file_id) if t["index"] == row_id), "remaining": remaining,
-            "message": message}
+            "message": message, "saved": saved, "save_error": why}
 
 
 def remove(con: sqlite3.Connection, data_dir: Path, row_id: int) -> None:
-    """Take a downloaded subtitle off a file; its file goes too once no other video uses it."""
+    """Take a downloaded subtitle off a file; its file in the data dir goes too once no other video uses it. A copy
+    saved next to the video stays (BAMS never deletes in media folders): it's one of the file's own tracks then."""
     r = con.execute("SELECT path FROM subtitle_downloads WHERE id=?", (row_id,)).fetchone()
     if not r:
         return

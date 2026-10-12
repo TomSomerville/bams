@@ -148,7 +148,9 @@ function LibraryCard({ lib, status, onChange, onMove }: {
             <Icon name="folder" size={16} /> <code>{r.path}</code>
             {!r.exists && <span className="root-badge bad">offline / not found</span>}
             {r.exists && !r.readable && <span className="root-badge bad">no read permission</span>}
-            {r.os_write_access && <span className="root-badge warn" title="BAMS never writes here, but the OS would let it. See docs/READ-ONLY.md">writable by BAMS's account</span>}
+            {r.os_write_access && (lib.type === "music"
+              ? <span className="root-badge warn" title="BAMS never writes here, but the OS would let it. See docs/READ-ONLY.md">writable by BAMS's account</span>
+              : <span className="root-badge ok" title="BAMS writes nothing here except copies of the subtitles you download from OpenSubtitles (Settings → Playback → OpenSubtitles). See docs/READ-ONLY.md">subtitle copies can be saved</span>)}
             {lib.roots.length > 1 && (
               <button className="icon-btn subtle remove-root" title="Remove this folder from the library (files are not touched)"
                 onClick={() => patch({ remove_paths: [r.path] })}>

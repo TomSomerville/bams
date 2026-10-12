@@ -114,3 +114,54 @@ def test_nested_roots_rejected(env):
     library.create(con, paths.root, "One", "show", [str(media)])
     with pytest.raises(library.LibraryError):
         library.create(con, paths.root, "Two", "movie", [str(media / "a")])
+
+
+VIDEO = "Some Show/Some Show - Season 00 - 'S00E01-Episode name'.mkv"
+SRT = b"1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+
+
+def _files(snap):
+    return {k: v for k, v in snap.items() if v[0] != "dir"}  # a new file changes its folder's time, nothing else may
+
+
+def test_a_new_subtitle_next_to_a_video_is_the_one_write(guarded):
+    """Owner, 2026-10-12: a downloaded subtitle may be saved next to its video. readonly.create_sidecar creates a new
+    .srt in the video's own folder and nothing else; every other file stays byte-identical."""
+    _, media, _ = guarded
+    video = media / VIDEO
+    before = _files(snapshot(media))
+    made = readonly.create_sidecar(video, video.stem + ".en.srt", SRT)
+    assert made.parent == video.parent and made.read_bytes() == SRT
+    after = _files(snapshot(media))
+    assert {k: v for k, v in after.items() if k != str(made.relative_to(media))} == before
+    # create only: a name that's taken is never opened for writing
+    with pytest.raises(FileExistsError):
+        readonly.create_sidecar(video, made.name, b"something else")
+    assert made.read_bytes() == SRT
+    # only a plain .srt file name, in that folder
+    for bad in ("poster.jpg", "x.nfo", "../escape.srt", "sub/x.srt", r"sub\x.srt", ".hidden.srt", VIDEO):
+        with pytest.raises(ValueError):
+            readonly.create_sidecar(video, bad, SRT)
+    # the door closes behind it: ordinary writes, even of a new .srt, are still refused
+    with pytest.raises(ReadOnlyViolation):
+        open(video.parent / (video.stem + ".fr.srt"), "x")
+    with pytest.raises(ReadOnlyViolation):
+        open(made, "w")
+    assert _files(snapshot(media)) == after
+
+
+def test_the_sidecar_door_is_exclusive_create_of_one_path(guarded):
+    """While create_sidecar runs, only an "x"-mode open of its own target (or removing that file after a failed
+    write) passes; overwriting it, or touching anything else, is refused."""
+    _, media, _ = guarded
+    target = media / "Some Show" / "x.en.srt"
+    other = media / "Some Show" / "y.en.srt"
+    readonly._allowed.target = readonly._norm(target)  # noqa: SLF001 - as create_sidecar sets it
+    try:
+        for attempt in (lambda: open(target, "w"), lambda: open(target, "a"), lambda: open(other, "x"),
+                        lambda: os.remove(media / VIDEO), lambda: os.rename(media / VIDEO, target)):
+            with pytest.raises(ReadOnlyViolation):
+                attempt()
+    finally:
+        readonly._allowed.target = None  # noqa: SLF001
+    assert not target.exists() and not other.exists()

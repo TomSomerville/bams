@@ -46,10 +46,13 @@ export default function FindSubtitles({ fileId, call, subLang, tracks, current, 
     setBusy(r.file_id);
     setErr(null);
     try {
-      const d = await call.post<{ track: SubtitleTrack; remaining: number | null; message: string | null }>(
+      const d = await call.post<{ track: SubtitleTrack; remaining: number | null; message: string | null;
+        saved?: string | null; save_error?: string | null }>(
         `/api/files/${fileId}/opensubtitles`,
         { file_id: r.file_id, language: r.language, release: r.release, hearing_impaired: r.hearing_impaired });
-      onUse(d.track, d.remaining != null ? `${d.remaining} OpenSubtitles download${d.remaining === 1 ? "" : "s"} left today` : null);
+      const left = d.remaining != null ? `${d.remaining} OpenSubtitles download${d.remaining === 1 ? "" : "s"} left today` : null;
+      const copy = d.saved ? `Saved next to the video as ${d.saved}` : d.save_error ? `Not saved next to the video: ${d.save_error}` : null;
+      onUse(d.track, [copy, left].filter(Boolean).join(" · ") || null);
     } catch (e) {
       setErr(e instanceof ApiError && e.status === 429
         ? `${e.message} Subtitles already downloaded still work.` : (e as Error).message);

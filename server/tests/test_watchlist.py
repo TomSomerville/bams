@@ -157,6 +157,6 @@ def test_migration_to_v12(tmp_path):
     con.close()
     con = connect(p)
     db.migrate(con, backup_dir=tmp_path / "backups")
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 12
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION >= 12  # v12 and every step after it
     assert [r[1] for r in con.execute("PRAGMA table_info(watchlist)")] == ["user_id", "item_id", "added_at"]
     con.close()

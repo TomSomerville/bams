@@ -36,7 +36,10 @@ Files may have changed since you last looked, and work may exist that you never 
 1. **Media folders are read-only to BAMS.** Never write, rename, delete, chmod, touch, or drop sidecar files
    (artwork, .nfo, thumbnails) in a library folder. Everything BAMS creates goes in the data dir. Media access
    goes through `server/bams/readonly.py`. A process-wide audit hook enforces this. Don't weaken it, and keep
-   `tests/test_readonly.py` passing.
+   `tests/test_readonly.py` passing. **One exception, the owner's (2026-10-12):** `readonly.create_sidecar` may create
+   a *new* `.srt` next to a video (a copy of an OpenSubtitles download; setting on by default). Exclusive create only:
+   never overwrite, rename or delete, never another file type, and no other code path may write. Don't add more
+   exceptions without the owner.
 2. **Cross-platform.** Every server feature must work on Windows *and* Debian/Ubuntu/Mint: `pathlib`, no
    hard-coded separators, file paths stored relative to their library root, no Windows-only or Linux-only
    calls without a fallback. Minimum Python is **3.11** (Debian 12).
@@ -252,8 +255,18 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   *file* name "Naruto-01" stays episode 1 and an all-lowercase "aaf-movie.name" keeps "aaf" as the group (folders
   don't get those exceptions). New cases go in `test_parse.py`; dry-run over the owner's paths before shipping.
 - **Downloaded subtitles ("d<n>" tracks)** live in the data dir (`subtitles/opensubtitles/`, table
-  `subtitle_downloads`), not next to the video. `subtitles.tracks()` lists only the file's own tracks: code that
-  needs every track adds `opensubtitles.tracks(con, file_id)` (as `get_item` and the `.vtt` route do).
+  `subtitle_downloads`); a copy also goes next to the video ("Episode.en.srt", `subtitle_downloads.sidecar`) unless
+  the setting is off. `subtitles.tracks()` lists only the file's own tracks: the player's list is
+  `opensubtitles.listing(con, file_id, own)` (own tracks minus BAMS's copies, plus the downloads); the `.vtt` route
+  adds `opensubtitles.tracks()`. A removed download's copy stays and becomes an ordinary sidecar.
+- **The sidecar door in the audit hook is thread-local and path-exact** (`readonly._allowed.target`): only an
+  `open(target, "x…")` of that one path, or removing it after a failed write, passes. Never write a sidecar any
+  other way (no temp file + rename: rename is blocked and could replace a file). Copies of a name that's taken get
+  `.2`, `.3`...; an identical file already there is reused. `test_readonly.py` checks the door stays shut otherwise.
+- **The Linux service can't write media even when the code may** (`ProtectSystem=strict`, `ReadWritePaths=/var/lib/bams`):
+  subtitle copies need a drop-in `ReadWritePaths=-<library folder>` (`/etc/systemd/system/bams.service.d/20-subtitles.conf`,
+  survives upgrades; postinst only writes `10-user.conf`). Settings shows the exact command (`opensubtitles.save_check`,
+  `os.access` checks without writing). A failed copy never fails the download: it's reported (`save_error`).
 - **Don't guess the OpenSubtitles key's format**: their docs don't give one, and a 16–64 character check refused the
   owner's paste. `valid_key_format` only rules out spaces and silly lengths; a JWT with an `exp` (a sign-in token, 24 h)
   is refused with an explanation (`_sign_in_token`); everything else is OpenSubtitles' call (`Client.check`).

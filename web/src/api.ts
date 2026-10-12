@@ -194,7 +194,13 @@ export type SubtitleTrack = { id: string; index: number; source: "embedded" | "f
  *  admin's optional account */
 export type OpenSubtitlesStatus = { configured: boolean; last4: string | null; verified_at: string | null;
   user: string | null; error: string | null;
-  account: { level: string | null; allowed_downloads: number | null; vip: boolean } | null };
+  account: { level: string | null; allowed_downloads: number | null; vip: boolean } | null;
+  /** a copy of each download is saved next to its video (on by default); the last one that couldn't be */
+  save_beside: boolean; save_error: { at: string; folder: string | null; why: string } | null };
+/** GET /api/settings/opensubtitles-save (admins): can BAMS save copies in each TV/movie folder; `fix`: the Linux
+ *  service command that allows it */
+export type SaveCheck = { roots: { library: string; path: string; exists: boolean; writable: boolean | null }[];
+  fix: string | null };
 
 /** One of GET /api/files/:id/opensubtitles's results */
 export type SubtitleResult = { file_id: number; language: string | null; release: string; hearing_impaired: boolean;
