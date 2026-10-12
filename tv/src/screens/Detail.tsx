@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PlayRandomButton } from "../random";
 import { apiFor, mediaFor, type ContinueItem, type ItemDetail, type ItemSummary } from "../api";
 import { useFocusOnReady, useNav } from "../App";
 import Icon from "../Icon";
@@ -138,6 +139,7 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
                   {item.watchlist ? `Remove from ${listName}` : `Add to ${listName}`}
                 </button>
               )}
+              {item.kind === "show" && !!item.episodes && <PlayRandomButton path={`/api/items/${item.id}/random`} rid={rid} />}
             </div>
           </div>
         </div>

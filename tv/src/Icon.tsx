@@ -18,6 +18,10 @@ const PATHS = {
   music: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
   shuffle: "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
   stop: "M6 6h12v12H6z",
+  list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  up: "M6 15l6-6 6 6",
+  down: "M6 9l6 6 6-6",
+  close: "M6 6l12 12M18 6 6 18",
   // a bed (headboard, sleeper's head, blanket, frame), with two stars above it in FILLS: sleep mode
   sleep: "M3 9v11M3 17h18v3M9 17v-4h9a3 3 0 0 1 3 3v1M6 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
   // the watch list: a bookmark, filled when the item is on it

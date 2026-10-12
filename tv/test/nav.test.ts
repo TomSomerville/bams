@@ -275,6 +275,25 @@ test("a [data-trap] layer keeps the focus inside", () => {
   eq(focused(), "m2");
 });
 
+test("Up next (Queue.tsx): ▲▼ go row to row, ▶ reaches the move / remove buttons, focus stays in the panel", () => {
+  const row = (i: number, at: number) => `<div class="queue-row ${i === at ? "on" : ""}">` +
+    `<button class="queue-item" data-fid="q-row-${i}"><span class="queue-title">Video ${i}</span><span class="queue-sub">sub</span></button>` +
+    ["up", "down", "del"].map((b) => `<button class="round small" data-fid="q-${b}-${i}"><svg width="28" height="28"></svg></button>`).join("") + `</div>`;
+  mount(shell(home(2), { np: true }) + `<div class="hold-menu queue-menu" data-trap><div class="hold-box queue-box"><h2>Up next</h2>` +
+    `<div class="queue-list">${[0, 1, 2, 3].map((i) => row(i, 1)).join("")}</div></div></div>`);
+  focus(el("q-row-1"));
+  press("down");
+  eq(focused(), "q-row-2");
+  press("right");
+  eq(focused(), "q-up-2");
+  press("right", "right");
+  eq(focused(), "q-del-2");
+  press("up");
+  eq(focused(), "q-del-1", "straight up to the row above's button");
+  press("left", "left", "left", "left");
+  eq(focused(), "q-row-1", "not out to the rail");
+});
+
 test("focusId restores a remembered element", () => {
   mount(shell(home(3)));
   ok(focusId("r2-5"), "found");

@@ -8,6 +8,8 @@ import { setKeyHandler } from "../keys";
 import { focus, focusFirst } from "../nav";
 import { caps, convertHeight, pickAudio, pickFile, plan, type Mode } from "../plan";
 import { prefs, setPref } from "../prefs";
+import { QueuePanel } from "../Queue";
+import { entrySub, moveVideo, queueIndex, queueNext, removeVideo, useVideoQueue } from "../random";
 import { isBack, KEY } from "../tizen";
 import { defaultLanguage, languageName, OS_LANGUAGES } from "../../../web/src/subtitleLangs";
 
@@ -55,6 +57,16 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     session: null as string | null, started: false, startAt: 0, fellBack: false, duration: null as number | null,
     item: null as ItemDetail | null, seek: null as number | null, ended: false, sleep: sleeping ?? null as number | null });
   const timers = useRef<{ osd?: ReturnType<typeof setTimeout>; seek?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setInterval> }>({});
+
+  // Play Random (random.tsx): while this video is in the random queue, "next" is the queue's next, not the next episode
+  const vq = useVideoQueue();
+  const qAt = queueIndex(id, rid);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const nextOf = (): number | null => {
+    const q = queueNext(id, rid);
+    return q !== undefined ? q : st.current.item?.next_id ?? null;
+  };
+  const nextId = item ? nextOf() : null;
 
   const duration = (): number | null => st.current.duration ?? engine.current?.duration() ?? null;
 
@@ -143,7 +155,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         st.current.ended = true;
         const d = duration();
         report(false, d ?? engine.current?.time());
-        const next = st.current.item?.next_id;
+        const next = nextOf();
         if (st.current.sleep === 0) setSlept(true);  // sleep mode: that was the last one
         else if (next) setUpNext(UP_NEXT);
         else nav.back();
@@ -242,7 +254,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
 
   const playNext = () => {
     clearInterval(timers.current.next);
-    const next = st.current.item?.next_id;
+    const next = nextOf();
     // sleep mode counts down; going on by hand after it stopped means someone's awake: off
     const left = st.current.sleep;
     if (next) nav.replace({ name: "player", id: next, rid, resume: true, sleep: left ? left - 1 : undefined });
@@ -272,7 +284,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
   };
 
   const toggleSleep = () => {
-    const n = sleep !== null ? null : st.current.item?.next_id ? SLEEP_MORE : 0;
+    const n = sleep !== null ? null : nextOf() ? SLEEP_MORE : 0;
     st.current.sleep = n;
     setSleep(n);
     wake();
@@ -314,6 +326,10 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         return false;
       }
       wake();  // every key counts, menu keys too
+      if (queueOpen) {
+        if (isBack(e)) { setQueueOpen(false); setTimeout(() => focus(document.querySelector<HTMLElement>('[data-fid="osd-queue"]'))); return true; }
+        return false;  // arrows and OK move within Up next
+      }
       if (menu) {
         if (isBack(e) && menu === "findLang") { setMenu("find"); return true; }
         if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu === "audio" ? "audio" : "subs"}"]`))); return true; }
@@ -327,7 +343,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         case KEY.STOP: nav.back(); return true;
         case KEY.FF: seekBy(30); return true;
         case KEY.RW: seekBy(-10); return true;
-        case KEY.NEXT: if (st.current.item?.next_id) playNext(); return true;
+        case KEY.NEXT: if (nextOf()) playNext(); return true;
       }
       if (isBack(e)) {
         if (osd && inButtons) { (document.activeElement as HTMLElement).blur(); setOsd(false); return true; }
@@ -392,7 +408,8 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
             {(subs.length > 0 || !!item?.opensubtitles) && (
               <button className="pill" data-fid="osd-subs" onClick={() => setMenu("subs")}><Icon name="subs" /> Subtitles</button>
             )}
-            {item?.next_id && <button className="pill" data-fid="osd-next" onClick={playNext}><Icon name="next" /> Next episode</button>}
+            {nextId && <button className="pill" data-fid="osd-next" onClick={playNext}><Icon name="next" /> {qAt >= 0 ? "Next" : "Next episode"}</button>}
+            {qAt >= 0 && <button className="pill" data-fid="osd-queue" onClick={() => setQueueOpen(true)}><Icon name="list" /> Up next</button>}
             {(item?.kind === "movie" || item?.kind === "episode") && (
               <button className={`pill ${sleep !== null ? "on" : ""}`} data-fid="osd-sleep" onClick={toggleSleep}>
                 <Icon name="sleep" /> {sleep === null ? "Sleep" : sleep ? `Sleep: this + ${sleep} more` : "Sleep: stop after this"}
@@ -404,6 +421,12 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         </div>
       </div>
 
+      {queueOpen && qAt >= 0 && (
+        <QueuePanel at={qAt} rows={vq.items.map((e) => ({ key: `${e.id}`, title: e.title, sub: entrySub(e) }))}
+          onMove={moveVideo} onRemove={removeVideo}
+          onJump={(i) => { const v = vq.items[i]; if (v && v.id !== id) nav.replace({ name: "player", id: v.id, rid, resume: true }); }}
+          onClose={() => { setQueueOpen(false); setTimeout(() => focus(document.querySelector<HTMLElement>('[data-fid="osd-queue"]'))); }} />
+      )}
       {(menu === "find" || menu === "findLang") && file && (
         <FindSubs fileId={file.id} rid={rid} lang={osLang} picking={menu === "findLang"} current={sub?.id ?? null}
           tracks={subs} onLang={() => setMenu("findLang")} onPickLang={pickOsLang} onUse={takeFound} />
@@ -426,9 +449,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
               ...(item?.opensubtitles ? [{ key: "os", label: "Check OpenSubtitles…", on: false, pick: () => setMenu("find") }] : [])]} />
       )}
 
-      {upNext !== null && item?.next_id && (
+      {upNext !== null && nextId && (
         <div className="upnext" data-trap>
-          <h2>Next episode in {upNext}</h2>
+          <h2>{qAt >= 0 ? "Next" : "Next episode"} in {upNext}</h2>
           <div className="button-row">
             <button className="btn primary" ref={(b) => b?.focus()} onClick={playNext}><Icon name="play" size={30} /> Play now</button>
             <button className="btn" onClick={() => nav.back()}>Back</button>

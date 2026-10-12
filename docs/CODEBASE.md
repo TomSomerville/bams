@@ -144,7 +144,9 @@ bams/
 │   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
 │       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
-│       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback); MusicProvider in main.tsx
+│       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback; jump/move/remove for Up next); MusicProvider in main.tsx
+│       ├── random.tsx         Play Random: the video queue (module store, sessionStorage; queueNext for the player), PlayRandomButton
+│       ├── Queue.tsx          "Up next" panel ([data-trap]): rows with ▲ ▼ ✕, OK plays; video queue (Player) and music queue (NowPlaying)
 │       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting; other servers of this TV (extras: apiFor/mediaFor(rid), checkExtras, sources() for everywhere.ts)
 │       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
 │       ├── hold.ts            Holding OK: on a [data-hold] element a long press sends "contextmenu" instead of a click (key-up before HOLD_MS = press; repeats = hold, for remotes without key-ups); App.tsx calls okDown/okUp
