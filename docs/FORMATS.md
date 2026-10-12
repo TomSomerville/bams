@@ -130,7 +130,8 @@ How it works (`server/bams/subtitles.py`):
 - The player remembers the subtitle language per browser and picks a matching text track next time (never an image
   track by itself, since that means converting).
 - **Downloaded** tracks (`d1`, `d2`...): subtitles picked from OpenSubtitles while playing (`opensubtitles.py`). They
-  come as UTF-8 SRT, are kept in `data/subtitles/opensubtitles/`, and are served like sidecars (WebVTT, cached).
+  come as UTF-8 SRT, are kept in `data/cache/subtitles/opensubtitles/`, and are served like sidecars (WebVTT, cached).
+  **Download locally** saves one next to the video as `<video name>.srt`.
 
 ## 5. Music (audio-only files)
 

@@ -187,18 +187,17 @@ export type AudioTrack = { index: number; label: string; language: string | null
  *  tracks (image) have no url: they're burned in by sending the id as `burn`. */
 export type SubtitleTrack = { id: string; index: number; source: "embedded" | "file" | "download"; language: string | null;
   label: string; forced: boolean; sdh: boolean; image: boolean; codec: string | null; url: string | null;
-  /** downloaded ("d<n>"): where from, its id there, and who downloaded it (they or an admin can remove it) */
-  provider?: string; ext_id?: string; added_by?: number | null };
+  /** downloaded ("d<n>"): where from, its id there, who downloaded it (they or an admin can remove it), and the name
+   *  it was saved under next to the video ("Download locally"), if it was */
+  provider?: string; ext_id?: string; added_by?: number | null; sidecar?: string | null };
 
 /** GET /api/settings → opensubtitles: this server's OpenSubtitles API key (only its last 4 characters) and the
  *  admin's optional account */
 export type OpenSubtitlesStatus = { configured: boolean; last4: string | null; verified_at: string | null;
   user: string | null; error: string | null;
-  account: { level: string | null; allowed_downloads: number | null; vip: boolean } | null;
-  /** a copy of each download is saved next to its video (on by default); the last one that couldn't be */
-  save_beside: boolean; save_error: { at: string; folder: string | null; why: string } | null };
-/** GET /api/settings/opensubtitles-save (admins): can BAMS save copies in each TV/movie folder; `fix`: the Linux
- *  service command that allows it */
+  account: { level: string | null; allowed_downloads: number | null; vip: boolean } | null };
+/** GET /api/settings/opensubtitles-save (admins): can "Download locally" save subtitles in each TV/movie folder; `fix`:
+ *  the Linux service command that allows it */
 export type SaveCheck = { roots: { library: string; path: string; exists: boolean; writable: boolean | null }[];
   fix: string | null };
 

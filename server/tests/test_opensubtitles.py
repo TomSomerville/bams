@@ -37,8 +37,10 @@ class FakeOpenSubtitles:
         self.calls.append(req)
         assert req.headers["user-agent"].startswith("BAMS v")
         path = req.url.path
-        if req.url.host == "www.opensubtitles.com":  # the temporary download link
-            return httpx.Response(200, content=SRT.encode())
+        if req.url.host == "www.opensubtitles.com":  # the temporary download link: 111 is SRT, others differ
+            fid = path.rsplit("/", 1)[-1].split(".")[0]
+            extra = "" if fid == "111" else f"\n3\n00:00:05,000 --> 00:00:06,000\nsubtitle {fid}\n"
+            return httpx.Response(200, content=(SRT + extra).encode())
         if req.headers.get("api-key") != KEY:  # what they answer a key they don't know
             return httpx.Response(403, json={"message": "You cannot consume this service"})
         if path == "/api/v1/login":
@@ -178,7 +180,7 @@ def _media_files(media):
     return {str(p.relative_to(media)): (p.stat().st_size, p.stat().st_mtime_ns) for p in media.rglob("*") if p.is_file()}
 
 
-def test_download_becomes_a_track_and_a_copy_next_to_the_video(os_env):
+def test_download_goes_to_the_cache_not_the_media_folder(os_env):
     c, fake, paths, media, ep, fid = os_env
     before = _media_files(media)
     r = c.post(f"/api/files/{fid}/opensubtitles",
@@ -187,21 +189,16 @@ def test_download_becomes_a_track_and_a_copy_next_to_the_video(os_env):
     d = r.json()
     assert d["remaining"] == 18 and d["track"]["id"] == "d1" and d["track"]["source"] == "download"
     assert d["track"]["label"] == "English · Catch-22.S01E01.WEB.x264-GRP" and d["track"]["language"] == "en"
-    assert (paths.root / "subtitles" / "opensubtitles" / "111.srt").read_text(encoding="utf-8") == SRT
-    # owner, 2026-10-12: a copy next to the episode (on by default), named so other players find it; nothing else
-    # in the media folder changes
-    copy = media / "Catch-22" / "Season 1" / "Catch-22 S01E01.en.srt"
-    assert d["saved"] == copy.name and d["save_error"] is None
-    assert copy.read_text(encoding="utf-8") == SRT
-    assert {k: v for k, v in _media_files(media).items() if k != str(copy.relative_to(media))} == before
-    # listed with the file's tracks, for everyone, once (the copy is the same subtitle); the search marks it as here
+    # owner, 0.15.0: downloads go to cache/subtitles; the media folder is untouched until "Download locally"
+    assert (paths.root / "cache" / "subtitles" / "opensubtitles" / "111.srt").read_text(encoding="utf-8") == SRT
+    assert "saved" not in d and _media_files(media) == before
+    # listed with the file's tracks, for everyone; the search marks it as already here
     subs = c.get(f"/api/items/{ep}").json()["files"][0]["subtitles"]
     assert [s["id"] for s in subs] == ["d1"]
     assert c.get(f"/api/files/{fid}/opensubtitles?languages=en").json()["results"][0]["track"] == "d1"
-    # picking it again doesn't download it again (the daily quota is small), nor save another copy
-    again = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111}).json()
-    assert again["track"]["id"] == "d1" and again["saved"] == copy.name
-    assert fake.downloads == 1 and sorted(x.name for x in copy.parent.glob("*.srt")) == [copy.name]
+    # picking it again doesn't download it again (the daily quota is small)
+    assert c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111}).json()["track"]["id"] == "d1"
+    assert fake.downloads == 1 and _media_files(media) == before
     if stream.ffmpeg_path():
         vtt = c.get(f"/api/files/{fid}/subtitles/d1.vtt")
         assert vtt.status_code == 200 and vtt.text.startswith("WEBVTT") and "General Kenobi" in vtt.text
@@ -241,10 +238,8 @@ def test_account_sign_in_quota_and_removal(os_env):
     other = signed_in(c.app, "Other", admin=False)
     assert other.delete(f"/api/files/{fid}/subtitles/{track}").status_code == 403
     assert viewer.delete(f"/api/files/{fid}/subtitles/{track}").status_code == 204
-    assert not (paths.root / "subtitles" / "opensubtitles" / "222.srt").exists()
-    # the admin's download stays; the removed one's copy next to the video stays too, as one of the file's own tracks
-    assert [(s["source"], s.get("ext_id") or s.get("file")) for s in c.get(f"/api/items/{ep}").json()["files"][0]["subtitles"]
-            ] == [("file", "Catch-22 S01E01.en.sdh.srt"), ("download", "333")]
+    assert not (paths.root / "cache" / "subtitles" / "opensubtitles" / "222.srt").exists()
+    assert [s["ext_id"] for s in c.get(f"/api/items/{ep}").json()["files"][0]["subtitles"]] == ["333"]  # the admin's stays
     assert c.delete(f"/api/files/{fid}/subtitles/e0").status_code == 404  # the file's own: never
 
     assert c.delete("/api/settings/opensubtitles").json()["user"] is None
@@ -274,54 +269,56 @@ def test_a_movie_without_ids_is_searched_by_name(tmp_path, monkeypatch):
         readonly.set_protected_roots([])
 
 
-def test_copies_never_overwrite_and_follow_the_setting(os_env, unguarded):
+def test_download_locally_saves_it_next_to_the_video_under_its_name(os_env, unguarded):
+    """Owner, 0.15.0: "Download locally" (player → Check OpenSubtitles → Already on this video) saves the subtitle next
+    to its video with the video's name: "Catch-22 S01E01.mkv" -> "Catch-22 S01E01.srt". Never overwrites."""
     c, fake, paths, media, ep, fid = os_env
     folder = media / "Catch-22" / "Season 1"
-    with unguarded:  # the owner's own subtitle file is already there under the name BAMS would use
-        (folder / "Catch-22 S01E01.en.srt").write_text("mine", encoding="utf-8")
-    d = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111, "language": "en"}).json()
-    assert d["saved"] == "Catch-22 S01E01.en.2.srt"  # the next free name; theirs is untouched
-    assert (folder / "Catch-22 S01E01.en.srt").read_text(encoding="utf-8") == "mine"
-    d = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 222, "language": "en", "hearing_impaired": True}).json()
-    assert d["saved"] == "Catch-22 S01E01.en.sdh.srt"
-    # the player lists the owner's file and the two downloads, not BAMS's copies of them
+    before = _media_files(media)
+    d1 = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111, "language": "en"}).json()["track"]["id"]
+    r = c.post(f"/api/files/{fid}/subtitles/{d1}/local")
+    assert r.status_code == 200 and r.json() == {"saved": "Catch-22 S01E01.srt"}, r.text
+    assert (folder / "Catch-22 S01E01.srt").read_bytes() == SRT.encode()
+    assert {k: v for k, v in _media_files(media).items() if not k.endswith("Catch-22 S01E01.srt")} == before
+    assert c.post(f"/api/files/{fid}/subtitles/{d1}/local").json() == {"saved": "Catch-22 S01E01.srt"}  # once
+    # the player lists it once (the download, which says it's saved), not the copy as well
     subs = c.get(f"/api/items/{ep}").json()["files"][0]["subtitles"]
-    assert [(t["source"], t.get("file") or t.get("ext_id")) for t in subs] == [
-        ("file", "Catch-22 S01E01.en.srt"), ("download", "111"), ("download", "222")]
+    assert [(t["id"], t.get("sidecar")) for t in subs] == [(d1, "Catch-22 S01E01.srt")]
 
-    # removing a download leaves its copy (BAMS never deletes in media folders): an ordinary sidecar from then on
-    d222 = next(t["id"] for t in subs if t.get("ext_id") == "222")
-    assert c.delete(f"/api/files/{fid}/subtitles/{d222}").status_code == 204
-    assert (folder / "Catch-22 S01E01.en.sdh.srt").read_text(encoding="utf-8") == SRT
+    # the video's name is taken by another subtitle: the language goes in, nothing is overwritten
+    d2 = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 222, "language": "en",
+                                                       "hearing_impaired": True}).json()["track"]["id"]
+    assert c.post(f"/api/files/{fid}/subtitles/{d2}/local").json() == {"saved": "Catch-22 S01E01.en.sdh.srt"}
+    with unguarded:  # the owner's own file under the next name BAMS would use
+        (folder / "Catch-22 S01E01.fr.srt").write_text("mine", encoding="utf-8")
+    d3 = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 333, "language": "fr"}).json()["track"]["id"]
+    assert c.post(f"/api/files/{fid}/subtitles/{d3}/local").json() == {"saved": "Catch-22 S01E01.fr.2.srt"}
+    assert (folder / "Catch-22 S01E01.fr.srt").read_text(encoding="utf-8") == "mine"
+    assert (folder / "Catch-22 S01E01.srt").read_bytes() == SRT.encode()
+
+    # removing a download leaves its saved copy: an ordinary subtitle of the video from then on
+    assert c.delete(f"/api/files/{fid}/subtitles/{d1}").status_code == 204
     subs = c.get(f"/api/items/{ep}").json()["files"][0]["subtitles"]
-    assert ("file", "Catch-22 S01E01.en.sdh.srt") in [(t["source"], t.get("file")) for t in subs]
-
-    # turned off: downloads stay in the data dir only; picking one again once it's back on saves its copy then
-    st = c.put("/api/settings/opensubtitles-save", json={"enabled": False}).json()
-    assert st["save_beside"] is False and c.get("/api/settings").json()["opensubtitles"]["save_beside"] is False
-    d = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 333, "language": "fr"}).json()
-    assert d["saved"] is None and d["save_error"] is None and not list(folder.glob("*.fr.srt"))
-    assert c.put("/api/settings/opensubtitles-save", json={"enabled": True}).json()["save_beside"] is True
-    d = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 333}).json()
-    assert d["saved"] == "Catch-22 S01E01.fr.srt" and fake.downloads == 3
-    assert signed_in(c.app, "Kid", admin=False).put("/api/settings/opensubtitles-save",
-                                                    json={"enabled": False}).status_code == 403
+    assert ("file", "Catch-22 S01E01.srt") in [(t["source"], t.get("file")) for t in subs]
+    # rights: who downloaded it, or an admin; the file's own tracks and unknown ones: 404
+    viewer = signed_in(c.app, "Kid", admin=False)
+    assert viewer.post(f"/api/files/{fid}/subtitles/{d3}/local").status_code == 403
+    assert c.post(f"/api/files/{fid}/subtitles/x0/local").status_code == 404
 
 
 def test_a_folder_bams_cant_write_to(os_env, monkeypatch):
-    """The OS has the last word (a read-only mount, the Linux service's sandbox): the subtitle still works in BAMS,
-    the player and Settings say why there's no copy, and Settings shows the command that allows it."""
+    """The OS has the last word (a read-only mount, the Linux service's sandbox): the button says why, the subtitle
+    still works in BAMS, and Settings shows the command that allows it."""
     c, fake, paths, media, ep, fid = os_env
 
     def refused(video, name, data):
         raise OSError(errno.EROFS, "Read-only file system")
     monkeypatch.setattr(opensubtitles.readonly, "create_sidecar", refused)
-    r = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111, "language": "en"})
-    assert r.status_code == 200 and r.json()["track"]["id"] == "d1" and r.json()["saved"] is None
-    assert "only in its own data folder" in r.json()["save_error"]
-    err = c.get("/api/settings").json()["opensubtitles"]["save_error"]
-    assert err["folder"].endswith("Season 1") and "Settings → Playback" in err["why"]
+    d1 = c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111, "language": "en"}).json()["track"]["id"]
+    r = c.post(f"/api/files/{fid}/subtitles/{d1}/local")
+    assert r.status_code == 409 and "only in its own data folder" in r.json()["detail"]
     assert not list(media.rglob("*.srt"))
+    assert c.get(f"/api/items/{ep}").json()["files"][0]["subtitles"][0]["sidecar"] is None
 
     check = c.get("/api/settings/opensubtitles-save").json()
     assert [(x["library"], x["exists"]) for x in check["roots"]] == [("TV", True)] and check["fix"] is None
@@ -334,9 +331,8 @@ def test_a_folder_bams_cant_write_to(os_env, monkeypatch):
     assert fix.endswith("sudo systemctl restart bams")
     assert signed_in(c.app, "Kid", admin=False).get("/api/settings/opensubtitles-save").status_code == 403
 
-    # once it can write again, the next pick saves its copy and the error goes
+    # once it can write, the button works
     monkeypatch.undo()
     monkeypatch.setattr(opensubtitles, "_MIN_INTERVAL", 0)
     monkeypatch.setattr(opensubtitles, "_LOGIN_INTERVAL", 0)
-    assert c.post(f"/api/files/{fid}/opensubtitles", json={"file_id": 111}).json()["saved"] == "Catch-22 S01E01.en.srt"
-    assert c.get("/api/settings").json()["opensubtitles"]["save_error"] is None
+    assert c.post(f"/api/files/{fid}/subtitles/{d1}/local").json() == {"saved": "Catch-22 S01E01.srt"}
