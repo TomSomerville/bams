@@ -152,6 +152,16 @@ def test_each_server_has_its_own_key_like_tmdb(os_env):
     viewer = signed_in(c.app, "Kid", admin=False)
     assert viewer.put("/api/settings/opensubtitles-key", json={"key": KEY}).status_code == 403
 
+    # a saved key OpenSubtitles stopped accepting (or a server whose key is wrong): signing in to an account says the
+    # key is the problem, not the name and password (tester, 0.13.1: "didn't accept the API key" under the account)
+    con = connect(paths.db)
+    con.execute("UPDATE settings SET value='OtherKey0123456789abcdef' WHERE key='opensubtitles_key'")
+    con.close()
+    r = c.put("/api/settings/opensubtitles", json={"username": "tom", "password": "right"})
+    assert r.status_code == 409 and "refused this server's API key" in r.json()["detail"], r.text
+    assert "weren't checked" in r.json()["detail"] and "opensubtitles.com/en/consumers" in r.json()["detail"]
+    assert c.get("/api/settings").json()["opensubtitles"]["user"] is None  # not kept
+
     # removed: off everywhere, nothing asked
     assert c.delete("/api/settings/opensubtitles-key").json()["configured"] is False
     calls = len(fake.calls)

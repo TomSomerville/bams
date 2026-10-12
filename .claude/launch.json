@@ -68,6 +68,66 @@
       "port": 8494
     },
     {
+      "name": "bams-test-8495",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\b169a8c9-58f7-4862-b4f8-1d311acf59ee\\scratchpad\\data", "serve", "--port", "8495"],
+      "port": 8495
+    },
+    {
+      "name": "bams-test-8496",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\164bc835-a6a1-4d03-bea5-b5e4fb56c8e8\\scratchpad\\data", "serve", "--port", "8496"],
+      "port": 8496
+    },
+    {
+      "name": "bams-test-8497",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\3ffc3cce-12cc-4027-8342-2976bacf24fc\\scratchpad\\data", "serve", "--port", "8497"],
+      "port": 8497
+    },
+    {
+      "name": "bams-test-8498",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\de6a9416-8b43-4e10-855f-8bde947d55f9\\scratchpad\\serve_fake_os.py", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\de6a9416-8b43-4e10-855f-8bde947d55f9\\scratchpad\\data", "serve", "--port", "8498"],
+      "port": 8498
+    },
+    {
+      "name": "bams-test-8499",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\77618900-6b57-42c2-9ce5-80c87acff28a\\scratchpad\\data", "serve", "--port", "8499"],
+      "port": 8499
+    },
+    {
+      "name": "bams-test-8500",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\beaa40a8-0cbf-4858-9c3b-ce69f3de028a\\scratchpad\\data", "serve", "--port", "8500"],
+      "port": 8500
+    },
+    {
+      "name": "bams-test-8501",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\0cdf5b50-dc8b-4d6e-8ec4-578e7171c386\\scratchpad\\data", "serve", "--port", "8501"],
+      "port": 8501
+    },
+    {
+      "name": "bams-test-8502",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\01448aae-fc65-4f33-9ba6-3f2d1859532d\\scratchpad\\data", "serve", "--port", "8502"],
+      "port": 8502
+    },
+    {
+      "name": "bams-test-8503",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\5efe0b88-b6de-4183-b3f5-0b9813c2d620\\scratchpad\\data8503", "serve", "--port", "8503"],
+      "port": 8503
+    },
+    {
+      "name": "bams-test-8504",
+      "runtimeExecutable": "server\\.venv\\Scripts\\python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "C:\\Users\\Beached\\AppData\\Local\\Temp\\claude\\C--Users-Beached-bams\\5efe0b88-b6de-4183-b3f5-0b9813c2d620\\scratchpad\\data8504", "serve", "--port", "8504"],
+      "port": 8504
+    },
+    {
       "name": "tv",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "tv", "run", "dev"],

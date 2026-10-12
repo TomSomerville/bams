@@ -17,7 +17,9 @@ bams/
 ├── README.md                  Project intro, how to run
 ├── LICENSE                    MIT
 ├── .gitignore / .gitattributes   (LF line endings everywhere; data/, .venv/, node_modules/, dist/ ignored)
-├── .claude/launch.json        Preview-pane servers: "web" (Vite :5173), "bams-test" (a scratch server on :8485)
+├── .claude/launch.json        Preview-pane servers: "web" (Vite :5173), "bams-test" (a scratch server on :8485), one scratch server per session that added one
+├── .claude/skills/            Project skills for Claude sessions: bams-server (SSH to the owner's Ubuntu server: log, read-only DB,
+│                              FFmpeg repro, linux-tests.sh in Docker), tv-connection (sdb to the Samsung TV on/off/check)
 │
 ├── docs/
 │   ├── PLAN.md                Architecture, how Plex works, metadata licensing, phases
@@ -175,6 +177,8 @@ bams/
 ├── branding/logo/             Owner-supplied logo + transparent cut-outs (re-rendered by tools/brand_art)
 ├── branding/archive/          Old comic-style concept logos (PNGs gitignored, contact sheet kept)
 ├── tools/brand_art/rework.py  Redraws the logo set via local ComfyUI (render candidates → finalize picks)
+├── tools/hwcheck/             Hardware check for choosing a server machine: bams-hwcheck.ps1 (Windows) / .sh (Linux) time video
+│                              conversion (GPU/CPU via FFmpeg), media drive reads, network and memory, score them alike; read-only
 └── data/                      (gitignored) dev data dir: bams.db, images/, logs/, backups/, cache/ (subtitles, keyframes),
                                transcode/ (HLS segments, wiped at start)
 ```

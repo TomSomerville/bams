@@ -257,8 +257,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Don't guess the OpenSubtitles key's format**: their docs don't give one, and a 16–64 character check refused the
   owner's paste. `valid_key_format` only rules out spaces and silly lengths; a JWT with an `exp` (a sign-in token, 24 h)
   is refused with an explanation (`_sign_in_token`); everything else is OpenSubtitles' call (`Client.check`).
-- **OpenSubtitles answers a wrong API key with 403 "You cannot consume this service"** on searches (`/infos/formats`
-  works with any key, so it can't check one). `Client.check()` uses a small search; searching never counts against
+- **OpenSubtitles answers a wrong API key with 403 "You cannot consume this service"** on searches and on `/login`
+  (before it reads the name and password: a failed account sign-in with that message is the *key*; `Client.request`
+  says so). `/infos/formats` works with any key, so it can't check one. `Client.check()` uses a small search; searching never counts against
   the download limit, downloads do (also when picked from the TV).
 - **`web/src/subtitleLangs.ts` is shared with the TV app** (OpenSubtitles' language list): no React, router or
   storage in it, like `everywhere.ts`.

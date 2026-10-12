@@ -69,6 +69,7 @@ Building the installers: [deploy/README.md](deploy/README.md).
 | `firetv/` | Fire TV app (Fire OS): an Android shell around the `tv/` app with ExoPlayer; notes in `firetv/README.md` |
 | `branding/logo/` | Logo files. `*-transparent.png` are cut-outs for dark backgrounds |
 | `tools/brand_art/rework.py` | Redraws the logo set through local ComfyUI (Qwen Image 2.1 edit) and rebuilds the cut-outs |
+| `tools/hwcheck/` | Hardware check for a would-be server: `bams-hwcheck.ps1` (Windows) or `bams-hwcheck.sh` (Linux) times video conversion, drive reads, network and memory and scores them, so machines can be compared (reads media only) |
 
 ## License
 

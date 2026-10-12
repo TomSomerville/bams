@@ -3,6 +3,18 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.13.2 (2026-10-12)
+
+### Fixed
+- **Signing in to an OpenSubtitles account gave a misleading error** when OpenSubtitles refused the server's API key:
+  "didn't accept the API key" appeared under the account's name and password, so it looked like they were wrong.
+  OpenSubtitles turns such a server away before it looks at the account at all. The message now says the API key was
+  refused and the name and password weren't checked, and tells you to press **Test** next to the key (and paste it
+  again from opensubtitles.com → your profile → **API consumers** if that fails too).
+
+Update the server with the new installer. The TV apps are unchanged: `BAMS-SamsungTV-0.13.0.wgt` and
+`BAMS-FireTV-0.13.0.apk` from the 0.13.0 release are still current.
+
 ## 0.13.1 (2026-10-11)
 
 ### Changed

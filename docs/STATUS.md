@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-11** (release 0.13.1).
+Last updated: **2026-10-12** (release 0.13.2).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -385,6 +385,26 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-12: OpenSubtitles account sign-in error, VIP account on the owner's server, tools committed (release 0.13.2)
+- **What / why:** owner: "Tester cannot log into open subtitles with their account credentials" (screenshot: "OpenSubtitles
+  didn't accept the API key (You cannot consume this service)" under the account form). Probing `/login` with a
+  made-up key gives exactly that 403 before any credentials are read, so the tester's *server* key was refused, not
+  the account. The owner's server (0.13.1) was fine: key verified, and its traffic log had no failed sign-in, so the
+  screenshot came from the tester's own server. `Client.request` now answers a 403 on `/login` with "OpenSubtitles
+  refused this server's API key …, so it couldn't sign in to the account; the name and password weren't checked.
+  Press Test next to the key; if it's refused too, paste the API key again from …/consumers". The owner then signed
+  in on their own server with the tester's account: OpenSubtitles reported "VIP Member", 1000 downloads a day.
+  Also committed at the owner's request ("commit everything"): `tools/hwcheck/` (hardware check scripts, Windows +
+  Linux, made by another session) and the project skills `.claude/skills/bams-server`, `.claude/skills/tv-connection`.
+- **Files:** `server/bams/opensubtitles.py` (`Client.request`), `tests/test_opensubtitles.py` (a refused key on account
+  sign-in: 409 with the key message, account not kept); `tools/hwcheck/`, `.claude/skills/`, `.claude/launch.json`
+  (scratch servers); README, CODEBASE (tree), CHANGELOG, VERSION 0.13.2.
+- **Verified:** 330 server tests (clean worktree of the release commit too); on the owner's server (read-only, over
+  SSH): key 32 letters/digits verified 2026-10-12 15:23 UTC, account `VIP Member` / 1000 a day, sign-in 200 in the
+  traffic log; the key and password themselves were never read (length/shape only).
+- **Left open:** no subtitle downloaded with the VIP account yet (0 rows in `subtitle_downloads` when checked); the
+  tester's own server still needs its key checked (Test) or pasted again.
 
 ### 2026-10-11: Keep for hand-identified files, OpenSubtitles key check (release 0.13.1)
 - **What / why:** (1) Another session's finished work, documented here at release: "Keep" in the Unrecognized list
