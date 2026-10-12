@@ -84,6 +84,7 @@ bams/
 │       ├── api.ts             fetch wrapper (ApiError; a 401 fires SIGNED_OUT) + TypeScript types for every server shape
 │       ├── useApi.ts          useApi<T>(path) → {data, error, loading, reload}
 │       ├── settings.tsx       SettingsProvider: server TMDB status (configured/last4), serverError
+│       ├── random.tsx         Play Random: VideoQueueProvider/useVideoQueue (video queue the player follows, sessionStorage), PlayRandomButton
 │       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
 │       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search); this browser's names, hidden flags and order for each server's libraries (`setLibrary`, `setLibraryOrder`; `describe` applies the order)
@@ -589,6 +590,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/genres` | every show/movie genre `[{name, count}]`, most titles first | Home, HomeSettings (genre rows) |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
 | `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback; a movie's/episode's unprobed files are probed now) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |
+| `GET /api/libraries/{id}/random`, `GET /api/items/{id}/random` | Play Random: `{type:"music", tracks}` (queue like /tracks) or `{type:"video", items}` (movies/episodes with a file, random, no Specials; `limit` ≤ 1000, default 100); items: show, season, artist, album | random.tsx |
 | `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback`, `start`/`end` (CUE) | Music pages, NowPlaying |
 | `GET /api/libraries/{id}/playlists` · `GET /api/playlists/{id}` | imported playlists (`track_count`, `duration`, `missing`, `covers`) · one with its `tracks` (queue) | MusicLibrary, PlaylistPage |
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music Fix match | MusicFixMatch |

@@ -7,6 +7,7 @@ import { UnrecognizedFiles } from "../components/Identify";
 import { useScope } from "../servers";
 import { useApi } from "../useApi";
 import { MusicLibrary } from "./Music";
+import { PlayRandomButton } from "../random";
 
 const SORTS = { added: "Recently added", title: "Title", year: "Year", rating: "Rating" } as const;
 
@@ -36,6 +37,7 @@ export default function Library() {
       <div className="page-head">
         <h1>{lib ? libName(lib.id, lib.name) : ""}</h1>
         {items && <span className="count">{list.length} {noun}</span>}
+        {lib && tab === "titles" && <PlayRandomButton className="btn ghost small page-random" path={`/api/libraries/${lib.id}/random`} />}
         {admin && (unrecognized > 0 || tab === "unrecognized") && (
           <div className="segmented lib-tabs">
             <button className={tab === "titles" ? "on" : ""} onClick={() => setParams({})}>{noun[0].toUpperCase() + noun.slice(1)}</button>

@@ -776,5 +776,8 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .list-rename { display: flex; align-items: center; gap: 8px; }
 .list-rename input { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 20px; font-weight: 700; width: min(360px, 60vw); }
 .page-head .list-rename .btn { margin-left: 0; }
+.page-head .btn.page-random { margin-left: 0; }
 .list-empty { padding-top: 8vh; color: var(--muted); }
 .list-empty h2 { color: var(--text); font-size: 22px; }
+.player-queue { right: 32px; }
+.np-q-remove { flex: none; width: 28px; height: 28px; }

@@ -10,6 +10,7 @@ import { fmtClock, fmtRuntime, fmtSize, seasonsLabel, sxe } from "../format";
 import { useScope } from "../servers";
 import { useApi } from "../useApi";
 import { MusicDetail } from "./Music";
+import { PlayRandomButton } from "../random";
 
 function TechInfo({ f }: { f: FileInfo }) {
   const p = f.probe;
@@ -177,6 +178,7 @@ export default function Detail() {
             <ListToggle big item={item} />
             {(!remote || remote.is_admin) && (  // another server's titles: only its admins can fix them
               <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>)}
+            {item.kind === "show" && !!item.episodes && <PlayRandomButton path={`/api/items/${item.id}/random`} />}
             {item.ids.imdb && (
               <a className="btn ghost" href={`https://www.imdb.com/title/${item.ids.imdb}/`} target="_blank" rel="noreferrer">IMDb</a>
             )}

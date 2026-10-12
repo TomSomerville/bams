@@ -274,3 +274,16 @@ def test_one_account_on_two_devices_at_once(tv):
         assert cont == {ep[(1, 1)]: 180, other: 680}
     tvc.put(f"/api/items/{ep[(1, 1)]}/watched", json={"watched": True})  # marked on the TV, seen on the web
     assert c.get(f"/api/items/{ep[(1, 1)]}").json()["progress"]["watched"] is True
+
+
+def test_play_random(tv):
+    _, c, ep, show = tv
+    got = c.get(f"/api/items/{show}/random").json()
+    assert got["type"] == "video"
+    assert sorted(x["id"] for x in got["items"]) == sorted(i for k, i in ep.items() if k[0] > 0)  # no Specials
+    assert all(x["show"] == "Show" and x["kind"] == "episode" for x in got["items"])
+    lib = c.get("/api/libraries").json()[0]["id"]
+    whole = c.get(f"/api/libraries/{lib}/random?limit=3").json()
+    assert whole["type"] == "video" and len(whole["items"]) == 3
+    assert len(c.get(f"/api/libraries/{lib}/random").json()["items"]) == 5  # Show's 4 + Other's 1
+    assert c.get(f"/api/items/{ep[(1, 1)]}/random").status_code == 404

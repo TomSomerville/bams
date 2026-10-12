@@ -8,6 +8,7 @@ import MusicFixMatch from "../components/MusicFixMatch";
 import { fmtClock, fmtLength, plural } from "../format";
 import { useScope } from "../servers";
 import { useMusic } from "../music";
+import { PlayRandomButton } from "../random";
 import { useApi } from "../useApi";
 
 // ------------------------------------------------------------------ library
@@ -46,6 +47,7 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
         </div>
         {tab === "playlist" ? (lists && <span className="count">{plural(lists.length, "playlist")}</span>)
           : items && <span className="count">{plural(list.length, tab)}</span>}
+        <PlayRandomButton className="btn ghost small page-random" path={`/api/libraries/${lib.id}/random`} />
         {tab !== "playlist" && <label className="sort">
           Sort
           <select value={sort} onChange={(e) => (tab === "album"
@@ -150,6 +152,7 @@ function Actions({ item, reload }: { item: ItemDetail; reload: () => void }) {
       <button className="btn primary" onClick={() => music.playItem(item.id, { rid })}><Icon name="play" /> Play</button>
       <button className="btn ghost" onClick={() => music.playItem(item.id, { shuffle: true, rid })}><Icon name="shuffle" /> Shuffle</button>
       {(!remote || remote.is_admin) && <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>}
+      {item.kind === "artist" && <PlayRandomButton path={`/api/items/${item.id}/random`} />}
       {fixing && <MusicFixMatch item={item} onClose={(changed) => { setFixing(false); if (changed) reload(); }} />}
     </div>
   );

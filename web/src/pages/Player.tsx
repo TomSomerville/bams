@@ -7,6 +7,8 @@ import Icon from "../components/Icon";
 import { fmtClock, PLAY_LABEL, sxe } from "../format";
 import { useScope, type Call } from "../servers";
 import { useApi } from "../useApi";
+import { entryLabel, useVideoQueue } from "../random";
+import { useReorder } from "../components/useReorder";
 
 // Three ways a file reaches <video>, chosen by the server (file.playback.mode) and the viewer's choices:
 //  "file"      - the original bytes with HTTP Range; the browser seeks by itself.
@@ -116,6 +118,35 @@ function Choice({ on, onClick, children, note }: { on: boolean; onClick: () => v
   );
 }
 
+/** Play Random's queue in the player: jump to a video, or drag (arrow keys) to reorder, like the music queue. */
+function VideoQueueList({ at, jump }: { at: number; jump: (id: number) => void }) {
+  const vq = useVideoQueue();
+  const { listRef, dragging, handle, rowClass } = useReorder<HTMLOListElement>(vq.items.length, vq.move, ".np-queue");
+  return (
+    <ol ref={listRef} className={dragging ? "dragging" : ""}>
+      {vq.items.map((e, i) => {
+        const l = entryLabel(e);
+        return (
+          <li key={e.id} className={rowClass(i)}>
+            <button type="button" className="reorder-handle np-q-handle" aria-label={`Move ${l.title}`} {...handle(i)}>
+              <Icon name="grip" size={16} />
+            </button>
+            <button className={`np-q-row ${i === at ? "on" : ""}`} onClick={() => jump(e.id)}>
+              <span className="np-q-title">{l.title}</span>
+              <span className="muted">{l.sub}</span>
+              <span className="muted np-q-time">{e.runtime ? `${e.runtime}m` : ""}</span>
+            </button>
+            {i !== at && (
+              <button type="button" className="icon-btn subtle np-q-remove" onClick={() => vq.remove(i)}
+                aria-label={`Remove ${l.title}`} title="Remove from the queue"><Icon name="close" size={14} /></button>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 /** /play/:id. Keyed by id, so going on to the next episode starts a fresh player. */
 export default function PlayerPage() {
   const { id } = useParams();
@@ -183,6 +214,11 @@ function Player({ id }: { id: string }) {
 
   const file = item?.files.find((f) => f.available) ?? item?.files[0];
   const show = item?.ancestors.find((a) => a.kind === "show");
+  // Play Random (random.tsx): while this video is in the random queue, "next" is the queue's next, not the next episode
+  const vq = useVideoQueue();
+  const qAt = item ? vq.indexOf(item.id, rid) : -1;
+  const nextId = qAt >= 0 ? vq.items[qAt + 1]?.id ?? null : item?.next_id ?? null;
+  const [showQueue, setShowQueue] = useState(false);
   const pb = file?.playback;
   const audioTracks = file?.audio_tracks ?? [];
   const subTracks = useMemo(() => [...(file?.subtitles ?? []), ...found.filter((f) => !file?.subtitles?.some((s) => s.id === f.id))]
@@ -397,16 +433,16 @@ function Player({ id }: { id: string }) {
 
   // Up next: when an episode ends, the next one starts after a short countdown.
   useEffect(() => {
-    if (upNext === null || !item?.next_id) return;
+    if (upNext === null || !nextId) return;
     if (upNext <= 0) return goNext(true);
     if (!playing && !video.current?.ended) return;  // paused during the credits: so is the countdown
     const timer = setTimeout(() => setUpNext(upNext - 1), 1000);
     return () => clearTimeout(timer);
-  }, [upNext, item?.next_id, playing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [upNext, nextId, playing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The credits: the up-next countdown starts CREDITS seconds before the end, as if the episode were over
   // (not when sleep mode stops after this one).
-  const inCredits = !!item?.next_id && total > 4 * CREDITS && pos >= total - CREDITS;
+  const inCredits = !!nextId && item?.kind === "episode" && total > 4 * CREDITS && pos >= total - CREDITS;
   useEffect(() => {
     if (inCredits && playing && upNext === null && !skipCredits.current && sleep !== 0) setUpNext(10);
   }, [inCredits, playing]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -520,7 +556,7 @@ function Player({ id }: { id: string }) {
     if (note) setNotice(note);
   };
   const toggleSleep = () => {
-    const n = sleep !== null ? null : item?.next_id ? SLEEP_MORE : 0;
+    const n = sleep !== null ? null : nextId ? SLEEP_MORE : 0;
     setSleep(n);
     setSlept(false);
     setNotice(n === null ? "Sleep mode off"
@@ -537,10 +573,10 @@ function Player({ id }: { id: string }) {
   };
   /** On to the next episode. `done`: from the credits / the end, so this one counts as watched. */
   const goNext = (done: boolean) => {
-    if (!item?.next_id) return;
+    if (!nextId) return;
     finished.current = done;  // the report on leaving says where this one ended
     // sleep mode counts down; going on by hand after it stopped means someone's awake: off
-    nav(to(`/play/${item.next_id}`), { replace: true, state: sleep ? { sleep: sleep - 1 } : undefined });
+    nav(to(`/play/${nextId}`), { replace: true, state: sleep ? { sleep: sleep - 1 } : undefined });
   };
   const fullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen();
@@ -601,10 +637,10 @@ function Player({ id }: { id: string }) {
   const qualityLabel = height ? qualityName(height) : auto ? "Auto"
     : mode === "transcode" ? (fullSize ? qualityName(fullSize) : "Full size") : "Original";
   const surroundSource = audioTracks.some((a) => (a.channels ?? 0) >= 6);
-  const nextUp = upNext !== null && item.next_id;
+  const nextUp = upNext !== null && nextId;
 
   return (
-    <div ref={shell} className={`player ${idle && playing && !menu && !finding ? "idle" : ""}`}>
+    <div ref={shell} className={`player ${idle && playing && !menu && !finding && !showQueue ? "idle" : ""}`}>
       {file ? (
         <video
           // a new element per stream: hls.js detaching must not wipe the next stream's src
@@ -629,7 +665,7 @@ function Player({ id }: { id: string }) {
           onEnded={() => {
             report(totalRef.current || posRef.current);  // the end counts as watched
             if (sleep === 0) setSlept(true);  // sleep mode: this was the last one
-            else if (item.next_id) setUpNext(10);
+            else if (nextId) setUpNext(10);
           }}
           onLoadedMetadata={(e) => {
             const v = e.currentTarget;
@@ -665,7 +701,7 @@ function Player({ id }: { id: string }) {
         <div className="player-msg">
           <p>Sleep mode stopped playback here.</p>
           <div className="actions">
-            {item.next_id && <button className="btn primary small" onClick={() => goNext(true)}>
+            {nextId && <button className="btn primary small" onClick={() => goNext(true)}>
               <Icon name="play" size={16} /> Next episode</button>}
             <button className="btn ghost small" onClick={() => nav(-1)}>Back</button>
           </div>
@@ -673,7 +709,7 @@ function Player({ id }: { id: string }) {
       )}
       {nextUp && (
         <div className="up-next">
-          <span className="muted">Next episode in {upNext}…</span>
+          <span className="muted">{qAt >= 0 ? "Next" : "Next episode"} in {upNext}…</span>
           <button className="btn primary small" onClick={() => goNext(true)}>
             <Icon name="play" size={16} /> Play now</button>
           <button className="btn ghost small" onClick={() => { skipCredits.current = true; setUpNext(null); }}>Cancel</button>
@@ -719,6 +755,15 @@ function Player({ id }: { id: string }) {
           style={{ ["--pct" as string]: `${total ? ((scrub ?? pos) / total) * 100 : 0}%` }}
           aria-label="Seek"
         />
+        {showQueue && qAt >= 0 && (
+          <div className="np-queue player-queue">
+            <div className="np-queue-head">
+              <h3>Up next</h3>
+              <button className="icon-btn subtle" onClick={() => setShowQueue(false)} aria-label="Close queue"><Icon name="close" size={18} /></button>
+            </div>
+            <VideoQueueList at={qAt} jump={(qid) => { if (qid !== item.id) nav(to(`/play/${qid}`), { replace: true }); }} />
+          </div>
+        )}
         <div className="player-controls">
           <button className="icon-btn" onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
             <Icon name={playing ? "pause" : "play"} size={28} />
@@ -727,7 +772,7 @@ function Player({ id }: { id: string }) {
             title={`Back ${SKIP_BACK} s (←)`}><Icon name="chevronLeft" size={24} /><span>{SKIP_BACK}</span></button>
           <button className="icon-btn skip-btn" onClick={() => seek(pos + SKIP_FORWARD)} aria-label={`Forward ${SKIP_FORWARD} seconds`}
             title={`Forward ${SKIP_FORWARD} s (→)`}><span>{SKIP_FORWARD}</span><Icon name="chevronRight" size={24} /></button>
-          {item.next_id && (
+          {nextId && (
             <button className="icon-btn" onClick={() => goNext(false)} aria-label="Next episode" title="Next episode">
               <Icon name="skipForward" size={22} /></button>
           )}
@@ -737,7 +782,7 @@ function Player({ id }: { id: string }) {
           {watchable && (
             <button className={`icon-btn sleep-btn ${sleep !== null ? "on" : ""}`} onClick={toggleSleep} aria-pressed={sleep !== null}
               aria-label="Sleep mode" title={sleep === null
-                ? `Sleep mode: stop after this ${item.kind === "movie" ? "movie" : item.next_id ? `episode and ${SLEEP_MORE} more` : "episode"}`
+                ? `Sleep mode: stop after this ${item.kind === "movie" ? "movie" : nextId ? `episode and ${SLEEP_MORE} more` : "episode"}`
                 : sleep ? `Sleep mode on: stops after this episode and ${sleep} more (click to turn off)`
                 : "Sleep mode on: stops after this one (click to turn off)"}>
               <Icon name="sleep" size={24} />{sleep ? <span>+{sleep}</span> : null}
@@ -746,6 +791,10 @@ function Player({ id }: { id: string }) {
           <span className="time">{fmt(scrub ?? pos)} / {fmt(total)}</span>
           {note && <span className="muted audio-note" title={note.why}>{note.text}</span>}
           <span className="spacer" />
+          {qAt >= 0 && (
+            <button className={`icon-btn ${showQueue ? "on" : ""}`} onClick={() => setShowQueue(!showQueue)}
+              aria-label="Up next" title="Up next (Play Random)"><Icon name="list" size={22} /></button>
+          )}
           {(subTracks.length > 0 || (item.opensubtitles && file)) && (
             <Menu label={<Icon name="subtitles" size={20} />} title="Subtitles" open={menu === "subs"}
               setOpen={(o) => setMenu(o ? "subs" : null)}>
