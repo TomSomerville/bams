@@ -3,6 +3,38 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.17.0 (2026-10-14)
+
+### Added
+- **BAMS for Android (phones), 0.2.0.** An app for Android 8 or later that shows your BAMS server's own pages, plus
+  **downloads**: movies, episodes, whole seasons and shows, songs, albums, artists and playlists, as the original
+  files, to the phone or an SD card. With no connection the app opens your downloads and plays them (music keeps
+  playing with the screen off, with lock-screen controls). Where you stop watching offline is sent to the server the
+  next time it's reached. A server can have more than one address (home and away). Install `BAMS-Android-0.2.0.apk`
+  from this release (copy it to the phone and open it).
+- **Who may download** is set per account: Settings → Accounts → *Can download to the BAMS Android app* (admins
+  always can). The web and TV apps still don't download.
+- **Your own playlists.** Music → Playlists → **New playlist** (a name and a few words about it). Add a song with the
+  small playlist icon on its row, or a whole album or artist with **Add to playlist**. On a playlist's page: drag
+  songs into order, take them out, edit, delete. Your playlists are yours alone: other accounts don't see them.
+  Playlists imported from playlist files stay as they are and get **Make a copy** to edit one.
+- **Quality line.** Under the playing song's title and artist: its format and quality, like *FLAC · 24-bit / 96 kHz*
+  or *MP3 · 320 kbps*; a song converted while streaming shows both (*ALAC 24-bit / 96 kHz → AAC 256 kbps*).
+
+### Fixed
+- On a phone-sized screen, libraries no longer stack on top of each other in the menu bar at the bottom.
+
+Update the server with the new installer. The TV apps 0.15.0 (playlists and the quality line on the TV) need this
+server or later.
+
+## TV apps 0.15.0
+
+### Added
+- **Your own playlists on the TV:** a *New playlist* tile in Music → Playlists (the name is typed with the TV's
+  keyboard), *Add to playlist* on album and artist pages, and holding OK on a song to add it to one. In your own
+  playlist, holding OK on a song moves it up or down or takes it out. *Make a copy* on imported playlists.
+- **Quality line** under the playing song on the music bar.
+
 ## TV apps 0.14.0 (2026-10-12)
 
 ### Added
