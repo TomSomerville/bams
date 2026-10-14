@@ -6,6 +6,8 @@ import { ridOf, scopeLink } from "../servers";
 import { Poster } from "./Art";
 import Icon from "./Icon";
 import { useReorder } from "./useReorder";
+import { qualityLine } from "../quality";
+import type { QueueTrack } from "../api";
 
 /** The queue, reorderable: drag a row by its handle (mouse or touch), or focus the handle and use the arrow keys. */
 function QueueList() {
@@ -38,6 +40,12 @@ function QueueList() {
   );
 }
 
+/** The playing song's format and quality, under its title and artist (quality.ts). */
+function Quality({ t }: { t: QueueTrack }) {
+  const line = qualityLine(t.playback);
+  return line ? <span className="np-quality" title={line}>{line}</span> : null;
+}
+
 /** The bar at the bottom of every page while music is queued. */
 export default function NowPlaying() {
   const m = useMusic();
@@ -64,6 +72,7 @@ export default function NowPlaying() {
         <div className="np-text">
           <Link to={to(`/title/${t.album_id}`)} className="np-title">{t.title}</Link>
           <Link to={to(`/title/${t.artist_id}`)} className="np-artist muted">{t.artist}</Link>
+          <Quality t={t} />
         </div>
       </div>
 

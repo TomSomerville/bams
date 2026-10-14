@@ -79,8 +79,9 @@ def test_fix_match_shows_where_the_files_are(tmp_path):
         readonly.set_protected_roots([])
 
 
-def test_files_play_but_are_never_offered_for_download(tmp_path):
-    """Owner's decision: BAMS has no downloads. A file is streamed for playing only, with no name to save it under."""
+def test_files_play_without_a_name_to_save_them_under(tmp_path):
+    """Playing streams the file with no name to save it under; downloads are only for the Android app, through
+    their own route (test_downloads.py)."""
     from bams import jobs
     media = tmp_path / "media"
     make_tree(media, ["Film (2001)/Film (2001).mkv"])
@@ -92,7 +93,6 @@ def test_files_play_but_are_never_offered_for_download(tmp_path):
         item = c.get(f"/api/libraries/{lib['id']}/items").json()[0]
         f = c.get(f"/api/items/{item['id']}").json()["files"][0]
         assert "download_url" not in f
-        assert c.get(f"/api/files/{f['id']}/download").status_code == 404
         r = c.get(f["stream_url"])
         assert r.status_code == 200 and "content-disposition" not in r.headers
     finally:

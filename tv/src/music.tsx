@@ -18,6 +18,8 @@ type Music = {
   time: number;
   duration: number;
   error: string | null;
+  /** the TV couldn't decode the file as it is: it's playing the server's conversion (the quality line says so) */
+  converted: boolean;
   playTracks: (tracks: QueueTrack[], rid: number | undefined, start?: number, shuffle?: boolean) => void;
   /** an artist, album or track by id: its play queue from the server */
   playItem: (id: number, rid: number | undefined, opts?: { shuffle?: boolean; startTrackId?: number }) => Promise<void>;
@@ -54,6 +56,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [convertedNow, setConverted] = useState(false);
   const q = useRef<Track[]>([]);
   const idx = useRef(0);
   const offset = useRef(0);          // a converted stream starts at ?t=: its clock starts there
@@ -67,6 +70,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     if (!e) return;
     const m = mediaFor(t.rid);
     converted.current = convert;
+    setConverted(convert);
     setError(null);
     if (convert || t.playback.mode === "transcode") {
       const url = convert ? `/api/files/${t.file_id}/audio` : t.playback.url;
@@ -206,7 +210,8 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<Music>(() => ({
-    queue, index, current, playing, time, duration, error, playTracks, playItem, toggle, pause, next, prev, stop, jump, move, remove,
-  }), [queue, index, current, playing, time, duration, error, playTracks, playItem, toggle, pause, next, prev, stop, jump, move, remove]);
+    queue, index, current, playing, time, duration, error, converted: convertedNow, playTracks, playItem, toggle, pause, next,
+    prev, stop, jump, move, remove,
+  }), [queue, index, current, playing, time, duration, error, convertedNow, playTracks, playItem, toggle, pause, next, prev, stop, jump, move, remove]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

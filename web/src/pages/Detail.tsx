@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { MUSIC_KINDS, type FileInfo, type ItemDetail, type ItemSummary } from "../api";
 import { Backdrop, Poster } from "../components/Art";
 import { ListToggle, PlayBadge, PosterCard, progressOf } from "../components/Cards";
+import { DownloadButton } from "../components/Download";
 import FixMatch from "../components/FixMatch";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
@@ -84,6 +85,7 @@ function Episodes({ season, picked, onChange }: { season: ItemSummary; picked: n
         {data.overview && <p className="muted season-overview">{data.overview}</p>}
         {!!data.episodes && <WatchedButton item={data} watched={data.unwatched === 0} done={changed} />}
         <ListToggle big item={data} what=" season" />
+        {!!data.episodes && <DownloadButton id={data.id} title={`${season.title}`} what=" season" />}
       </div>
       <ol className="episodes">
         {data.children.map((e) => (
@@ -103,6 +105,7 @@ function Episodes({ season, picked, onChange }: { season: ItemSummary; picked: n
               <span className="ep-time">{[e.air_date?.slice(0, 4), e.runtime ? `${e.runtime}m` : null].filter(Boolean).join(" · ")}</span>
               <ListToggle small item={e} />
               <WatchedButton small item={e} watched={!!e.progress?.watched} done={reload} />
+              <DownloadButton small id={e.id} title={`${sxe(e.season_number!, e.episode_number)} ${e.title}`} />
             </Link>
           </li>
         ))}
@@ -176,6 +179,9 @@ export default function Detail() {
             {item.kind === "movie" && <WatchedButton item={item} watched={!!item.progress?.watched} done={reload} />}
             {item.kind === "show" && !!item.episodes && <WatchedButton item={item} watched={item.unwatched === 0} done={reload} />}
             <ListToggle big item={item} />
+            {item.kind === "movie" && file && (
+              <DownloadButton id={item.id} title={item.title} audio={file.probe?.audio.map((a) => a.codec)} />)}
+            {item.kind === "show" && !!item.episodes && <DownloadButton id={item.id} title={item.title} what=" show" />}
             {(!remote || remote.is_admin) && (  // another server's titles: only its admins can fix them
               <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>)}
             {item.kind === "show" && !!item.episodes && <PlayRandomButton path={`/api/items/${item.id}/random`} />}

@@ -8,6 +8,7 @@ import { LIB_TYPES } from "../format";
 import { listName } from "../homeRows";
 import Icon from "./Icon";
 import { useReorder } from "./useReorder";
+import { appApi, inApp } from "../android";
 
 export default function Sidebar() {
   const { user, prefs } = useAuth();
@@ -77,6 +78,11 @@ export default function Sidebar() {
       </div>
 
       <div className="nav-group bottom">
+        {inApp && (  // the Android app's own screen: what's on this phone, playable with no connection
+          <button type="button" className="nav-item" onClick={() => { appApi.openDownloads().catch(() => {}); }}>
+            <Icon name="download" /> <span>Downloads</span>
+          </button>
+        )}
         <NavLink to="/settings" className="nav-item">
           <Icon name="settings" /> <span>Settings</span>
         </NavLink>

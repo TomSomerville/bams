@@ -781,3 +781,52 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .list-empty h2 { color: var(--text); font-size: 22px; }
 .player-queue { right: 32px; }
 .np-q-remove { flex: none; width: 28px; height: 28px; }
+
+/* Android app downloads (components/Download.tsx; only in the app) */
+.tracklist li.track-row, .tracklist li.has-download { display: flex; align-items: center; gap: 4px; position: relative; }
+.tracklist li.track-row .track, .tracklist li.has-download .track { flex: 1; min-width: 0; }
+.track-row .add-to-playlist { opacity: 0.45; }
+.track-row:hover .add-to-playlist, .track-row .add-to-playlist:focus-visible { opacity: 1; }
+.playlists-head { margin-top: 8px; }
+.playlist-form { display: flex; flex-direction: column; gap: 10px; padding: 8px 18px 18px; }
+.playlist-form textarea { resize: vertical; min-height: 64px; padding: 10px 12px; font: inherit; height: auto; }
+.playlist-form-foot { display: flex; gap: 8px; justify-content: flex-end; }
+.playlist-done { padding: 4px 18px 8px; line-height: 1.5; }
+.playlist-modal { width: min(480px, 100%); }
+.download-toggle.on { color: var(--cyan); }
+.download-toggle.busy { color: var(--cyan); }
+.download-pct { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 16px; }
+.download-confirm { font-size: 13px; }
+button.nav-item { background: none; border: 0; font: inherit; text-align: left; cursor: pointer; width: 100%; }
+@media (max-width: 720px) { button.nav-item { width: auto; } }
+.phone-volumes { display: flex; flex-direction: column; gap: 8px; }
+.phone-volume { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.phone-volume.on { border-color: var(--cyan); }
+.phone-volume input { accent-color: var(--cyan); }
+.phone-volume-name { font-weight: 700; flex: 1; }
+
+/* the Android app's own pages (src/phone: Downloads, Servers; only in the app) */
+.phone-start { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 0 32px; }
+.phone-start img { width: min(320px, 80vw); }
+.phone-start .progress { width: min(240px, 60vw); }
+.phone-banner { width: 100%; border: 0; text-align: left; font: inherit; }
+.phone-banner.online { cursor: pointer; background: linear-gradient(90deg, rgba(94, 200, 239, 0.2), rgba(132, 76, 189, 0.2)), #141c26; color: var(--text); }
+.phone-banner.online > svg, .phone-banner.online .config-banner-cta { color: var(--cyan); }
+.phone-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-width: 900px; }
+.phone-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; flex-wrap: wrap; }
+.phone-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.phone-row-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-row-text .bad { color: #ffb3c6; }
+.phone-row .progress.inline { margin-top: 6px; }
+.phone-shelf .section-head .row-more { margin-left: auto; }
+.phone-addresses { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.phone-addresses li { display: flex; align-items: center; gap: 6px; }
+.episode[role="button"] { cursor: pointer; }
+.phone-shelf .row-track { margin: 0 calc(-1 * var(--gutter)); }
+/* phone width: the libraries (this server's and others') sit in the bottom bar's row like the other items */
+@media (max-width: 720px) { .nav-libs, .nav-row, .nav-remote { display: contents; } }
+@media (max-width: 720px) { .phone-banner .config-banner-cta { display: inline-flex; } }
+
+/* the playing song's format and quality (quality.ts), under its title and artist */
+.np-quality { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--cyan); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 720px) { .np-text { gap: 1px; } .np-title { font-size: 14px; } .np-artist { font-size: 12px; } }

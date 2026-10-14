@@ -6,6 +6,8 @@ import AboutSettings from "../components/AboutSettings";
 import { AccountSettings, UsersSettings } from "../components/AccountSettings";
 import FolderPicker from "../components/FolderPicker";
 import { HomeSettings } from "../components/HomeSettings";
+import { PhoneSettings } from "../components/PhoneSettings";
+import { inApp } from "../android";
 import { ConnectServer, RemoteServers } from "../components/RemoteSettings";
 import { TvSettings } from "../components/TvSettings";
 import Icon from "../components/Icon";
@@ -293,6 +295,8 @@ export default function Settings() {
     return (
       <div className="page narrow">
         <div className="page-head"><h1>Settings</h1></div>
+        {inApp && <><div className="section-head"><h2 className="section-title">This phone</h2></div>
+          <div className="lib-list"><PhoneSettings /></div></>}
         <div className="section-head"><h2 className="section-title">Your account</h2></div>
         <div className="lib-list"><AccountSettings /><TvSettings /><HomeSettings /></div>
         <div className="section-head" id="servers">
@@ -367,6 +371,9 @@ function AdminSettings() {
   return (
     <div className="page narrow">
       <div className="page-head"><h1>Settings</h1></div>
+
+      {inApp && <><div className="section-head"><h2 className="section-title">This phone</h2></div>
+        <div className="lib-list"><PhoneSettings /></div></>}
 
       <div className="section-head"><h2 className="section-title">This server</h2></div>
       <div className="lib-list"><ServerNameSettings /></div>

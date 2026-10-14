@@ -108,6 +108,8 @@ export type User = {
   must_change_password?: boolean;
   /** two-step sign-in (a code from an authenticator app) is on */
   two_factor?: boolean;
+  /** may download to the Android app (admins always; others when an admin turned it on) */
+  can_download?: boolean;
 };
 /** Admin settings: when a title counts as watched (% of its length) and as started (seconds in). */
 export type WatchSettings = { watched_percent: number; resume_after: number };
@@ -255,6 +257,13 @@ export type FileInfo = {
     audio_codec: string | null;
     audio_ok: boolean;
     duration: number | null;
+    /** music: what the server converts to when asked (a player falling back to its conversion) */
+    convert_to?: "aac" | "flac";
+    /** music: the file's quality (quality.ts) */
+    sample_rate?: number | null;
+    bit_depth?: number | null;
+    bitrate?: number | null;
+    channels?: number | null;
   };
   stream_url: string;
   /** video files */
@@ -366,6 +375,21 @@ export type PlaylistSummary = {
 };
 
 export type Playlist = PlaylistSummary & { library_name: string; tracks: QueueTrack[] };
+
+/** One of your own playlists (made in BAMS, private to your account; server: user_playlists.py). */
+export type UserPlaylistSummary = {
+  id: number;
+  user: true;
+  name: string;
+  description: string;
+  track_count: number;
+  duration: number | null;
+  /** up to 4 album covers, in playlist order */
+  covers: string[];
+  created_at: number;
+  updated_at: number;
+};
+export type UserPlaylist = UserPlaylistSummary & { tracks: QueueTrack[] };
 
 export type TmdbResult ={ tmdb_id: number; title: string; year: number | null; overview: string | null; poster_path: string | null };
 /** GET /api/items/{id}/folders (admins): where a show's folders / a movie's files are, for Fix match */

@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 15
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -351,8 +351,33 @@ def _v13(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE subtitle_downloads ADD COLUMN sidecar TEXT")
 
 
+def _v14(con: sqlite3.Connection) -> None:
+    """v14: downloads to the Android app (owner 2026-10-13): an admin turns them on per account; admins always may."""
+    con.execute("ALTER TABLE users ADD COLUMN can_download INTEGER NOT NULL DEFAULT 0")
+
+
+def _v15(con: sqlite3.Connection) -> None:
+    """v15: playlists people make in BAMS (user_playlists.py, owner 2026-10-13): each account's own, private.
+    Imported playlists (.m3u files, `playlists`) stay read-only; "Make a copy" turns one into one of these."""
+    con.execute("""CREATE TABLE user_playlists (
+        id          INTEGER PRIMARY KEY,
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        created_at  REAL NOT NULL,
+        updated_at  REAL NOT NULL)""")
+    con.execute("CREATE INDEX user_playlists_user ON user_playlists(user_id)")
+    con.execute("""CREATE TABLE user_playlist_items (
+        playlist_id INTEGER NOT NULL REFERENCES user_playlists(id) ON DELETE CASCADE,
+        position    INTEGER NOT NULL,              -- 0.. in play order
+        item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,  -- a track
+        added_at    REAL NOT NULL,
+        PRIMARY KEY (playlist_id, position))""")
+    con.execute("CREATE INDEX user_playlist_items_item ON user_playlist_items(item_id)")
+
+
 MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11,
-              12: _v12, 13: _v13}  # target version -> step
+              12: _v12, 13: _v13, 14: _v14, 15: _v15}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:
