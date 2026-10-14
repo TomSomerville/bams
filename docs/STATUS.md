@@ -463,8 +463,10 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Released (2026-10-14):** GitHub release **v0.17.0** with `bams_0.17.0_all.deb` (built on the Linux PC; unpacked,
   installed offline from its wheels and started: 0.17.0, UI served) and `BAMS-Android-0.2.0.apk`. The owner's partner
   adds `BAMS-Setup-0.17.0.exe`, `BAMS-SamsungTV-0.15.0.wgt` and `BAMS-FireTV-0.15.0.apk` from the Windows PC
-  (`gh release upload v0.17.0 …`, `SHA256SUMS.txt` regenerated with all five): done 2026-10-14. The owner updated
-  their Ubuntu server to 0.17.0 (`sudo apt install`) and reports it working.
+  (`gh release upload v0.17.0 …`, `SHA256SUMS.txt` regenerated with all five): done 2026-10-14, from the tagged commit
+  after 343 server tests and TV `npm test` 39/39; the `.wgt` has the same certificates as 0.14.0, the Fire TV APK the
+  same release key (versionCode 1500). The owner updated their Ubuntu server to 0.17.0 (`sudo apt install`) and
+  reports it working.
 - **Left open:** not tried on a real TV.
 
 ### 2026-10-13: Android phone app with downloads (release 0.17.0, app 0.2.0)

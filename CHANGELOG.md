@@ -39,7 +39,7 @@ TV apps are unchanged (0.15.0).
 Update the server with the new installer. The TV apps 0.15.0 (playlists and the quality line on the TV) need this
 server or later.
 
-## TV apps 0.15.0
+## TV apps 0.15.0 (2026-10-14)
 
 ### Added
 - **Your own playlists on the TV:** a *New playlist* tile in Music → Playlists (the name is typed with the TV's
