@@ -40,7 +40,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 |---|---|---|
 | F1 | TV Shows / Movies / Music libraries, identified correctly, with posters and descriptions (IMDb and other databases, like Plex) | TV ✅ Movies ✅ Music ✅ (MusicBrainz, Cover Art Archive, Wikipedia bios) |
 | F2 | Works from mounted folders; understands `Show Name - Season 00 - 'S00E01-Episode name'` | ✅ (tested, including the quoted form) |
-| F3 | Download content | ✅ **Android app only** (10-13, owner's request; not released yet): movies, episodes, seasons, shows, songs, albums, artists and playlists, original files, played offline. An admin turns it on per account. The web and TV apps still have no downloads (0.9.2) |
+| F3 | Download content | ✅ **Android app only** (0.17.0, owner's request): movies, episodes, seasons, shows, songs, albums, artists and playlists, original files, played offline. An admin turns it on per account. The web and TV apps still have no downloads (0.9.2) |
 | F4 | Auto refresh every X hours | ✅ |
 | F5 | H.264, H.265, MKV, MP4, MP3, AVI; ISO if possible | H.264/HEVC/MKV/MP4 ✅ play; MP3 ✅ (music libraries); AVI/Xvid ✅ (transcoded to H.264); ISO 🔜 phase 3 |
 
@@ -331,7 +331,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
 
-### Android phone app (`android/`, 0.2.0 release-signed, not released yet)
+### Android phone app (`android/`, 0.2.0, release 0.17.0)
 - Android 8+ (tested: Android 16 emulator, owner's Galaxy A17 5G). Online: the server's web UI in a WebView with
   Download buttons (movie, episode, season, show, song, album, artist, playlist), a Downloads menu item and Settings →
   This phone (phone storage / SD card, Wi-Fi only, space used, servers and addresses). Offline: its own pages (`web/src/phone/`,
@@ -417,7 +417,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
-### 2026-10-13: Your own playlists and the quality line (web, TV, phone; not released yet)
+### 2026-10-13: Your own playlists and the quality line (release 0.17.0, TV apps 0.15.0)
 - **What / why:** owner: "an option to create playlist, name them, add a brief description, add individual songs,
   albums or artist… for all versions" and "list the current format/quality of the song… below the song name and
   artist". Private per account (owner's choice), imported playlists read-only + Make a copy, full TV editing.
@@ -435,10 +435,14 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   at 1920×1080 in the browser: playlists tab, hold-OK menu (move), New playlist from an album; emulator: download a
   playlist, offline page + play + quality line. Owner on the phone: made playlists, added songs, saw descriptions and
   the quality line, downloaded a playlist and played it offline (0.1.1).
-- **Left open:** not tried on a real TV (TV builds are made on the Windows PC); not released (needs a server release
-  for the owner's Ubuntu server).
+- **Released (2026-10-14):** GitHub release **v0.17.0** with `bams_0.17.0_all.deb` (built on the Linux PC; unpacked,
+  installed offline from its wheels and started: 0.17.0, UI served) and `BAMS-Android-0.2.0.apk`. The owner's partner
+  adds `BAMS-Setup-0.17.0.exe`, `BAMS-SamsungTV-0.15.0.wgt` and `BAMS-FireTV-0.15.0.apk` from the Windows PC
+  (`gh release upload v0.17.0 …`, then regenerate `SHA256SUMS.txt` with all five and upload it with `--clobber`).
+  Until the `.exe` is there, Windows servers see 0.17.0 in Settings → About but can't download it.
+- **Left open:** not tried on a real TV.
 
-### 2026-10-13: Android phone app with downloads (app 0.1.1; not released yet)
+### 2026-10-13: Android phone app with downloads (release 0.17.0, app 0.2.0)
 - **What / why:** owner: an Android app that looks like the web version, plus downloads of movies, episodes, seasons,
   shows, songs, albums, artists and playlists (original files) to the phone or an SD card, that works with no server
   and shows what's downloaded. Decisions in §3 (10-13). Server: `can_download` (v14), `/api/files/{id}/download`,
