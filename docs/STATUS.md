@@ -171,6 +171,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-13 | Downloads go to the **app's own folder** on the phone's storage or an **SD card** (picked in Settings → This phone; no permission; deleted with the app); **Wi-Fi only** by default; each original file kept once however many downloads need it | Owner's choice (simplest, reliable on Android 11+). Wi-Fi only because originals can be many GB |
 | 10-13 | Sound the phone can't decode offline (DTS, TrueHD, AC3 on some phones): **warn on Download**, play another track the file has; **no FFmpeg in the app** | Owner's choice; bundling an FFmpeg decoder would break "FFmpeg is never bundled" |
 | 10-13 | The app knows a server by **`/api/hello` `id`** (new, stable) with **every address it was reached at** (home LAN, away), trying each; the WebView's sign-in cookie is shared between them | Owner: the server is reachable only sometimes (walks: nothing; trips: internet). Downloads must stay one server's whichever address answers |
+| 10-14 | **Android releases are signed with a BAMS release key** (`~/sandboxes/Android/bams-android.jks`, passwords in git-ignored `android/keystore.properties`), first used for 0.2.0 | Owner's go-ahead. Updates install only over the same key; switching from the debug builds meant one reinstall while there was little to re-download |
 | 10-13 | **Playlists made in BAMS are each account's own and private** (`user_playlists`, schema v15); albums/artists add their tracks as they are now, each track once; imported playlists stay read-only with **"Make a copy"**; full editing on web, TV (hold-OK menus, TV keyboard) and the phone online; downloadable to the phone | Owner: "create playlist, name them, add a brief description, add individual songs, albums or artist… for all versions", then chose "personal and private" and full TV editing. Playlist files live in read-only media folders |
 | 10-13 | **Quality line** under a playing song's title and artist on every player (`web/src/quality.ts`): codec + bit depth/sample rate (lossless) or bitrate (lossy); a converted song shows both ("ALAC 24-bit / 96 kHz → AAC 256 kbps") | Owner: "list the current format/quality of the song… below the song name and artist" |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
@@ -330,7 +331,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
 
-### Android phone app (`android/`, 0.1.1, not released yet)
+### Android phone app (`android/`, 0.2.0 release-signed, not released yet)
 - Android 8+ (tested: Android 16 emulator, owner's Galaxy A17 5G). Online: the server's web UI in a WebView with
   Download buttons (movie, episode, season, show, song, album, artist, playlist), a Downloads menu item and Settings →
   This phone (phone storage / SD card, Wi-Fi only, space used, servers and addresses). Offline: its own pages (`web/src/phone/`,
@@ -374,8 +375,7 @@ Roughly in priority order:
 7. **Watch list leftovers:** no music on it; renamed on the web only (the TV's rail picks a new name up at its next
    start, its Home at once); posters' bookmark needs a mouse (touch screens use the title page's button).
 8. **UI redesign** from the owner's mockups.
-9. **Android app leftovers:** a release signing key (debug builds today: a release build won't install over them);
-   music streamed online plays in the page (no lock-screen controls, may stop with the phone locked); new episodes of
+9. **Android app leftovers:** music streamed online plays in the page (no lock-screen controls, may stop with the phone locked); new episodes of
    a downloaded show aren't fetched by themselves; a downloaded playlist is a snapshot (Download again to update);
    Android 15+ allows background downloads 6 h a day (the rest goes on when the app is opened); no Play Store build;
    the offline video player uses Android's controls, not the web player's look.
