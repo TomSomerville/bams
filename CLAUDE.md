@@ -310,6 +310,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   This phone settings) ship with a **server** release. Its offline pages (`web/src/phone/`, `npm run build:app`) are
   bundled in the APK: rebuild the APK after changing them, `web/src/android.ts`, `quality.ts` or `styles.css`.
   `android.ts` and `quality.ts` are shared like `everywhere.ts` (no React/router/storage).
+- **Android releases need the release key** (`/mnt/Data/Sandboxes/Android/bams-android.jks`, passwords in git-ignored
+  `android/keystore.properties`, made 2026-10-14): give the owner `assembleRelease` builds, never debug ones (they
+  won't install over each other; switching costs the phone's downloads). Never commit either file.
 - **Bump `bamsVersion` (android/gradle.properties) for every APK handed to the owner**: they sideload it, and a
   stale 0.1.0 install looked exactly like a bug in 0.1.1. The version shows at the bottom of offline Downloads.
 - **Downloads are the Android app's only** (`/api/files/{id}/download`, manifests), refused unless the account may

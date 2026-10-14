@@ -66,7 +66,16 @@ the browser). On first start the app asks for the server's address; then you sig
 browser. To use the server away from home too, add its other address under Settings → This phone → *Servers and
 addresses*.
 
-Android only installs an update signed with the same key as the copy already installed. Debug builds are signed
-with the build PC's debug key (`/mnt/Data/Sandboxes/Android/.android/debug.keystore` on the Linux PC). A release key
-works like the Fire TV app's (`firetv/README.md`, "Release builds"), with `android/keystore.properties`. Never
-commit the key or its passwords.
+Android only installs an update signed with the same key as the copy already installed.
+
+- **Releases** (0.2.0 on) are signed with the BAMS release key **`/mnt/Data/Sandboxes/Android/bams-android.jks`**
+  (alias `bams`, made 2026-10-14, SHA-256 `BD:86:B4:37:…:27:CD:70`). Its passwords are in
+  **`android/keystore.properties`** (git-ignored; `storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Never commit
+  either. **Keep a backup of both**: a lost key means every phone uninstalls (losing its downloads) and reinstalls.
+  `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`; check it with
+  `apksigner verify --print-certs`.
+- **Debug builds** are signed with the build PC's debug key (`/mnt/Data/Sandboxes/Android/.android/debug.keystore`).
+  A release build doesn't install over a debug build or the other way round: uninstall first (the phone loses its
+  downloads and sign-in).
+
+Bump `bamsVersion` in `gradle.properties` for every APK that goes to a phone.
