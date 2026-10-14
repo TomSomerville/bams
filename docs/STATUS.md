@@ -331,7 +331,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
 
-### Android phone app (`android/`, 0.2.0, release 0.17.0)
+### Android phone app (`android/`, 0.2.1, release 0.17.1)
 - Android 8+ (tested: Android 16 emulator, owner's Galaxy A17 5G). Online: the server's web UI in a WebView with
   Download buttons (movie, episode, season, show, song, album, artist, playlist), a Downloads menu item and Settings →
   This phone (phone storage / SD card, Wi-Fi only, space used, servers and addresses). Offline: its own pages (`web/src/phone/`,
@@ -417,7 +417,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
-### 2026-10-14: Lock-screen controls for streamed music in the Android app (0.17.1 + app 0.2.1; not released yet)
+### 2026-10-14: Lock-screen controls for streamed music in the Android app (release 0.17.1, app 0.2.1)
 - **What / why:** owner picked it from the left-open list: music streamed online in the app played in the page
   (no lock-screen controls, could stop with the phone locked). In the app (0.2.1+, `android.appPlaysMusic` from the
   user agent) `web/src/music.tsx` `AppMusicProvider` hands the queue to the app's Media3 player (`musicStream`: media
@@ -433,8 +433,11 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   media keys next/previous (previous restarts first), page bar follows; converted AIFF: quality line "PCM 44.1 kHz →
   AAC 256 kbps", seek to 27 s (`?t=27.00`), carries on into the next converted track, bar counts; MP3 seek 2 → 22 s;
   release 0.2.1 installs over 0.2.0. Web `tsc`, TV `tsc`.
-- **Left open:** not yet on the owner's phone; the volume slider moves the app player's own volume (the phone's
-  buttons still set the system volume).
+- **Owner:** on the Galaxy against the sandbox: play/pause, next, previous, seek on the lock screen and headphone
+  buttons all work; the converted album shows the conversion line and seeks from the lock screen.
+- **Released:** v0.17.1 with `bams_0.17.1_all.deb` and `BAMS-Android-0.2.1.apk`; the partner adds
+  `BAMS-Setup-0.17.1.exe` from the Windows PC (TV apps unchanged, 0.15.0).
+- **Left open:** the volume slider moves the app player's own volume (the phone's buttons still set the system volume).
 
 ### 2026-10-13: Your own playlists and the quality line (release 0.17.0, TV apps 0.15.0)
 - **What / why:** owner: "an option to create playlist, name them, add a brief description, add individual songs,

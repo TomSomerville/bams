@@ -3,7 +3,7 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
-## 0.17.1 (not released yet)
+## 0.17.1 (2026-10-14)
 
 ### Added
 - **Lock-screen controls for music streamed in the Android app** (app 0.2.1). Music you play from your server in the
@@ -11,6 +11,9 @@ accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating
   in the notification shade and on headphone/Bluetooth buttons (play/pause, next, previous, seek), like downloaded
   music already did. Songs the server converts while streaming can be seeked there too. With app 0.2.0 music plays
   as before.
+
+Update the server with the new installer and the phone with `BAMS-Android-0.2.1.apk` (installs over 0.2.0). The
+TV apps are unchanged (0.15.0).
 
 ## 0.17.0 (2026-10-14)
 
