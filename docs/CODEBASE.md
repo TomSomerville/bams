@@ -87,7 +87,7 @@ bams/
 │       ├── useApi.ts          useApi<T>(path) → {data, error, loading, reload}
 │       ├── settings.tsx       SettingsProvider: server TMDB status (configured/last4), serverError
 │       ├── random.tsx         Play Random: VideoQueueProvider/useVideoQueue (video queue the player follows, sessionStorage), PlayRandomButton
-│       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session
+│       ├── music.tsx          MusicProvider/useMusic: the one <audio>, queue, play/seek (file vs transcode), Media Session; in the Android app (0.2.1+) AppMusicProvider: the app's player plays (musicStream, ticket URLs), the page shows its state
 │       ├── tmdb.ts            keyKind() (token vs api key), TMDB signup URL
 │       ├── servers.tsx        Other BAMS servers of this browser (localStorage `bams.servers`): connect (hello + /api/auth/token), direct calls with bearer + ticket links (`rewrite`), RemotesProvider, `/r/:rid` RemoteScope, useScope (call/media/to/libName), useSources + useEverywhere (Home/Search); this browser's names, hidden flags and order for each server's libraries (`setLibrary`, `setLibraryOrder`; `describe` applies the order)
 │       ├── everywhere.ts      Home rows (`homeSpecs`) and Search across every server, and how answers merge (newest, interleave, Continue Watching by `last_watched_at`, genres, the watch list by `listed_at`: `listedOrder`; `listedLook` = how an entry looks); SHARED with the TV app (no React/router)
@@ -185,7 +185,8 @@ bams/
 │       ├── Store.kt           downloads catalog: roots (what was asked for + manifest) and files (each once, ref-counted), status, library(); location / Wi-Fi only settings
 │       ├── DownloadService.kt foreground service: one file at a time, HTTP Range resume, Wi-Fi only wait, pictures + subtitles, notification
 │       ├── PlayerActivity.kt  offline video (ExoPlayer + PlayerView, downloaded WebVTT subtitles, resume, next episode, picture-in-picture)
-│       ├── MusicService.kt · Music.kt  offline music (Media3 session: screen off, lock screen) and the page's controller for it
+│       ├── MusicService.kt · Music.kt  the app's one music player (Media3 session: screen off, lock screen): downloaded tracks (`play`) and music streamed from a server's page (`stream`); the pages' controller for it
+│       ├── Streams.kt         streamed tracks by queue key; Streams.Player (ForwardingPlayer): converted tracks seek by starting over (`?t=`), report time/length, not "live"; fallback to the conversion; SEEK session command
 │       ├── Progress.kt        where you stopped offline, sent to the server when reached
 │       └── Volumes.kt · Caps.kt · Http.kt · App.kt   storage volumes (phone / SD card), decoders, HTTP with cookie/bearer, singletons + events
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
@@ -762,6 +763,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Your own playlists (rules, what can go in) | `user_playlists.py` (`track_ids`, `add`, `set_tracks`), routes `/api/user-playlists*` in `app.py`; web `components/Playlists.tsx` + `UserPlaylistPage`; TV `PlaylistMenus.tsx` + `UserPlaylistScreen` |
 | The quality line under a playing song | `web/src/quality.ts` (shared: web NowPlaying, TV NowPlaying, phone App.tsx); fields from `stream.plan_audio` (`sample_rate`, `bit_depth`, `bitrate`, `channels`, `convert_to`) |
 | Android app: what's downloaded / how | server `_manifest`, `item_download`, `download_file` in `app.py`; app `Store.kt`, `DownloadService.kt`, `Bridge.kt`; web `components/Download.tsx`, `android.ts` |
+| Android app: streamed music (lock screen) | web `music.tsx` `AppMusicProvider` (gate `android.appPlaysMusic`); app `Music.stream`, `Streams.kt`, bridge `musicStream` |
 | Android app: offline pages, offline playback | `web/src/phone/` (rebuild `npm run build:app`, then the APK); `PlayerActivity.kt`, `MusicService.kt`, `Music.kt` |
 | Build / install the Android phone app | `android/README.md` (`source /mnt/Data/Sandboxes/Android/env.sh`, `./gradlew assembleDebug`) |
 | Gapless timing / music player behaviour | `web/src/music.tsx` (`PRELOAD_BEFORE`, `ARM_BEFORE`, `advance`, `tick`) |

@@ -93,6 +93,21 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
             "setWifiOnly" -> { app.store.wifiOnly = m.getBoolean("on"); activity.downloadsQueued(); done(info()) }
             "openDownloads" -> { activity.showApp("downloads"); done(null) }
             "openServers" -> { activity.showApp("servers"); done(null) }
+            // the app's music player, for music streamed from the page's server(s) too (lock screen, screen off)
+            "musicStream" -> {
+                val items = m.getJSONArray("items")
+                val bad = (0 until items.length()).any { i ->
+                    val t = items.getJSONObject(i)
+                    listOfNotNull(t.str("url"), t.str("fallback"), t.str("art")).any { !it.startsWith("http://") && !it.startsWith("https://") }
+                }
+                if (bad) fail("Only server addresses can be streamed.")
+                else { music.stream(items, m.optInt("index")); done(null) }
+            }
+            "musicCmd" -> {
+                music.command(m.getString("cmd"), if (m.has("value")) m.optDouble("value") else null, if (m.has("to")) m.optInt("to") else null)
+                done(null)
+            }
+            "musicState" -> done(music.state())
             else -> if (ownPage) appPage(m, done, fail, later) else fail("Not allowed here.")
         }
     }
@@ -158,8 +173,6 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
                 if (out.length() == 0) fail("Those tracks aren't on this phone yet.")
                 else { music.play(out, index.coerceIn(0, out.length() - 1), m.optBoolean("shuffle")); done(null) }
             }
-            "musicCmd" -> { music.command(m.getString("cmd"), if (m.has("value")) m.optDouble("value") else null); done(null) }
-            "musicState" -> done(music.state())
             else -> fail("The app doesn't know \"${m.optString("type")}\".")
         }
     }

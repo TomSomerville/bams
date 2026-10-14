@@ -321,6 +321,12 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **The app's bridge only answers its servers' addresses and its own pages** (WebMessageListener origin rules in
   `Bridge.register`): re-register after the server list changes. Things only the app's own pages may do (play files,
   change servers) stay in `Bridge.appPage`.
+- **The app's music player is Media3 with a `ForwardingPlayer` (`Streams.Player`)**: never wrap listeners with Kotlin
+  `object : Player.Listener by listener` (Java default methods aren't delegated: the session stopped hearing
+  play/position events and the page's bar froze). A converted stream is "live" to ExoPlayer (no length, no seek): the
+  wrapper says otherwise for the lock screen, and the page seeks it through the `Streams.SEEK` session command (a
+  controller drops a seek ExoPlayer said isn't available). Server-side web changes that need a newer app are gated by
+  its version (`android.appAtLeast`, from the user agent), so older apps keep working.
 - **Your own playlists are private**: every `/api/user-playlists/{id}` route must go through `_own_playlist` (404 for
   anyone else's). Imported playlists stay read-only (media folders are); editing means "Make a copy".
 - **TV tests on the Linux PC** need `CHROME_PATH=/mnt/Data/Sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`.

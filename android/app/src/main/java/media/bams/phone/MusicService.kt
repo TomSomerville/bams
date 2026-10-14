@@ -10,6 +10,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import android.os.Bundle
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
@@ -29,12 +32,29 @@ class MusicService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)  // headphones out: pause
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
+        // debug builds: ExoPlayer's events in logcat (tag EventLogger)
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
+        }
         val open = PendingIntent.getActivity(this, 1,
             Intent(this, MainActivity::class.java).putExtra(MainActivity.OPEN, "downloads").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        session = MediaSession.Builder(this, player)
+        // converted streams seek by starting over (Streams.Player), for the lock screen and headphones too
+        session = MediaSession.Builder(this, Streams.Player(player))
             .setSessionActivity(open)
             .setCallback(object : MediaSession.Callback {
+                override fun onConnect(s: MediaSession, c: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+                    MediaSession.ConnectionResult.AcceptedResultBuilder(s)
+                        .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                            .add(SessionCommand(Streams.SEEK, Bundle.EMPTY)).build())
+                        .build()
+
+                override fun onCustomCommand(s: MediaSession, c: MediaSession.ControllerInfo, command: SessionCommand, args: Bundle):
+                    ListenableFuture<SessionResult> {
+                    if (command.customAction == Streams.SEEK) s.player.seekTo(args.getLong("ms"))
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+
                 // a controller's items arrive without their URI (Media3 strips it): it rides in requestMetadata
                 override fun onAddMediaItems(s: MediaSession, c: MediaSession.ControllerInfo, items: MutableList<MediaItem>):
                     ListenableFuture<MutableList<MediaItem>> =

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { QueueTrack } from "./api";
+import { api, type QueueTrack } from "./api";
+import { app, appPlaysMusic } from "./android";
 import { callFor } from "./servers";
 
 // The music player lives above the routes, so a song keeps playing while you browse.
@@ -12,6 +13,9 @@ import { callFor } from "./servers";
 // Gapless between files: there are two <audio> elements. While one plays, the next track is loaded into the
 // other a little before the end, and started the moment the current track ends (a timer armed from the
 // element's own clock, with `ended` as the fallback), instead of only beginning to load then.
+//
+// In the Android app the page doesn't play music itself: AppMusicProvider hands the queue to the app's player
+// (android/…/Music.kt), which plays on with the screen locked and shows on the lock screen and headphones.
 
 type Music = {
   queue: QueueTrack[];
@@ -79,6 +83,10 @@ const continuous = (a: QueueTrack, b: QueueTrack | undefined) =>
 type Slot = { track: QueueTrack | null; offset: number };
 
 export function MusicProvider({ children }: { children: ReactNode }) {
+  return appPlaysMusic ? <AppMusicProvider>{children}</AppMusicProvider> : <BrowserMusicProvider>{children}</BrowserMusicProvider>;
+}
+
+function BrowserMusicProvider({ children }: { children: ReactNode }) {
   const els = [useRef<HTMLAudioElement>(null), useRef<HTMLAudioElement>(null)];
   const slots = useRef<Slot[]>([{ track: null, offset: 0 }, { track: null, offset: 0 }]);
   const active = useRef(0);
@@ -373,4 +381,143 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       ))}
     </Ctx.Provider>
   );
+}
+
+// ---- in the Android app: the app's player plays, this page shows it
+
+/** The app's player as the page sees it (Music.kt `state`, sent as `bams:music` events). */
+type AppState = {
+  ready: boolean; playing?: boolean; index?: number; position?: number; duration?: number | null;
+  queue?: string[]; volume?: number; error?: string | null;
+};
+
+const SAVED = "bams.appMusic";  // this page's queue, kept while the app shows other pages (the player plays on)
+const TICKET_REFRESH = 6 * 3600 * 1000;
+let ticket: { prefix: string; at: number } | null = null;
+
+/** A media link the app's player can open without this page's sign-in cookie: this server's through a media ticket
+ *  (as the TV app does); another server's links are ticket URLs already (servers.tsx `rewrite`). */
+async function playable(p: string | null): Promise<string | null> {
+  if (!p) return null;
+  if (/^https?:\/\//.test(p)) return p;
+  if (!ticket || Date.now() - ticket.at > TICKET_REFRESH) {
+    ticket = { prefix: (await api.get<{ prefix: string }>("/api/media-ticket")).prefix, at: Date.now() };
+  }
+  return p.startsWith("/api/files/") || p.startsWith("/api/images/") ? location.origin + ticket.prefix + p.slice(4) : null;
+}
+
+let keyCounter = 0;
+
+function AppMusicProvider({ children }: { children: ReactNode }) {
+  const saved = (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(SAVED) || "null") as { queue: QueueTrack[]; keys: string[] } | null;
+    } catch {
+      return null;
+    }
+  })();
+  const [queue, setQueueState] = useState<QueueTrack[]>(saved?.queue ?? []);
+  const [keys, setKeys] = useState<string[]>(saved?.keys ?? []);
+  const [st, setSt] = useState<AppState>({ ready: false });
+  const [volume, setVolumeState] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+
+  const keep = (q: QueueTrack[], k: string[]) => {
+    setQueueState(q);
+    setKeys(k);
+    try {
+      sessionStorage.setItem(SAVED, JSON.stringify({ queue: q, keys: k }));
+    } catch { /* not kept */ }
+  };
+
+  useEffect(() => {
+    const on = (e: Event) => setSt((e as CustomEvent<AppState>).detail);
+    window.addEventListener("bams:music", on);
+    app<AppState>("musicState").then(setSt).catch(() => {});
+    return () => window.removeEventListener("bams:music", on);
+  }, []);
+
+  // the app's queue is still ours (not stopped, not replaced by the Downloads pages' music)
+  const ours = !!st.queue && st.queue.length === keys.length && st.queue.every((k, i) => k === keys[i]);
+  const index = ours ? st.index ?? -1 : -1;
+  const current = index >= 0 ? queue[index] ?? null : null;
+  useEffect(() => { if (st.volume !== undefined) setVolumeState(st.volume); }, [st.volume]);
+
+  const cmd = (c: string, value?: number, to?: number) =>
+    app("musicCmd", { cmd: c, ...(value === undefined ? {} : { value }), ...(to === undefined ? {} : { to }) }).catch(() => {});
+
+  const playTracks = useCallback((tracks: QueueTrack[], start = 0, shuffle = false) => {
+    let list = tracks.filter((t) => t.available);
+    if (!list.length) return;
+    let at = Math.max(0, list.findIndex((t) => t.id === tracks[start]?.id));
+    if (shuffle) {
+      list = shuffled(list);
+      at = 0;
+    }
+    const k = list.map((t) => `s${++keyCounter}:${t.id}`);
+    setError(null);
+    void (async () => {
+      try {
+        const items = await Promise.all(list.map(async (t, i) => {
+          const url = await playable(t.playback.url);
+          return {
+            key: k[i], url, transcode: t.playback.mode === "transcode",
+            // the phone can't decode it after all: the server's conversion
+            fallback: t.playback.mode === "file" ? url?.replace(/\/stream$/, "/audio") ?? null : null,
+            title: t.title, artist: t.artist, album: t.album, art: await playable(t.poster), start: t.start, end: t.end,
+            duration: t.duration,
+          };
+        }));
+        keep(list, k);
+        await app("musicStream", { items, index: at });
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    })();
+  }, []);
+
+  const playItem = useCallback(async (itemId: number, opts: { startTrackId?: number; shuffle?: boolean; rid?: number | null } = {}) => {
+    const tracks = await callFor(opts.rid ?? null).get<QueueTrack[]>(`/api/items/${itemId}/tracks`);
+    const start = opts.startTrackId ? Math.max(0, tracks.findIndex((t) => t.id === opts.startTrackId)) : 0;
+    playTracks(tracks, start, opts.shuffle);
+  }, [playTracks]);
+
+  const move = useCallback((from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= queue.length || to >= queue.length) return;
+    const q = [...queue], k = [...keys];
+    q.splice(to, 0, ...q.splice(from, 1));
+    k.splice(to, 0, ...k.splice(from, 1));
+    keep(q, k);
+    void cmd("move", from, to);
+  }, [queue, keys]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = useCallback((i: number) => {
+    if (i < 0 || i >= queue.length || i === index) return;
+    keep(queue.filter((_, n) => n !== i), keys.filter((_, n) => n !== i));
+    void cmd("remove", i);
+  }, [queue, keys, index]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stop = useCallback(() => {
+    keep([], []);
+    void cmd("stop");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setVolume = useCallback((v: number) => {
+    setVolumeState(v);
+    void cmd("volume", v);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const duration = current?.duration ?? st.duration ?? 0;
+  const value = useMemo<Music>(() => ({
+    queue: current ? queue : [], index, current, playing: ours && !!st.playing, time: ours ? st.position ?? 0 : 0,
+    duration, volume, error: error ?? (ours ? st.error ?? null : null),
+    playTracks, playItem, move, remove, stop, setVolume,
+    toggle: () => void cmd("toggle"),
+    pause: () => void cmd("pause"),
+    next: () => void cmd("next"),
+    prev: () => void cmd("prev"),
+    jump: (i: number) => void cmd("jump", i),
+    seek: (t: number) => void cmd("seek", t),
+  }), [queue, index, current, ours, st, duration, volume, error, playTracks, playItem, move, remove, stop, setVolume]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

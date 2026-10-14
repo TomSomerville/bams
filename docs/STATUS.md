@@ -417,6 +417,25 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-14: Lock-screen controls for streamed music in the Android app (0.17.1 + app 0.2.1; not released yet)
+- **What / why:** owner picked it from the left-open list: music streamed online in the app played in the page
+  (no lock-screen controls, could stop with the phone locked). In the app (0.2.1+, `android.appPlaysMusic` from the
+  user agent) `web/src/music.tsx` `AppMusicProvider` hands the queue to the app's Media3 player (`musicStream`: media
+  ticket URLs, no headers; queue kept in sessionStorage across page loads) and shows its state (`bams:music`); the
+  browser player is unchanged. App: `Music.stream`, `Streams.kt` (a `ForwardingPlayer`: a converted track
+  (`/audio?t=`) seeks by starting over, reports its time and length, isn't "live", so the lock screen gets seek and
+  previous; a file the phone can't decode falls back to the conversion), seeks from the page through a session
+  command (`Streams.SEEK`), bridge `musicStream`/`musicCmd`/`musicState` now allowed for server pages.
+- **Files:** `web/src/{music.tsx, android.ts}`; `android/.../{Music,Streams,MusicService,Bridge}.kt`,
+  `gradle.properties` 0.2.1; sandbox mock media got an AIFF album ("Test Signals", converted while streaming).
+- **Verified:** Android 16 emulator, debug build driven over Chrome's remote debugging: streamed MP3/FLAC play in the
+  media session (notification with art/title/artist, seek bar, prev/next), 20 s with the screen locked kept playing,
+  media keys next/previous (previous restarts first), page bar follows; converted AIFF: quality line "PCM 44.1 kHz →
+  AAC 256 kbps", seek to 27 s (`?t=27.00`), carries on into the next converted track, bar counts; MP3 seek 2 → 22 s;
+  release 0.2.1 installs over 0.2.0. Web `tsc`, TV `tsc`.
+- **Left open:** not yet on the owner's phone; the volume slider moves the app player's own volume (the phone's
+  buttons still set the system volume).
+
 ### 2026-10-13: Your own playlists and the quality line (release 0.17.0, TV apps 0.15.0)
 - **What / why:** owner: "an option to create playlist, name them, add a brief description, add individual songs,
   albums or artist… for all versions" and "list the current format/quality of the song… below the song name and
