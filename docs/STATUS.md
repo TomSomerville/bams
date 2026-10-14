@@ -171,6 +171,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-13 | Downloads go to the **app's own folder** on the phone's storage or an **SD card** (picked in Settings → This phone; no permission; deleted with the app); **Wi-Fi only** by default; each original file kept once however many downloads need it | Owner's choice (simplest, reliable on Android 11+). Wi-Fi only because originals can be many GB |
 | 10-13 | Sound the phone can't decode offline (DTS, TrueHD, AC3 on some phones): **warn on Download**, play another track the file has; **no FFmpeg in the app** | Owner's choice; bundling an FFmpeg decoder would break "FFmpeg is never bundled" |
 | 10-13 | The app knows a server by **`/api/hello` `id`** (new, stable) with **every address it was reached at** (home LAN, away), trying each; the WebView's sign-in cookie is shared between them | Owner: the server is reachable only sometimes (walks: nothing; trips: internet). Downloads must stay one server's whichever address answers |
+| 10-14 | **Releases are made from the Linux PC**: `.deb` and APKs built there, the Windows `.exe` by **GitHub Actions** on GitHub's Windows machine when the release is published; the Fire TV release key gets a copy on the Linux PC; Samsung builds stay on the Windows PC | Owner: "configure everything needed for me to deploy windows and firetv builds" from Linux, and "I don't think we need Wine". Inno Setup runs only on Windows; a hosted Windows runner is a real Windows build without a Windows PC |
 | 10-14 | **Android releases are signed with a BAMS release key** (`/mnt/Data/Sandboxes/Android/bams-android.jks`, passwords in git-ignored `android/keystore.properties`), first used for 0.2.0 | Owner's go-ahead. Updates install only over the same key; switching from the debug builds meant one reinstall while there was little to re-download |
 | 10-13 | **Playlists made in BAMS are each account's own and private** (`user_playlists`, schema v15); albums/artists add their tracks as they are now, each track once; imported playlists stay read-only with **"Make a copy"**; full editing on web, TV (hold-OK menus, TV keyboard) and the phone online; downloadable to the phone | Owner: "create playlist, name them, add a brief description, add individual songs, albums or artist… for all versions", then chose "personal and private" and full TV editing. Playlist files live in read-only media folders |
 | 10-13 | **Quality line** under a playing song's title and artist on every player (`web/src/quality.ts`): codec + bit depth/sample rate (lossless) or bitrate (lossy); a converted song shows both ("ALAC 24-bit / 96 kHz → AAC 256 kbps") | Owner: "list the current format/quality of the song… below the song name and artist" |
@@ -435,8 +436,10 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   release 0.2.1 installs over 0.2.0. Web `tsc`, TV `tsc`.
 - **Owner:** on the Galaxy against the sandbox: play/pause, next, previous, seek on the lock screen and headphone
   buttons all work; the converted album shows the conversion line and seeks from the lock screen.
-- **Released:** v0.17.1 with `bams_0.17.1_all.deb` and `BAMS-Android-0.2.1.apk`; the partner adds
-  `BAMS-Setup-0.17.1.exe` from the Windows PC (TV apps unchanged, 0.15.0).
+- **Released:** v0.17.1 with `bams_0.17.1_all.deb` and `BAMS-Android-0.2.1.apk` from the Linux PC; the first
+  `BAMS-Setup-0.17.1.exe` built by GitHub Actions (`.github/workflows/windows-installer.yml`, run by hand for this
+  release; runs by itself on every published release from now on), attached with its `SHA256SUMS.txt` line (same
+  size as the partner's 0.17.0 build, valid PE). TV apps unchanged (0.15.0). Not install-tested on Windows yet.
 - **Left open:** the volume slider moves the app player's own volume (the phone's buttons still set the system volume).
 
 ### 2026-10-13: Your own playlists and the quality line (release 0.17.0, TV apps 0.15.0)
