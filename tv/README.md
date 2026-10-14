@@ -41,6 +41,22 @@ The browser uses a browser's codec rules (`plan.ts` `BROWSER`), so more files ge
    **BAMS** → sign in with a Samsung account → it adds the connected TV's DUID to the distributor certificate.
    Without a Samsung certificate made for this TV, the TV refuses to install the app.
 
+**On the Linux PC** (since 2026-10-14) the Tizen Studio CLI lives in `/mnt/Data/Sandboxes/tizen-home/tizen-studio`
+(Tizen's tools only accept a folder under "home" and write their bookkeeping there, so they got a home of their
+own: `source /mnt/Data/Sandboxes/tizen-env.sh` sets `TIZEN_STUDIO` and a `tz` helper). No IDE and no Samsung
+Certificate Extension there (it needs a 2016 WebKitGTK that Debian 13 doesn't have): certificates are *made* on the
+Windows PC (Certificate Manager, Samsung account), and only *used* on Linux. Copy `author.p12` and
+`distributor.p12` from `C:\Users\Beached\SamsungCertificate\BAMS\` to `/mnt/Data/Sandboxes/tizen-home/certificates/`,
+then once (with the passwords chosen when they were made):
+
+```bash
+source /mnt/Data/Sandboxes/tizen-env.sh
+tizen security-profiles add -n BAMS -a /mnt/Data/Sandboxes/tizen-home/certificates/author.p12 -p '<author password>' -d /mnt/Data/Sandboxes/tizen-home/certificates/distributor.p12 -dp '<distributor password>'
+```
+
+`npm run package -- --release` then works as on Windows. Installing on the TV from Linux needs `sdb connect` to
+reach it and the TV's Developer Mode host address set to the Linux PC.
+
 ## Build, package, install
 
 ```bash
