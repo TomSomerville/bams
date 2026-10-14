@@ -80,6 +80,8 @@ cd tv && npm install && npx tsc -p . && npm test && npm run build && npm run pac
 cd tv && npm run build && npm run firetv -- --install --device <fire-tv-ip>   # --release: dist/BAMS-FireTV-<v>.apk
 # Android phone app (android/README.md), on the Linux PC: source ~/sandboxes/Android/env.sh first
 cd web && npm run build:app && cd ../android && ./gradlew assembleDebug   # app/build/outputs/apk/debug/app-debug.apk
+# releases from Linux: .deb here (python3 deploy/build.py deb), the .exe is built by GitHub Actions when the release is
+# published (.github/workflows/windows-installer.yml); Fire TV key on Linux: ~/sandboxes/Android/bams-firetv.jks
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```

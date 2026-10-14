@@ -14,6 +14,15 @@ builds on Windows too. `--version X` stamps a different package version (for tes
 
 ## Releasing an update
 
+**From Linux (the usual way since 0.17.1):** build the `.deb` (and the Android/Fire TV APKs) on the Linux PC and
+publish the release with them; the **`.exe` is built by GitHub Actions** (`.github/workflows/windows-installer.yml`)
+on GitHub's Windows machine as soon as the release is published, attached to it, and added to `SHA256SUMS.txt`.
+If it fails, or to rebuild a release's installer: GitHub → Actions → *Windows installer* → *Run workflow* with the
+tag (`gh workflow run windows-installer.yml -f tag=v0.17.1`). It checks the built version matches the tag, so bump
+`VERSION` before tagging. Samsung TV builds still need the Windows PC (signing profile).
+
+**On Windows (as before):**
+
 1. Bump `VERSION` in `server/bams/config.py` (the installers, the `.deb` and `bams --help` all read it). Windows
    doesn't strictly need a higher version, but apt only upgrades to a higher one.
 2. If dependencies changed: `uv pip compile server/pyproject.toml --universal --generate-hashes --python-version 3.11 -o deploy/requirements.txt`, then run the tests against it.
