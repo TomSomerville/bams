@@ -43,6 +43,23 @@ const port = (window as unknown as { bamsAndroid?: Port }).bamsAndroid ?? null;
 /** In the Android app (it can download), or in a browser. */
 export const inApp = port !== null;
 
+/** The app's version, from its user agent ("… BAMS-Android/0.2.1"); null in a browser. */
+export const appVersion = /BAMS-Android\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? null;
+
+/** `appVersion` is `min` or later ("0.2.1"). */
+export function appAtLeast(min: string): boolean {
+  if (!appVersion) return false;
+  const a = appVersion.split(".").map(Number), b = min.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return true;
+}
+
+/** The app plays music from the server itself (lock screen, screen off): app 0.2.1 or later. An older app gets
+ *  the page's own player, as before. */
+export const appPlaysMusic = inApp && appAtLeast("0.2.1");
+
 let next = 1;
 const waiting = new Map<number, { ok: (v: unknown) => void; fail: (e: Error) => void }>();
 
