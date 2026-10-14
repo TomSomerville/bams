@@ -19,6 +19,7 @@ const PATHS: Record<string, string> = {
   chevronDown: "M6 9l6 6 6-6",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   plus: "M12 5v14M5 12h14",
+  listPlus: "M3 6h12M3 12h12M3 18h7M17 14v8M13 18h8",
   close: "M18 6L6 18M6 6l12 12",
   subtitles: "M3 5h18v14H3zM7 13h4M13 13h4M7 16h10",
   volume: "M11 5L6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13",

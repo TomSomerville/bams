@@ -138,7 +138,13 @@ def set_prefs(con: sqlite3.Connection, user_id: int, changes: dict) -> dict:
 def public(u: sqlite3.Row) -> dict:
     return {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"]),
             "created_at": u["created_at"], "last_login_at": u["last_login_at"], "prefs": prefs(u),
-            "must_change_password": bool(u["must_change_password"]), "two_factor": bool(u["totp_secret"])}
+            "must_change_password": bool(u["must_change_password"]), "two_factor": bool(u["totp_secret"]),
+            "can_download": may_download(u)}
+
+
+def may_download(u) -> bool:
+    """Downloads to the Android app: admins always, others when an admin turned them on (`can_download`)."""
+    return bool(u["is_admin"] or u["can_download"])
 
 
 def get_user(con: sqlite3.Connection, ref: int | str) -> sqlite3.Row | None:
@@ -147,18 +153,20 @@ def get_user(con: sqlite3.Connection, ref: int | str) -> sqlite3.Row | None:
 
 
 def create_user(con: sqlite3.Connection, name: str, password: str, is_admin: bool = False,
-                must_change_password: bool = False) -> int:
+                must_change_password: bool = False, can_download: bool = False) -> int:
     name = _check_name(name)
     _check_password(password)
     if get_user(con, name):
         raise AuthError(f"There's already a user called {name!r}.")
-    return con.execute("INSERT INTO users(name, password, is_admin, created_at, must_change_password) "
-                       "VALUES (?,?,?,?,?)",
-                       (name, hash_password(password), int(is_admin), now(), int(must_change_password))).lastrowid
+    return con.execute("INSERT INTO users(name, password, is_admin, created_at, must_change_password, can_download) "
+                       "VALUES (?,?,?,?,?,?)",
+                       (name, hash_password(password), int(is_admin), now(), int(must_change_password),
+                        int(can_download))).lastrowid
 
 
 def update_user(con: sqlite3.Connection, user_id: int, *, name: str | None = None, password: str | None = None,
-                is_admin: bool | None = None, must_change_password: bool | None = None) -> None:
+                is_admin: bool | None = None, must_change_password: bool | None = None,
+                can_download: bool | None = None) -> None:
     """An admin's change to an account. A new password or turning on "must change password" signs the user out
     everywhere, so their next sign-in is the one that asks for a new password. A new password without the flag
     in the same call clears it."""
@@ -175,6 +183,8 @@ def update_user(con: sqlite3.Connection, user_id: int, *, name: str | None = Non
         raise AuthError("BAMS needs at least one admin. Make someone else an admin first.")
     if is_admin is not None:
         con.execute("UPDATE users SET is_admin=? WHERE id=?", (int(is_admin), user_id))
+    if can_download is not None:
+        con.execute("UPDATE users SET can_download=? WHERE id=?", (int(can_download), user_id))
     if password is not None:
         con.execute("UPDATE users SET password=?, must_change_password=? WHERE id=?",
                     (hash_password(_check_password(password)), int(bool(must_change_password)), user_id))

@@ -16,7 +16,7 @@ import Settings from "./screens/Settings";
 import Watchlist from "./screens/Watchlist";
 import Rail from "./Rail";
 import { useMusic } from "./music";
-import { NowPlaying, PlaylistScreen } from "./screens/Music";
+import { NowPlaying, PlaylistScreen, UserPlaylistScreen } from "./screens/Music";
 
 export type Route =
   | { name: "home" }
@@ -26,6 +26,7 @@ export type Route =
   // sleep: sleep mode's count of episodes still to play after this one (Player.tsx), carried to the next episode
   | { name: "player"; id: number; resume: boolean; rid?: number; sleep?: number }
   | { name: "playlist"; id: number; rid?: number }
+  | { name: "my-playlist"; id: number; rid?: number }
   | { name: "search" }
   | { name: "settings" };
 
@@ -276,6 +277,7 @@ export default function App() {
               {r.name === "detail" && <Detail id={r.id} rid={r.rid} />}
               {r.name === "search" && <Search />}
               {r.name === "playlist" && <PlaylistScreen id={r.id} rid={r.rid} />}
+              {r.name === "my-playlist" && <UserPlaylistScreen key={r.id} id={r.id} rid={r.rid} />}
               {r.name === "settings" && <Settings />}
             </main>
             <NowPlaying />

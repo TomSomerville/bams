@@ -40,7 +40,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 |---|---|---|
 | F1 | TV Shows / Movies / Music libraries, identified correctly, with posters and descriptions (IMDb and other databases, like Plex) | TV ✅ Movies ✅ Music ✅ (MusicBrainz, Cover Art Archive, Wikipedia bios) |
 | F2 | Works from mounted folders; understands `Show Name - Season 00 - 'S00E01-Episode name'` | ✅ (tested, including the quoted form) |
-| F3 | Download content | ❌ removed in 0.9.2 at the owner's request ("remove the ability to download the files from the server completely"): files are only streamed for playing |
+| F3 | Download content | ✅ **Android app only** (10-13, owner's request; not released yet): movies, episodes, seasons, shows, songs, albums, artists and playlists, original files, played offline. An admin turns it on per account. The web and TV apps still have no downloads (0.9.2) |
 | F4 | Auto refresh every X hours | ✅ |
 | F5 | H.264, H.265, MKV, MP4, MP3, AVI; ISO if possible | H.264/HEVC/MKV/MP4 ✅ play; MP3 ✅ (music libraries); AVI/Xvid ✅ (transcoded to H.264); ISO 🔜 phase 3 |
 
@@ -166,6 +166,13 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **Quality menu: sizes up to the file's own** (the 16:9 box it fills: 1920×800 counts as 1080p), 4K/1440p only on a GPU encoder (`/api/status.video_encoder.hardware`); a size picked in this player applies even at the file's own size (converted), one **remembered** from another video only shrinks bigger files | Owner: "add a 1080P and 4k option". The CPU encoder stops at 1080p (`stream._box`), so 4K there was a 1080p picture. Remembering "1080p" from one workaround must not convert every 1080p file afterwards |
 | 10-11 | **One watch list across every server, stored on the servers**: each server keeps the watch list entries of its own items per account (table `watchlist`, schema v12); the web and TV apps put every connected server's part into one list (newest added first, `everywhere.listedOrder`). It sits under Home in the sidebar/rail, above the first library, and is a Home row (`watchlist`, after Continue Watching) | Owner: "a universal watch list, where episodes from EVERY server can be added… stored server side so all clients sync it". Keeping each item on its own server honours the 10-10 rule that servers store nothing about other servers; any device signed in to those servers shows the same list. A device not connected to a server doesn't see that server's entries (it couldn't play them either) |
 | 10-11 | The watch list holds **movies, shows, seasons and episodes** (not music); watching something **doesn't** take it off; its **name** is a per-account pref (`watchlist_name`, "" = "My Watch List") on the client's first server, renamed on the web list page | Owner: "ALL files I should be able to add… 'My Watch List' will be its default name". A watch list is for video; removal stays the person's choice (Netflix-style), with the watched tick shown on the card |
+| 10-13 | **Android phone app** = the server's own web UI in a WebView online (the same pages, plus Download buttons through `window.bamsAndroid`), its own pages bundled in the APK offline (built from `web/`, same styles), native ExoPlayer/Media3 for downloaded video and music. Android 8+, sideloaded APK | Owner: "look exactly like the web version… work even if it can't find a server". Server-served pages stay in step with every release; offline pages can't come from a server. Browsers can't play most original files (MKV, AC3) and music must play on with the screen off |
+| 10-13 | **Downloads come back for the Android app only**, gated by a **per-account switch** (`users.can_download`, schema v14; admins always) and their own route (`/api/files/{id}/download` + manifests). The web and TV apps still offer none | Owner's choice for the phone app, reversing 0.9.2 there only. Playing already sends the bytes (`/stream`), so the switch is a policy, not a lock |
+| 10-13 | Downloads go to the **app's own folder** on the phone's storage or an **SD card** (picked in Settings → This phone; no permission; deleted with the app); **Wi-Fi only** by default; each original file kept once however many downloads need it | Owner's choice (simplest, reliable on Android 11+). Wi-Fi only because originals can be many GB |
+| 10-13 | Sound the phone can't decode offline (DTS, TrueHD, AC3 on some phones): **warn on Download**, play another track the file has; **no FFmpeg in the app** | Owner's choice; bundling an FFmpeg decoder would break "FFmpeg is never bundled" |
+| 10-13 | The app knows a server by **`/api/hello` `id`** (new, stable) with **every address it was reached at** (home LAN, away), trying each; the WebView's sign-in cookie is shared between them | Owner: the server is reachable only sometimes (walks: nothing; trips: internet). Downloads must stay one server's whichever address answers |
+| 10-13 | **Playlists made in BAMS are each account's own and private** (`user_playlists`, schema v15); albums/artists add their tracks as they are now, each track once; imported playlists stay read-only with **"Make a copy"**; full editing on web, TV (hold-OK menus, TV keyboard) and the phone online; downloadable to the phone | Owner: "create playlist, name them, add a brief description, add individual songs, albums or artist… for all versions", then chose "personal and private" and full TV editing. Playlist files live in read-only media folders |
+| 10-13 | **Quality line** under a playing song's title and artist on every player (`web/src/quality.ts`): codec + bit depth/sample rate (lossless) or bitrate (lossy); a converted song shows both ("ALAC 24-bit / 96 kHz → AAC 256 kbps") | Owner: "list the current format/quality of the song… below the song name and artist" |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
 
 ## 4. Built so far
@@ -323,6 +330,17 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
 
+### Android phone app (`android/`, 0.1.1, not released yet)
+- Android 8+ (tested: Android 16 emulator, owner's Galaxy A17 5G). Online: the server's web UI in a WebView with
+  Download buttons (movie, episode, season, show, song, album, artist, playlist), a Downloads menu item and Settings →
+  This phone (phone storage / SD card, Wi-Fi only, space used, servers and addresses). Offline: its own pages (`web/src/phone/`,
+  bundled): Downloads (in progress, shelves, everything downloaded with Remove), Movies, TV Shows, Music, title /
+  album / artist / playlist pages, Servers, and a banner that offers "Go online" when the server answers again.
+- Downloads: foreground service, original files with Range resume, pictures and text subtitles (WebVTT) too, each
+  file once (shared by downloads, deleted with the last one). Video plays in ExoPlayer (resume, next episode,
+  subtitles, picture-in-picture), music in a Media3 session (screen off, lock screen); where you stopped is sent to
+  the server when it's reached. Build: `android/README.md`.
+
 ### More servers (0.7.0, web + TV)
 - Clients keep their own server lists: web `servers.tsx` (`bams.servers` in localStorage; `/r/<rid>/…` pages are the
   same page components scoped to that server), TV `api.ts` extras. Server name setting (Settings → This server).
@@ -340,8 +358,8 @@ Roughly in priority order:
    Family Guy episode on the owner's NAS, cached afterwards); Dolby
    pass-through on a real Dolby device (tested only with a faked "supported"); Dolby Vision profile 5 without
    libplacebo/Vulkan fails to convert (zscale can't read it); text MicroDVD `.sub` sidecars (no `.idx`) aren't listed.
-2. **Music leftovers (minor):** sample-perfect gapless (Media Source Extensions); un-merging an album; making and
-   editing playlists in BAMS (only imported today); `.cue` entries inside playlists.
+2. **Music leftovers (minor):** sample-perfect gapless (Media Source Extensions); un-merging an album; `.cue` entries
+   inside playlists; your own playlists can't be shared with other accounts (owner chose private) or edited offline.
 3. **ISO / DVD / Blu-ray folders** (phase 3).
 4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning).
 5. **OpenSubtitles leftovers:** not yet tried with a real key (built and tested against a fake; the API was read
@@ -356,6 +374,11 @@ Roughly in priority order:
 7. **Watch list leftovers:** no music on it; renamed on the web only (the TV's rail picks a new name up at its next
    start, its Home at once); posters' bookmark needs a mouse (touch screens use the title page's button).
 8. **UI redesign** from the owner's mockups.
+9. **Android app leftovers:** a release signing key (debug builds today: a release build won't install over them);
+   music streamed online plays in the page (no lock-screen controls, may stop with the phone locked); new episodes of
+   a downloaded show aren't fetched by themselves; a downloaded playlist is a snapshot (Download again to update);
+   Android 15+ allows background downloads 6 h a day (the rest goes on when the app is opened); no Play Store build;
+   the offline video player uses Android's controls, not the web player's look.
 
 ## 6. Dev environment (owner's machine)
 
@@ -368,6 +391,7 @@ Roughly in priority order:
 | FFmpeg | winget `Gyan.FFmpeg` (found automatically, even without PATH) |
 | Server data dir | `C:\Users\Beached\bams\data` (gitignored): DB, image cache, logs |
 | Owner's server (since 10-10) | Ubuntu 24.04 at `192.168.1.253` (Intel HD 630, FFmpeg 6.1.1), the `.deb`, running as `beached`; data `/var/lib/bams`, log `/var/lib/bams/logs/bams.log`, media on `/mnt/nas/jellyfin-media`. Read-only access for agents: `ssh bams-server` (key `~/.ssh/bams_claude` on the owner's PC; `beached` is in `render`, so FFmpeg/VAAPI tests run there). Installing a package needs the owner's sudo |
+| Linux PC (2026-10-13) | Debian 13 at `10.0.0.69`, user `yakob`, repo `/mnt/Data/Projects/bams`. **Sandbox server** `/mnt/Data/Sandboxes/bams/bams.sh {start\|stop\|update\|…}` (:8485, its own copy of the code, generated mock media; `BAMS_HOST=0.0.0.0` for the phone). Android tools in `/mnt/Data/Sandboxes/Android` (`source env.sh`: JDK 17, SDK 35, AVD `bams36` = Android 16 emulator), Chrome for Testing (TV tests: `CHROME_PATH=/mnt/Data/Sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`) |
 | Ports | 8484 = the owner's server · 8485 = scratch test instances (`.claude/launch.json` → `bams-test`, data dir in the session scratchpad: edit the path) · 5173 = Vite dev |
 | Test media | `C:\Users\Beached\Shows` (TV: Bob's Burgers, Family Guy, Simpsons, Burn Notice, South Park…) · `C:\Users\Beached\Movies` (2 movies) · `C:\Users\Beached\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) · `C:\Users\Beached\TestMedia` (Jellyfin DV profile 5 clip + its SDR version, CC BY-SA 4.0, `CREDITS.txt`) |
 | Libraries on the owner's server | 1 = "TV Shows" (`…\Shows`), 2 = "Movies" (`…\Movies`); the owner adds "Music" (`…\MyMusic`) when testing |
@@ -392,6 +416,45 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-13: Your own playlists and the quality line (web, TV, phone; not released yet)
+- **What / why:** owner: "an option to create playlist, name them, add a brief description, add individual songs,
+  albums or artist… for all versions" and "list the current format/quality of the song… below the song name and
+  artist". Private per account (owner's choice), imported playlists read-only + Make a copy, full TV editing.
+  Server `user_playlists.py` + routes `/api/user-playlists*` (+ `/download`), schema v15; `stream.plan_audio` adds
+  `sample_rate`, `bit_depth`, `bitrate`, `channels`, `convert_to`. Web: Playlists tab (yours + New playlist, then
+  imported), Add to playlist on albums/artists and a small icon per song, `/my-playlist/:id` (drag, take out, edit,
+  delete, download in the app). TV: New playlist tile, Add to playlist on album/artist pages, hold OK on a song (add;
+  in your playlist: move up/down, take out), Make a copy. `web/src/quality.ts` shared by all three players (the TV
+  says "→ AAC/FLAC" when it falls back to the server's conversion).
+- **Files:** `server/bams/{user_playlists,app,db,stream}.py`, `tests/test_user_playlists.py`; `web/src/{quality.ts,
+  components/Playlists.tsx, pages/Music.tsx, components/NowPlaying.tsx, App.tsx, api.ts}`; `tv/src/{PlaylistMenus.tsx,
+  screens/Music.tsx, music.tsx, api.ts, App.tsx, Icon.tsx, styles.css}`, `tv/test/nav.test.ts`; `web/src/phone/*`.
+- **Verified:** 342 server tests (+ `test_encoder_choice_api`, Linux-only failure as before); TV `npm test` 39/39
+  (Chrome for Testing); `tsc` web + TV; browser: made/edited/filled/reordered a playlist, quality line on FLAC; TV app
+  at 1920×1080 in the browser: playlists tab, hold-OK menu (move), New playlist from an album; emulator: download a
+  playlist, offline page + play + quality line. Owner on the phone: made playlists, added songs, saw descriptions and
+  the quality line, downloaded a playlist and played it offline (0.1.1).
+- **Left open:** not tried on a real TV (TV builds are made on the Windows PC); not released (needs a server release
+  for the owner's Ubuntu server).
+
+### 2026-10-13: Android phone app with downloads (app 0.1.1; not released yet)
+- **What / why:** owner: an Android app that looks like the web version, plus downloads of movies, episodes, seasons,
+  shows, songs, albums, artists and playlists (original files) to the phone or an SD card, that works with no server
+  and shows what's downloaded. Decisions in §3 (10-13). Server: `can_download` (v14), `/api/files/{id}/download`,
+  manifests (`/api/items|playlists/{id}/download`), `/api/hello` `id`. Web: `android.ts` bridge, Download buttons,
+  Settings → This phone, account switch in Settings → Accounts, Downloads in the menu, and a fix for an older bug
+  (libraries stacked in the phone-width menu bar: `.nav-libs` had no phone rule). App: `android/` (see README).
+- **Files:** `android/` (new), `web/src/{android.ts, components/{Download,PhoneSettings}.tsx, phone/, servers.tsx,
+  pages/{Detail,Music,Settings}.tsx, components/{Sidebar,AccountSettings}.tsx, styles.css}`, `web/phone/`,
+  `web/vite.app.config.ts`; `server/bams/{app,auth,db}.py`, `tests/test_downloads.py`, `test_devices.py`, `test_api.py`.
+- **Verified:** server tests; Android 16 emulator against a test server: sign-in in the app, downloads of a show
+  (byte-identical to the originals), a movie with AC3 (warning shown, plays picture-only), an artist, a playlist to
+  an SD card (a shared song reused, removing it kept the shared one), offline start → Downloads, episode playback with
+  resume, music with the screen off (media session), "Go online" when the server returned, offline progress sent.
+  Owner on a Galaxy A17 5G (Android 16): connected, downloaded, played offline.
+- **Left open:** see §5 item 9 (release key first). The version is shown at the bottom of offline Downloads after a
+  stale install of 0.1.0 looked like a bug.
 
 ### 2026-10-12: Play Random and Up next on the TV apps (TV 0.14.0)
 - **What / why:** owner: "lets update the TV apps with this same functionality" (0.16.0's Play Random). Buttons on the

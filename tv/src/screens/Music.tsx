@@ -3,7 +3,12 @@
 // player (music.tsx), which keeps going while you browse.
 
 import { useEffect, useMemo, useState } from "react";
-import { apiFor, mediaFor, type ItemDetail, type ItemSummary, type Playlist, type PlaylistSummary, type QueueTrack } from "../api";
+import {
+  apiFor, mediaFor, type ItemDetail, type ItemSummary, type Playlist, type PlaylistSummary, type QueueTrack, type UserPlaylist,
+  type UserPlaylistSummary,
+} from "../api";
+import { qualityLine } from "../../../web/src/quality";
+import { AddToPlaylistMenu, EditPlaylistMenu, HoldMenu, NewPlaylistMenu, PlaylistTrackMenu } from "../PlaylistMenus";
 import { useFocusOnReady, useNav } from "../App";
 import { Square } from "../Cards";
 import { clock } from "../format";
@@ -23,6 +28,8 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
   const [tab, setTab] = useState<Tab>(() => (sessionStorage.getItem(`bams.mtab.${key}`) as Tab) || "artist");
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [lists, setLists] = useState<PlaylistSummary[] | null>(null);
+  const [mine, setMine] = useState<UserPlaylistSummary[] | null>(null);
+  const [making, setMaking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,13 +37,16 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
     setItems(null);
     setLists(null);
     const api = apiFor(rid);
-    if (tab === "playlist") api.get<PlaylistSummary[]>(`/api/libraries/${id}/playlists`).then(setLists).catch((e) => setErr(e.message));
+    if (tab === "playlist") {
+      api.get<PlaylistSummary[]>(`/api/libraries/${id}/playlists`).then(setLists).catch((e) => setErr(e.message));
+      api.get<UserPlaylistSummary[]>("/api/user-playlists").then(setMine).catch(() => setMine([]));
+    }
     else api.get<ItemSummary[]>(`/api/libraries/${id}/items?kind=${tab}&sort=${tab === "album" ? "artist" : "title"}&limit=5000`)
       .then(setItems).catch((e) => setErr(e.message));
   }, [id, rid, tab, key]);
 
   useFocusOnReady(items !== null || lists !== null);
-  const count = tab === "playlist" ? lists?.length : items?.length;
+  const count = tab === "playlist" ? (lists && mine ? lists.length + mine.length : undefined) : items?.length;
 
   return (
     <div className="page">
@@ -52,8 +62,26 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
       </div>
       {err && <p className="error big">{err}</p>}
       {items === null && lists === null && !err && <div className="spinner" />}
-      {tab === "playlist" && lists && !lists.length && (
-        <p className="muted big">No playlists. BAMS imports playlist files (.m3u, .m3u8, .pls) it finds in this library's folders.</p>
+      {tab === "playlist" && (
+        <>
+          <h2 className="list-head">Your playlists</h2>
+          <div className="grid squares">
+            <button className="card square new-playlist" data-fid="pl-new" onClick={() => setMaking(true)}>
+              <div className="square-art"><div className="no-art"><Icon name="plus" size={90} /></div></div>
+              <div className="square-title">New playlist</div>
+            </button>
+            {mine?.map((p) => (
+              <Square key={`u${p.id}`} fid={`upl-${p.id}`} rid={rid} img={p.covers[0] ?? null} title={p.name}
+                sub={`${p.track_count} tracks`} onPress={() => nav.push({ name: "my-playlist", id: p.id, rid })} />
+            ))}
+          </div>
+          <h2 className="list-head">From playlist files</h2>
+          {lists && !lists.length && (
+            <p className="muted big">None. BAMS imports playlist files (.m3u, .m3u8, .pls) it finds in this library's folders.</p>
+          )}
+          {making && <NewPlaylistMenu rid={rid} onClose={() => { setMaking(false); setTimeout(() => focusId("pl-new")); }}
+            created={(p) => { setMaking(false); nav.push({ name: "my-playlist", id: p.id, rid }); }} />}
+        </>
       )}
       {tab !== "playlist" && items && !items.length && <p className="muted big">Nothing here yet.</p>}
       <div className="grid squares">
@@ -72,8 +100,10 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
 }
 
 /** A list of tracks; OK plays from that one. */
-function TrackList({ tracks, rid, numbered = false, showAlbum = false }: {
+function TrackList({ tracks, rid, numbered = false, showAlbum = false, onHold }: {
   tracks: QueueTrack[]; rid?: number; numbered?: boolean; showAlbum?: boolean;
+  /** holding OK on a track (hold.ts): its menu (add to a playlist; in your own playlist, move or take out) */
+  onHold?: (i: number) => void;
 }) {
   const music = useMusic();
   const discs = new Set(tracks.map((t) => t.disc_number ?? 1)).size > 1;
@@ -89,6 +119,7 @@ function TrackList({ tracks, rid, numbered = false, showAlbum = false }: {
           <div key={`${t.id}-${i}`}>
             {head}
             <button className={`track ${on ? "on" : ""}`} data-fid={`t-${t.id}-${i}`} disabled={!t.available}
+              data-hold={onHold ? "" : undefined} onContextMenu={onHold ? (e) => { e.preventDefault(); onHold(i); } : undefined}
               onClick={() => (on ? music.toggle() : music.playTracks(tracks, rid, i))}>
               <span className="track-num">{on && music.playing ? <Icon name="music" size={26} /> : numbered ? i + 1 : t.track_number ?? ""}</span>
               <span className="track-title">{t.title}
@@ -109,6 +140,7 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
   const music = useMusic();
   const media = mediaFor(rid);
   const [tracks, setTracks] = useState<QueueTrack[] | null>(null);
+  const [adding, setAdding] = useState<{ items: number[]; title: string; fid: string } | null>(null);
   const isAlbum = item.kind === "album" || item.kind === "track";
   useEffect(() => {
     if (isAlbum) apiFor(rid).get<QueueTrack[]>(`/api/items/${item.kind === "track" && item.parent_id ? item.parent_id : item.id}/tracks`)
@@ -149,6 +181,9 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
               <Icon name="shuffle" size={30} /> Shuffle
             </button>
             {item.kind === "artist" && <PlayRandomButton path={`/api/items/${item.id}/random`} rid={rid} />}
+            <button className="btn" data-fid="maddpl" onClick={() => setAdding({ items: [playId], title: item.kind === "track" ? item.parent_title ?? item.title : item.title, fid: "maddpl" })}>
+              <Icon name="listPlus" size={30} /> Add to playlist
+            </button>
             {artist && <button className="btn" data-fid="martist" onClick={() => nav.push({ name: "detail", id: artist.id, rid })}>{artist.title}</button>}
           </div>
         </div>
@@ -161,7 +196,10 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
           ))}
         </div>
       )}
-      {isAlbum && tracks && <TrackList tracks={tracks} rid={rid} />}
+      {isAlbum && tracks && <TrackList tracks={tracks} rid={rid}
+        onHold={(i) => setAdding({ items: [tracks[i].id], title: tracks[i].title, fid: `t-${tracks[i].id}-${i}` })} />}
+      {adding && <AddToPlaylistMenu items={adding.items} title={adding.title} rid={rid}
+        onClose={() => { const back = adding.fid; setAdding(null); setTimeout(() => focusId(back)); }} />}
     </div>
   );
 }
@@ -169,6 +207,8 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
 /** An imported playlist, in its own order. */
 export function PlaylistScreen({ id, rid }: { id: number; rid?: number }) {
   const music = useMusic();
+  const nav = useNav();
+  const [adding, setAdding] = useState<{ track: QueueTrack; fid: string } | null>(null);
   const media = mediaFor(rid);
   const [p, setP] = useState<Playlist | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -195,10 +235,102 @@ export function PlaylistScreen({ id, rid }: { id: number; rid?: number }) {
             <button className="btn" data-fid="pshuffle" onClick={() => music.playTracks(p.tracks, rid, 0, true)}>
               <Icon name="shuffle" size={30} /> Shuffle
             </button>
+            <button className="btn" data-fid="pcopy" onClick={() => {
+              apiFor(rid).post<UserPlaylistSummary>("/api/user-playlists", { name: p.name, copy_of: p.id })
+                .then((c) => nav.push({ name: "my-playlist", id: c.id, rid })).catch((e) => setErr(e.message));
+            }}><Icon name="plus" size={30} /> Make a copy</button>
           </div>
         </div>
       </div>
-      <TrackList tracks={p.tracks} rid={rid} numbered showAlbum />
+      <TrackList tracks={p.tracks} rid={rid} numbered showAlbum
+        onHold={(i) => setAdding({ track: p.tracks[i], fid: `t-${p.tracks[i].id}-${i}` })} />
+      {adding && <AddToPlaylistMenu items={[adding.track.id]} title={adding.track.title} rid={rid}
+        onClose={() => { const back = adding.fid; setAdding(null); setTimeout(() => focusId(back)); }} />}
+    </div>
+  );
+}
+
+/** One of your playlists: play it, hold OK on a song to move it or take it out, rename it, delete it. */
+export function UserPlaylistScreen({ id, rid }: { id: number; rid?: number }) {
+  const music = useMusic();
+  const nav = useNav();
+  const media = mediaFor(rid);
+  const [p, setP] = useState<UserPlaylist | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [menu, setMenu] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const load = () => apiFor(rid).get<UserPlaylist>(`/api/user-playlists/${id}`).then(setP).catch((e) => setErr(e.message));
+  useEffect(() => { void load(); }, [id, rid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useFocusOnReady(p !== null);
+  if (err && !p) return <div className="page"><p className="error big">{err}</p></div>;
+  if (!p) return <div className="page"><div className="spinner" /></div>;
+
+  const save = (tracks: QueueTrack[], focusAt: number) => {
+    setP({ ...p, tracks, track_count: tracks.length });
+    setMenu(null);
+    setTimeout(() => {
+      const t = tracks[Math.min(focusAt, tracks.length - 1)];
+      if (!(t && focusId(`t-${t.id}-${Math.min(focusAt, tracks.length - 1)}`))) focusId("uplay");
+    });
+    apiFor(rid).put<UserPlaylist>(`/api/user-playlists/${p.id}/tracks`, { tracks: tracks.map((t) => t.id) })
+      .then(setP).catch((e) => { setErr(e.message); void load(); });
+  };
+  const move = (i: number, by: -1 | 1) => {
+    const next = [...p.tracks];
+    next.splice(i + by, 0, ...next.splice(i, 1));
+    save(next, i + by);
+  };
+  const closeMenu = (i: number) => {
+    setMenu(null);
+    setTimeout(() => focusId(`t-${p.tracks[i].id}-${i}`));
+  };
+  const del = () => apiFor(rid).del(`/api/user-playlists/${p.id}`).then(() => nav.back()).catch((e) => setErr(e.message));
+
+  return (
+    <div className="page music-detail">
+      <div className="detail-top">
+        {p.covers[0] ? <img className="music-cover" src={media(p.covers[0]) ?? undefined} alt="" />
+          : <div className="music-cover no-art"><Icon name="music" size={90} /></div>}
+        <div className="detail-text">
+          <div className="eyebrow">Your playlist</div>
+          <h1>{p.name}</h1>
+          <div className="meta">{p.tracks.length} tracks  ·  {clock(p.duration ?? 0)}</div>
+          {p.description && <p className="playlist-desc">{p.description}</p>}
+          {err && <p className="error">{err}</p>}
+          <div className="button-row">
+            {p.tracks.length > 0 && <>
+              <button className="btn primary" data-autofocus data-fid="uplay" onClick={() => music.playTracks(p.tracks, rid)}>
+                <Icon name="play" size={30} /> Play
+              </button>
+              <button className="btn" data-fid="ushuffle" onClick={() => music.playTracks(p.tracks, rid, 0, true)}>
+                <Icon name="shuffle" size={30} /> Shuffle
+              </button>
+            </>}
+            <button className="btn" data-fid="uedit" data-autofocus={p.tracks.length ? undefined : true} onClick={() => setEditing(true)}>
+              <Icon name="edit" size={30} /> Edit
+            </button>
+            <button className="btn" data-fid="udelete" onClick={() => setDeleting(true)}><Icon name="close" size={30} /> Delete</button>
+          </div>
+        </div>
+      </div>
+      {p.tracks.length ? <TrackList tracks={p.tracks} rid={rid} numbered showAlbum onHold={setMenu} />
+        : <p className="muted big">No songs yet. Hold OK on a song, or press "Add to playlist" on an album or an artist.</p>}
+      {menu !== null && p.tracks[menu] && (
+        <PlaylistTrackMenu title={p.tracks[menu].title} first={menu === 0} last={menu === p.tracks.length - 1}
+          onMove={(by) => move(menu, by)} onRemove={() => save(p.tracks.filter((_, k) => k !== menu), menu)}
+          onClose={() => closeMenu(menu)} />
+      )}
+      {editing && <EditPlaylistMenu playlist={p} rid={rid} onClose={() => { setEditing(false); setTimeout(() => focusId("uedit")); }}
+        saved={() => { setEditing(false); void load(); setTimeout(() => focusId("uedit")); }} />}
+      {deleting && (
+        <HoldMenu title={`Delete ${p.name}?`} sub="Its songs stay in your library." onClose={() => { setDeleting(false); setTimeout(() => focusId("udelete")); }}>
+          <div className="button-row">
+            <button className="btn primary" onClick={() => void del()}>Delete</button>
+            <button className="btn" onClick={() => { setDeleting(false); setTimeout(() => focusId("udelete")); }}>Cancel</button>
+          </div>
+        </HoldMenu>
+      )}
     </div>
   );
 }
@@ -219,6 +351,7 @@ export function NowPlaying() {
       <div className="np-text">
         <div className="np-title">{t.title}</div>
         <div className="np-sub">{[t.artist, t.album].filter(Boolean).join("  ·  ")}{m.error ? `  ·  ${m.error}` : ""}</div>
+        {qualityLine(t.playback, m.converted) && <div className="np-quality">{qualityLine(t.playback, m.converted)}</div>}
         <div className="np-bar"><div style={{ width: `${pct}%` }} /></div>
       </div>
       <span className="np-time">{clock(m.time)} / {clock(m.duration)}</span>

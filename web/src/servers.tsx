@@ -15,6 +15,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Outlet, useParams } from "react-router-dom";
 import { api, ApiError, type RemoteServer } from "./api";
+import type { AppServer } from "./android";
 import { askAll, type Source, type Tagged } from "./everywhere";
 
 /** Window event: a server was added, signed in again, removed, renamed/hid/reordered a library, or signed out. */
@@ -68,6 +69,14 @@ const find = (id: number | null) => (id === null ? null : load().find((s) => s.i
 export function ridOf(url: string | null | undefined): number | null {
   if (!url || !/^https?:\/\//.test(url)) return null;
   return load().find((s) => url.startsWith(`${s.url}/`))?.id ?? null;
+}
+
+/** Server `rid` (null = this one) for the Android app's downloads (android.ts): where it is and how to sign in
+ *  there. This server's own sign-in is the WebView's cookie, which the app reads itself. */
+export function appServer(rid: number | null): AppServer | null {
+  if (rid === null) return { url: location.origin, name: "", token: null };
+  const s = find(rid);
+  return s && s.token ? { url: s.url, name: s.name, token: s.token } : null;
 }
 
 /** "/title/5" as a page of server `rid`. */

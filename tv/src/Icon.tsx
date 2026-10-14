@@ -22,6 +22,10 @@ const PATHS = {
   up: "M6 15l6-6 6 6",
   down: "M6 9l6 6 6-6",
   close: "M6 6l12 12M18 6 6 18",
+  plus: "M12 5v14M5 12h14",
+  // add to a playlist: lines with a plus (the web's Icon has the same)
+  listPlus: "M3 6h12M3 12h12M3 18h7M17 14v8M13 18h8",
+  edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
   // a bed (headboard, sleeper's head, blanket, frame), with two stars above it in FILLS: sleep mode
   sleep: "M3 9v11M3 17h18v3M9 17v-4h9a3 3 0 0 1 3 3v1M6 15.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
   // the watch list: a bookmark, filled when the item is on it

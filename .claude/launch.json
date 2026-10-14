@@ -128,6 +128,12 @@
       "port": 8504
     },
     {
+      "name": "bams-android-test",
+      "runtimeExecutable": "server/.venv/bin/python",
+      "runtimeArgs": ["-m", "bams", "--data-dir", "/tmp/claude-1000/-mnt-Data-Projects-bams/5ef81af5-b495-4f7b-a879-244655120055/scratchpad/bamsdata", "serve", "--port", "8506"],
+      "port": 8506
+    },
+    {
       "name": "tv",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "tv", "run", "dev"],

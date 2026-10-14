@@ -31,6 +31,9 @@ branding/archive/**/concepts/
 *.egg-info/
 .pytest_cache/
 
+# the Android app's own pages (web: npm run build:app; android/ bundles them)
+/web/dist-app/
+
 # installer builds (deploy/build.py)
 /build/
 /dist/

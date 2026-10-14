@@ -221,6 +221,14 @@ function UserRow({ u, me, onChange }: { u: User; me: User; onChange: () => void 
           {u.must_change_password && <span className="muted">(signed out; they pick their own password when they sign in)</span>}
         </label>
       )}
+      {!u.is_admin && (
+        <label className="check must-change">
+          <input type="checkbox" checked={!!u.can_download}
+            onChange={(e) => run(() => api.patch(`/api/users/${u.id}`, { can_download: e.target.checked }))} />
+          Can download to the BAMS Android app
+          <span className="muted">(original files, to watch and listen without a connection; admins always can)</span>
+        </label>
+      )}
       {resetting && (
         <form className="key-row" onSubmit={(e) => {
           e.preventDefault();

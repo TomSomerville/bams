@@ -70,7 +70,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 330 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 343 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\Beached\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -78,6 +78,8 @@ cd web && npm install && npx tsc -p . && npm run build
 cd tv && npm install && npx tsc -p . && npm test && npm run build && npm run package -- --install --run   # --release: dist/BAMS-SamsungTV-<v>.wgt
 # Fire TV app (firetv/README.md): JDK 17 + Android SDK 35; release key C:\Users\Beached\bams-firetv.jks via firetv/keystore.properties
 cd tv && npm run build && npm run firetv -- --install --device <fire-tv-ip>   # --release: dist/BAMS-FireTV-<v>.apk
+# Android phone app (android/README.md), on the Linux PC: source /mnt/Data/Sandboxes/Android/env.sh first
+cd web && npm run build:app && cd ../android && ./gradlew assembleDebug   # app/build/outputs/apk/debug/app-debug.apk
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
@@ -304,4 +306,19 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   tests compare (`test_watch.py` prefs tests).
 - **Buttons shown only on hover must not exist for touch** (`@media (hover: hover)`, the poster bookmark): an
   `opacity: 0` button still takes the tap that was meant to open the poster.
+- **The Android phone app shows the server's own web UI online** (`android/`): web changes for it (Download buttons,
+  This phone settings) ship with a **server** release. Its offline pages (`web/src/phone/`, `npm run build:app`) are
+  bundled in the APK: rebuild the APK after changing them, `web/src/android.ts`, `quality.ts` or `styles.css`.
+  `android.ts` and `quality.ts` are shared like `everywhere.ts` (no React/router/storage).
+- **Bump `bamsVersion` (android/gradle.properties) for every APK handed to the owner**: they sideload it, and a
+  stale 0.1.0 install looked exactly like a bug in 0.1.1. The version shows at the bottom of offline Downloads.
+- **Downloads are the Android app's only** (`/api/files/{id}/download`, manifests), refused unless the account may
+  (`auth.may_download`: admins or `users.can_download`). `LoginRequired` caches the user dict for a minute: a route
+  that changes `can_download` must call `forget_sessions()` (as `patch_user` does). Never add downloads to the web/TV.
+- **The app's bridge only answers its servers' addresses and its own pages** (WebMessageListener origin rules in
+  `Bridge.register`): re-register after the server list changes. Things only the app's own pages may do (play files,
+  change servers) stay in `Bridge.appPage`.
+- **Your own playlists are private**: every `/api/user-playlists/{id}` route must go through `_own_playlist` (404 for
+  anyone else's). Imported playlists stay read-only (media folders are); editing means "Make a copy".
+- **TV tests on the Linux PC** need `CHROME_PATH=/mnt/Data/Sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

@@ -41,6 +41,7 @@ def _link(app, web: TestClient, name="Living room") -> tuple[TestClient, str]:
 def test_hello_is_public(app):
     r = TestClient(app).get("/api/hello")
     assert r.status_code == 200 and r.json()["app"] == "bams" and r.json()["version"]
+    assert len(r.json()["id"]) == 32 and TestClient(app).get("/api/hello").json()["id"] == r.json()["id"]  # stays
 
 
 def test_server_name(app):

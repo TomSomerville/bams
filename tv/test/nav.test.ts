@@ -328,3 +328,30 @@ test("settling doesn't take the focus back from the user", async () => {
   await wait(2000);
   eq(focused(), "rail-lib1");
 });
+
+/** PlaylistMenus.tsx AddToPlaylistMenu over an album page: "New playlist…", then your playlists, in a column. */
+const addToPlaylist = (n: number) =>
+  `<div class="hold-menu" data-trap><div class="hold-box"><h2>Add to a playlist</h2><div class="hold-ep">Song</div>` +
+  `<div><div class="pick-list"><button class="btn pick" data-fid="pick-new">+ New playlist…</button>` +
+  Array.from({ length: n }, (_, i) => `<button class="btn pick" data-fid="pick-${i}">List ${i} <small>3 songs</small></button>`).join("") +
+  `</div></div></div></div>`;
+
+test("Add to a playlist: Down goes through the playlists and stays in the menu; Left/Right don't leave it", () => {
+  mount(shell(`<div class="page"><div class="button-row"><button class="btn" data-fid="maddpl">Add to playlist</button></div></div>` +
+    addToPlaylist(3), { np: true }));
+  focus(el("pick-new"));
+  move("down");
+  eq(focused(), "pick-0");
+  move("down");
+  move("down");
+  eq(focused(), "pick-2");
+  move("down");
+  eq(focused(), "pick-2");
+  move("left");
+  move("right");
+  ok(focused()?.startsWith("pick-"), `focus left the menu: ${focused()}`);
+  move("up");
+  move("up");
+  move("up");
+  eq(focused(), "pick-new");
+});

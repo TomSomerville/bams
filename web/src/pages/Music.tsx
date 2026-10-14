@@ -1,6 +1,8 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
-import type { ItemDetail, ItemSummary, Playlist, PlaylistSummary, QueueTrack, ServerLibrary } from "../api";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import type {
+  ItemDetail, ItemSummary, Playlist, PlaylistSummary, QueueTrack, ServerLibrary, UserPlaylist, UserPlaylistSummary,
+} from "../api";
 import { Backdrop, Poster } from "../components/Art";
 import { AlbumCard, ArtistCard } from "../components/Cards";
 import Icon from "../components/Icon";
@@ -9,6 +11,9 @@ import { fmtClock, fmtLength, plural } from "../format";
 import { useScope } from "../servers";
 import { useMusic } from "../music";
 import { PlayRandomButton } from "../random";
+import { DownloadButton } from "../components/Download";
+import { AddToPlaylist, EditPlaylistDialog, NewPlaylistDialog } from "../components/Playlists";
+import { useReorder } from "../components/useReorder";
 import { useApi } from "../useApi";
 
 // ------------------------------------------------------------------ library
@@ -28,6 +33,10 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
   const { data: items } = useApi<ItemSummary[]>(
     tab === "playlist" ? null : `/api/libraries/${lib.id}/items?kind=${tab}&sort=${sort}&limit=5000`);
   const { data: lists } = useApi<PlaylistSummary[]>(tab === "playlist" ? `/api/libraries/${lib.id}/playlists` : null);
+  const { data: mine } = useApi<UserPlaylistSummary[]>(tab === "playlist" ? "/api/user-playlists" : null);
+  const [making, setMaking] = useState(false);
+  const nav = useNavigate();
+  const { to } = useScope();
 
   const genres = useMemo(() => [...new Set((items ?? []).flatMap((i) => i.genres))].sort(), [items]);
   const list = (items ?? []).filter((i) => !genre || i.genres.includes(genre));
@@ -45,7 +54,7 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
             </button>
           ))}
         </div>
-        {tab === "playlist" ? (lists && <span className="count">{plural(lists.length, "playlist")}</span>)
+        {tab === "playlist" ? (lists && mine && <span className="count">{plural(lists.length + mine.length, "playlist")}</span>)
           : items && <span className="count">{plural(list.length, tab)}</span>}
         <PlayRandomButton className="btn ghost small page-random" path={`/api/libraries/${lib.id}/random`} />
         {tab !== "playlist" && <label className="sort">
@@ -57,13 +66,28 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
           </select>
         </label>}
       </div>
-      {tab === "playlist" && lists && !lists.length && (
-        <p className="muted">
-          No playlists yet. BAMS imports playlist files (.m3u, .m3u8, .pls) it finds in this library's folders, and
-          keeps them in step with those files on every scan.
-        </p>
+      {tab === "playlist" && (
+        <>
+          <div className="section-head playlists-head">
+            <h2 className="section-title">Your playlists</h2>
+            <button className="btn primary small" onClick={() => setMaking(true)}><Icon name="plus" size={16} /> New playlist</button>
+          </div>
+          {mine && !mine.length && (
+            <p className="muted">None yet. Make one here, or press <Icon name="listPlus" size={14} /> on a song, an album or an
+              artist to add it to a playlist. Your playlists are yours alone: other accounts don't see them.</p>
+          )}
+          <div className="grid">{mine?.map((p) => <PlaylistCard key={`u${p.id}`} p={p} />)}</div>
+          <div className="section-head playlists-head"><h2 className="section-title">From playlist files</h2></div>
+          {lists && !lists.length && (
+            <p className="muted">
+              None. BAMS imports playlist files (.m3u, .m3u8, .pls) it finds in this library's folders, and keeps them in
+              step with those files on every scan.
+            </p>
+          )}
+          <div className="grid">{lists?.map((p) => <PlaylistCard key={p.id} p={p} />)}</div>
+          {making && <NewPlaylistDialog onClose={() => setMaking(false)} created={(p) => nav(to(`/my-playlist/${p.id}`))} />}
+        </>
       )}
-      {tab === "playlist" && <div className="grid">{lists?.map((p) => <PlaylistCard key={p.id} p={p} />)}</div>}
       {tab !== "playlist" && genres.length > 1 && (
         <div className="chips">
           <button className={`chip ${!genre ? "on" : ""}`} onClick={() => setGenre(null)}>All</button>
@@ -153,6 +177,8 @@ function Actions({ item, reload }: { item: ItemDetail; reload: () => void }) {
       <button className="btn ghost" onClick={() => music.playItem(item.id, { shuffle: true, rid })}><Icon name="shuffle" /> Shuffle</button>
       {(!remote || remote.is_admin) && <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>}
       {item.kind === "artist" && <PlayRandomButton path={`/api/items/${item.id}/random`} />}
+      <AddToPlaylist items={[item.id]} title={item.title} />
+      <DownloadButton id={item.id} title={item.title} what={item.kind === "artist" ? " artist" : " album"} />
       {fixing && <MusicFixMatch item={item} onClose={(changed) => { setFixing(false); if (changed) reload(); }} />}
     </div>
   );
@@ -190,16 +216,19 @@ function Equalizer() {
   return <span className="eq" aria-label="Playing"><i /><i /><i /></span>;
 }
 
-/** Track rows. Clicking one plays the list from there. */
-export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = false }: {
+/** Track rows. Clicking one plays the list from there. `edit`: one of your playlists, whose rows can be dragged
+ *  into another order (by their handle) and taken out. */
+export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = false, edit }: {
   /** numbered: number rows by their place in the list (a playlist), not by their track number */
   tracks: QueueTrack[]; albumArtist?: string; showAlbum?: boolean; numbered?: boolean;
+  edit?: { move: (from: number, to: number) => void; remove: (i: number) => void };
 }) {
   const music = useMusic();
+  const { listRef, dragging, handle, rowClass } = useReorder<HTMLOListElement>(tracks.length, edit?.move ?? (() => {}));
   const discs = new Set(tracks.map((t) => t.disc_number ?? 1));
   let lastDisc: number | null = null;
   return (
-    <ol className="tracklist">
+    <ol className={`tracklist ${dragging ? "dragging" : ""}`} ref={edit ? listRef : undefined}>
       {tracks.map((t, i) => {
         const disc = t.disc_number ?? 1;
         const header = !numbered && discs.size > 1 && disc !== lastDisc ? <li className="disc-head"><Icon name="disc" size={16} /> Disc {disc}</li> : null;
@@ -209,7 +238,12 @@ export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = f
         return (
           <Fragment key={`${t.id}-${i}`}>
           {header}
-          <li>
+          <li className={`track-row ${edit ? rowClass(i) : ""}`}>
+            {edit && (
+              <button type="button" className="reorder-handle track-handle" aria-label={`Move ${t.title}`} {...handle(i)}>
+                <Icon name="grip" size={16} />
+              </button>
+            )}
             <button className={`track ${isCurrent ? "on" : ""} ${t.available ? "" : "gone"}`} disabled={!t.available}
               title={t.available ? undefined : "File not found (moved, deleted, or drive offline)"}
               onClick={() => (isCurrent ? music.toggle() : music.playTracks(tracks, i))}>
@@ -228,6 +262,12 @@ export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = f
               )}
               <span className="track-time">{fmtClock(t.duration)}</span>
             </button>
+            {!edit && <AddToPlaylist small items={[t.id]} title={t.title} />}
+            {t.available && <DownloadButton small id={t.id} title={t.title} audio={[t.playback.audio_codec]} />}
+            {edit && (
+              <button type="button" className="icon-btn subtle" onClick={() => edit.remove(i)} title="Take out of this playlist"
+                aria-label={`Take ${t.title} out of this playlist`}><Icon name="close" size={16} /></button>
+            )}
           </li>
           </Fragment>
         );
@@ -289,16 +329,18 @@ function Mosaic({ covers, name }: { covers: string[]; name: string }) {
   return <div className="mosaic">{covers.map((c) => <img key={c} src={c} alt="" loading="lazy" />)}</div>;
 }
 
-function PlaylistCard({ p }: { p: PlaylistSummary }) {
+/** A playlist's card: an imported one or one of yours (`user`). */
+function PlaylistCard({ p }: { p: PlaylistSummary | UserPlaylistSummary }) {
   const music = useMusic();
   const { call, to } = useScope();
+  const own = "user" in p;
   const play = async (e: React.MouseEvent) => {
     e.preventDefault();
-    const pl = await call.get<Playlist>(`/api/playlists/${p.id}`);
+    const pl = await call.get<Playlist>(own ? `/api/user-playlists/${p.id}` : `/api/playlists/${p.id}`);
     music.playTracks(pl.tracks);
   };
   return (
-    <Link to={to(`/playlist/${p.id}`)} className="poster-card album-card">
+    <Link to={to(own ? `/my-playlist/${p.id}` : `/playlist/${p.id}`)} className="poster-card album-card">
       <div className="poster-frame square">
         <Mosaic covers={p.covers} name={p.name} />
         {p.track_count > 0 && (
@@ -341,6 +383,8 @@ export function PlaylistPage() {
             <div className="actions">
               <button className="btn primary" onClick={() => music.playTracks(p.tracks)}><Icon name="play" /> Play</button>
               <button className="btn ghost" onClick={() => music.playTracks(p.tracks, 0, true)}><Icon name="shuffle" /> Shuffle</button>
+              <MakeCopy p={p} />
+              <DownloadButton kind="playlist" id={p.id} title={p.name} what=" playlist" />
             </div>
           )}
         </div>
@@ -348,6 +392,92 @@ export function PlaylistPage() {
       <section className="music-section">
         {p.tracks.length ? <TrackList tracks={p.tracks} showAlbum numbered /> : <p className="muted">None of its entries are in this library.</p>}
       </section>
+    </div>
+  );
+}
+
+/** An imported playlist as one of yours, to change (its file can't be: media folders are read-only to BAMS). */
+function MakeCopy({ p }: { p: Playlist }) {
+  const { call, to } = useScope();
+  const nav = useNavigate();
+  const [err, setErr] = useState<string | null>(null);
+  const copy = () => call.post<UserPlaylistSummary>("/api/user-playlists", { name: p.name, copy_of: p.id })
+    .then((c) => nav(to(`/my-playlist/${c.id}`))).catch((e) => setErr(e.message));
+  return (
+    <>
+      <button className="btn ghost" onClick={copy} title="Make a playlist of your own from it, to change"><Icon name="plus" /> Make a copy</button>
+      {err && <p className="key-msg bad">{err}</p>}
+    </>
+  );
+}
+
+/** /my-playlist/:id: one of your playlists. Drag rows to reorder, take songs out, rename, delete. */
+export function UserPlaylistPage() {
+  const { id } = useParams();
+  const music = useMusic();
+  const nav = useNavigate();
+  const { call, to } = useScope();
+  const { data, error, reload } = useApi<UserPlaylist>(`/api/user-playlists/${id}`);
+  const [p, setP] = useState<UserPlaylist | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => setP(data), [data]);
+  if (error) return <div className="page"><h1>Playlist not found</h1><p className="muted">{error}</p></div>;
+  if (!p) return <div className="page muted">Loading…</div>;
+
+  const save = (tracks: QueueTrack[]) => {
+    setP({ ...p, tracks, track_count: tracks.length });  // at once; the server's answer follows
+    call.put<UserPlaylist>(`/api/user-playlists/${p.id}/tracks`, { tracks: tracks.map((t) => t.id) })
+      .then(setP).catch((e) => { setErr(e.message); reload(); });
+  };
+  const move = (from: number, toIdx: number) => {
+    const next = [...p.tracks];
+    next.splice(toIdx, 0, ...next.splice(from, 1));
+    save(next);
+  };
+  const remove = (i: number) => save(p.tracks.filter((_, k) => k !== i));
+  // deleted: back where it was opened from (a library's Playlists tab), or Home
+  const del = () => call.del(`/api/user-playlists/${p.id}`)
+    .then(() => (window.history.length > 1 ? nav(-1) : nav(to("/"), { replace: true }))).catch((e) => setErr(e.message));
+
+  return (
+    <div className="detail music-detail">
+      <div className="detail-body music-head">
+        <div className="music-art"><Mosaic covers={p.covers} name={p.name} /></div>
+        <div className="detail-info">
+          <div className="hero-kicker">Your playlist</div>
+          <h1>{p.name}</h1>
+          <div className="meta">
+            <span>{plural(p.track_count, "track")}</span>
+            {p.duration ? <span>{fmtLength(p.duration)}</span> : null}
+          </div>
+          {p.description && <p className="overview">{p.description}</p>}
+          <div className="actions">
+            {p.tracks.length > 0 && <>
+              <button className="btn primary" onClick={() => music.playTracks(p.tracks)}><Icon name="play" /> Play</button>
+              <button className="btn ghost" onClick={() => music.playTracks(p.tracks, 0, true)}><Icon name="shuffle" /> Shuffle</button>
+            </>}
+            <button className="btn ghost" onClick={() => setEditing(true)}><Icon name="edit" /> Edit</button>
+            {p.tracks.length > 0 && <DownloadButton kind="user_playlist" id={p.id} title={p.name} what=" playlist" />}
+            {deleting ? (
+              <span className="confirm">
+                Delete {p.name}? Its songs stay in your library.
+                <button className="btn ghost small danger" onClick={del}>Delete</button>
+                <button className="btn ghost small" onClick={() => setDeleting(false)}>Cancel</button>
+              </span>
+            ) : <button className="btn ghost" onClick={() => setDeleting(true)}><Icon name="close" /> Delete</button>}
+          </div>
+          {err && <p className="key-msg bad">{err}</p>}
+        </div>
+      </div>
+      <section className="music-section">
+        {p.tracks.length ? <TrackList tracks={p.tracks} showAlbum numbered edit={{ move, remove }} />
+          : <p className="muted">No songs yet. Press <Icon name="listPlus" size={14} /> on a song, or "Add to playlist" on an
+              album or an artist.</p>}
+      </section>
+      {editing && <EditPlaylistDialog playlist={p} onClose={() => setEditing(false)}
+        saved={() => { setEditing(false); reload(); }} />}
     </div>
   );
 }

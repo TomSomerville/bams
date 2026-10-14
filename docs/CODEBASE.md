@@ -17,7 +17,7 @@ bams/
 ├── README.md                  Project intro, how to run
 ├── LICENSE                    MIT
 ├── .gitignore / .gitattributes   (LF line endings everywhere; data/, .venv/, node_modules/, dist/ ignored)
-├── .claude/launch.json        Preview-pane servers: "web" (Vite :5173), "bams-test" (a scratch server on :8485), one scratch server per session that added one
+├── .claude/launch.json        Preview-pane servers: "web" (Vite :5173), "bams-test" (a scratch server on :8485), one scratch server per session that added one ("bams-android-test" :8506 on the Linux PC)
 ├── .claude/skills/            Project skills for Claude sessions: bams-server (SSH to the owner's Ubuntu server: log, read-only DB,
 │                              FFmpeg repro, linux-tests.sh in Docker), tv-connection (sdb to the Samsung TV on/off/check)
 │
@@ -46,7 +46,7 @@ bams/
 │   │   │                      optional account (status, save_key, sign_in token cache), lookup/search (TMDB/IMDb id +
 │   │   │                      moviehash, else name), download → data dir, tracks() ("d<n>"), remove()
 │   │   ├── config.py          Data-dir resolution, Paths, ports, VIDEO_EXTS, AUDIO_EXTS, art file names, skip-folder lists
-│   │   ├── db.py              SQLite schema (v1 + migration steps to v12), connect(), migrate(), Tx, settings, JSON helpers
+│   │   ├── db.py              SQLite schema (v1 + migration steps to v15), connect(), migrate(), Tx, settings, JSON helpers
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
@@ -66,16 +66,18 @@ bams/
 │   │   │                      rollup(), fill_artwork() (folder art wins, picked up when added later; poster_src)
 │   │   ├── cue.py             CUE sheets: parse() → CueSheet/CueFile/CueTrack (start/end s), file_for(), splits()
 │   │   ├── playlists.py       Imported .m3u/.m3u8/.pls: parse(), import_files() (per root, follows the files), resolve() (entries → tracks)
+│   │   ├── user_playlists.py  Playlists made in BAMS (private per account): track_ids() (an artist/album/track → tracks in play order), create/update/add (each track once)/set_tracks/delete
 │   │   ├── music_match.py     Music identification: match_album/match_artist/match_music_library (MusicBrainz & co.),
 │   │   │                      merge_same_release/merge_albums, refresh after REFRESH_AFTER
 │   │   ├── musicbrainz.py     HTTP clients: MusicBrainz (1 req/s, shared), Cover Art Archive, Wikidata/Wikipedia/Commons
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 330 tests, see §7
+│   └── tests/                 pytest: 343 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
+│   ├── phone/index.html · vite.app.config.ts   The Android app's own pages: `npm run build:app` → dist-app (git-ignored), bundled into the APK
 │   ├── public/                favicon.png, brand/ (logo cut-outs used by the sidebar)
 │   └── src/
 │       ├── main.tsx           Mount: BrowserRouter > AuthProvider > SettingsProvider > MusicProvider > App; font import
@@ -92,9 +94,12 @@ bams/
 │       ├── subtitleLangs.ts   OpenSubtitles' language list, names, the default pick; SHARED with the TV app (no React/storage)
 │       ├── homeRows.ts        Home's rows: defaultRows(libs, genres, list) (default order, labels; `watchlist` after `continue`; one `genre:<name>` row per genre) + homeRows(saved, libs, genres, list) (user order merged with what exists; an old `genres` entry expands in place); `listName` / `WATCHLIST_NAME` ("My Watch List")
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
+│       ├── quality.ts         The quality line under a playing song ("FLAC · 24-bit / 96 kHz", "MP3 · 320 kbps", "ALAC … → AAC 256 kbps"): fileQuality(), qualityLine(playback, converted); SHARED with the TV app and the phone pages (no React)
+│       ├── android.ts         The Android app's bridge (`window.bamsAndroid`, WebMessageListener): inApp, app(type, args), appApi (info, download, status, remove, location, Wi-Fi only, open Downloads/Servers), DOWNLOADS_CHANGED, unplayableAudio(); SHARED with the phone pages (no React)
+│       ├── phone/             The Android app's own pages (offline, bundled in the APK; HashRouter): lib.ts (catalog + manifests → one library per server, pictures as /dl/<sid>/images/…), App.tsx (shell, online/offline banner, music bar from the app's player), pages.tsx (Downloads, Movies, TV Shows, Music, title/album/artist/playlist pages, Servers, start screen)
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
-│       │   ├── Sidebar.tsx    Logo, Home, the watch list (`/watchlist`, the user's name for it), this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Settings
+│       │   ├── Sidebar.tsx    Logo, Home, the watch list (`/watchlist`, the user's name for it), this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Downloads (Android app only), Settings
 │       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
 │       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out) + admins' "Who can sign in" (users CRUD)
@@ -111,7 +116,10 @@ bams/
 │       │   ├── Cards.tsx      PosterCard (+ WatchMarks, hover bookmark), ListToggle (on/off the watch list: button / round icon / small icon), ListedCard + listedPage (a watch list entry), ContinueCard (picture → play, name → show, episode line →
 │       │   │                  its season; long press / right-click → ContinueMenu "Remove from Continue Watching",
 │       │   │                  useLongPress), AlbumCard, ArtistCard, ItemCard, PlayBadge
-│       │   ├── NowPlaying.tsx Bottom bar: track, prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
+│       │   ├── NowPlaying.tsx Bottom bar: track (+ quality line), prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
+│       │   ├── Playlists.tsx  Your own playlists: AddToPlaylist (button / small icon) → AddToPlaylistDialog (pick one or make one), NewPlaylistDialog, EditPlaylistDialog, PlaylistForm
+│       │   ├── Download.tsx   Android app only: DownloadButton (item / playlist / user_playlist; state from the app, audio warning, remove), useAppInfo
+│       │   ├── PhoneSettings.tsx  Android app only: Settings → This phone (storage volume, Wi-Fi only, space used, Downloads, Servers)
 │       │   ├── MusicFixMatch.tsx  Modal: MusicBrainz search → POST /api/items/{id}/music-match
 │       │   ├── MusicSettings.tsx  Music identification on/off + converted-music format (AAC/FLAC) card
 │       │   ├── TranscodeSettings.tsx  Playback card: encoder in use, CPU/GPU choice (EncoderChoice), conversion limit
@@ -127,8 +135,8 @@ bams/
 │           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id[?season=<season id>[&episode=<id>]]: show (season tabs → episodes, watched + watch list toggles; `episode` picked out) or movie (Resume, TechInfo); watch list buttons; music → MusicDetail
 │           ├── Watchlist.tsx  /watchlist: every server's watch list as one grid (useEverywhere + listedOrder), sort, kind chips, rename (`watchlist_name` pref), empty state
-│           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs), artist page, album page + TrackList, Fix match,
-│           │                  PlaylistPage (/playlist/:id), PlaylistCard + cover Mosaic
+│           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs: your playlists + New playlist, then imported), artist page, album page + TrackList (add-to-playlist / download icons; `edit`: drag + take out), Fix match,
+│           │                  PlaylistPage (/playlist/:id, Make a copy), UserPlaylistPage (/my-playlist/:id), PlaylistCard + cover Mosaic
 │           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
 │           │                  (at the end and CREDITS = 30 s before it; next-episode button), skip +30 / −10 s (SKIP_*),
 │           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard; sleep mode (SLEEP_MORE,
@@ -156,8 +164,9 @@ bams/
 │       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, BROWSER caps) → direct / remux / convert; convertHeight, pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── ListMenu.tsx       Hold-OK menu: on/off the watch list (`setListed` on the item's server), `useListName`
+│       ├── PlaylistMenus.tsx  Your own playlists: HoldMenu, AddToPlaylistMenu, NewPlaylistMenu, EditPlaylistMenu, PlaylistTrackMenu (move up/down, take out)
 │       ├── Rail.tsx · Cards.tsx (Poster: `look` for watch list entries, `onHold`) · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Music (library tabs, artist/album/playlist, NowPlaying bar), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Music (library tabs incl. your playlists, artist/album/playlist + your playlist (`my-playlist`), hold OK on a song: add to a playlist; NowPlaying bar + quality line), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles)
 ├── firetv/                   ── Fire TV app (Fire OS 6+): Android shell around the tv/ page (firetv/README.md) ──
 │   ├── build.mjs              `cd tv && npm run firetv [-- --install --device <ip> --run --release]`: Gradle build, adb install, release APK → dist/BAMS-FireTV-<v>.apk
 │   ├── app/build.gradle.kts   copies tv/dist into assets/www each build; version from tv/package.json; release signing from keystore.properties (git-ignored)
@@ -167,6 +176,18 @@ bams/
 │   │   ├── Video.kt           ExoPlayer (one per load) under the page; events back to the page (firetv.ts FirePlayerEvent)
 │   │   └── Caps.kt            what this device decodes (Android codec list + audio output) in BAMS probe names, with sizes
 │   └── art.py                 launcher icons + TV banner from the logo (Pillow)
+├── android/                  ── Android phone app (Android 8+): the server's web UI + downloads, offline pages (android/README.md) ──
+│   ├── app/build.gradle.kts   copies web/dist-app into assets/app each build; version `bamsVersion` (gradle.properties); release signing from keystore.properties (git-ignored)
+│   └── app/src/main/java/media/bams/phone/
+│       ├── MainActivity.kt    WebView: the server's page or the app's own (WebViewAssetLoader /app/, /dl/ pictures); finds a server at start, falls back to Downloads when its page fails; full-screen video, Back, insets
+│       ├── Bridge.kt          window.bamsAndroid (origin rules: the app's servers + its own pages): download/status/remove/info/settings; own pages only: library, servers, playVideo, music
+│       ├── Servers.kt         servers by `/api/hello` id, each with every address (home/away), reach() tries them; cookie sign-in shared between addresses
+│       ├── Store.kt           downloads catalog: roots (what was asked for + manifest) and files (each once, ref-counted), status, library(); location / Wi-Fi only settings
+│       ├── DownloadService.kt foreground service: one file at a time, HTTP Range resume, Wi-Fi only wait, pictures + subtitles, notification
+│       ├── PlayerActivity.kt  offline video (ExoPlayer + PlayerView, downloaded WebVTT subtitles, resume, next episode, picture-in-picture)
+│       ├── MusicService.kt · Music.kt  offline music (Media3 session: screen off, lock screen) and the page's controller for it
+│       ├── Progress.kt        where you stopped offline, sent to the server when reached
+│       └── Volumes.kt · Caps.kt · Http.kt · App.kt   storage volumes (phone / SD card), decoders, HTTP with cookie/bearer, singletons + events
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
 ├── deploy/                    Installers (see deploy/README.md; user guide docs/INSTALL.md)
 │   ├── build.py               `build.py windows|deb|all [--skip-web] [--version X]` → dist/BAMS-Setup-<v>.exe, dist/bams_<v>_all.deb
@@ -225,11 +246,11 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v13)
+## 3. Data model (`db.py`, schema v15)
 
 | Table | Holds | Key columns |
 |---|---|---|
-| `settings` | key/value | `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `music_output` ("aac" default \| "flac": what unplayable music is converted to), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic), `opensubtitles_key` (+ `opensubtitles_verified_at`), `opensubtitles_user`/`opensubtitles_password` (optional account) + `opensubtitles_account` (JSON: level, downloads a day) |
+| `settings` | key/value | `server_id` (`/api/hello` `id`, made once), `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `music_output` ("aac" default \| "flac": what unplayable music is converted to), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic), `opensubtitles_key` (+ `opensubtitles_verified_at`), `opensubtitles_user`/`opensubtitles_password` (optional account) + `opensubtitles_account` (JSON: level, downloads a day) |
 | `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status`, `sort_order` (v7: the admin's order; `library.ORDER`) |
 | `library_roots` | its folders | `library_id`, `path` (absolute, as given) |
 | `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit, `matched_by` tag\|search\|manual…), `poster_src` (v8, JSON: where the poster came from: `{from: folder, file, size, mtime_ns}` \| `embedded` \| `caa` \| `commons`, or `{from: null, checked}`); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
@@ -239,7 +260,9 @@ web UI, `/docs`.
 | `playlists` | imported playlists (v8) | `library_id`, `root_id` + `rel_path` of the playlist file, `name`, `size`/`mtime_ns` (re-read when they change), `entries` JSON as written ({path, title, duration}), `missing` |
 | `playlist_items` | playlist → tracks (v8) | (`playlist_id`, `position`) → `item_id`; rebuilt by `playlists.resolve` after every scan |
 | `scans` | scan history | `trigger`, `status` ok\|partial\|error, `stats` JSON |
-| `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`), v9: `must_change_password` (0/1), `totp_secret` (base32, NULL = two-step off), `totp_last` (time step of the last code used) |
+| `users` | accounts | `name` (unique, NOCASE), `password` (scrypt string from `auth.hash_password`), `is_admin`, `last_login_at`, `prefs` (v5: JSON display preferences, `auth.PREFS`), v9: `must_change_password` (0/1), `totp_secret` (base32, NULL = two-step off), `totp_last` (time step of the last code used), v14: `can_download` (0/1: downloads to the Android app; admins always, `auth.may_download`) |
+| `user_playlists` | playlists made in BAMS (v15) | `user_id` (private to that account), `name`, `description`, `created_at`, `updated_at` |
+| `user_playlist_items` | their tracks (v15) | (`playlist_id`, `position`) → `item_id` (a track; cascades when the track goes), `added_at` |
 | `sessions` | signed-in browsers | `token` = SHA-256 of the cookie value, `user_id`, `last_seen_at` (sliding 30 days, refreshed hourly) |
 | `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `cache/subtitles/opensubtitles/<ext_id>.srt`, before 0.15.0 `subtitles/opensubtitles/…`; shared by files that picked the same one), `added_by`, `added_at`, `sidecar` (v13: the name "Download locally" saved it under next to the video, NULL = none) |
 | `continue_hidden` | titles a user took out of Continue Watching (v11) | (`user_id`, `item_id` = a movie or a show), `hidden_at`: out while the title's latest activity is not newer |
@@ -569,11 +592,11 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 |---|---|---|
 | `POST /api/auth/2fa/setup` → `{secret, uri}` · `POST /api/auth/2fa {secret, code, password}` · `POST /api/auth/2fa/off {password}` · `DELETE /api/users/{id}/2fa` (admin) | two-step sign-in on/off | AccountSettings |
 | `GET /api/auth/state` · `POST /api/auth/login {name,password,code?}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
-| `GET /api/hello` (public) → `{app, version, name}` · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx, Sidebar (this server's name) |
+| `GET /api/hello` (public) → `{app, version, name, id}` (`id`: the same at every address; the Android app keys downloads by it) · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx, Sidebar (this server's name) |
 | `PUT /api/settings/server-name {name}` (admin; `""` = default) → `{name, default, custom}` (also in `GET /api/settings` → `server_name`) | what the server is called in apps' lists; default "<oldest admin>'s BAM Server" (`app.default_server_name`) | ServerNameSettings |
 | `POST /api/devices/link {name}` (public) → `{code, secret, expires_in}` · `POST /api/devices/link/poll {secret}` (public) → `{status}` or `{status: linked, token, user}` · `POST /api/devices/approve {code}` · `GET /api/devices` · `DELETE /api/devices/{id}` | TV link codes; your linked TVs, sign one out | tv, TvSettings, LinkTv |
 | `GET /api/media-ticket` → `{prefix, expires_in}` | `/api/t/<ticket>`: media URLs for players and `<img>` that can't send headers | tv |
-| `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin; `must_change_password` on add/patch) | accounts | AccountSettings |
+| `GET/POST /api/users` · `PATCH/DELETE /api/users/{id}` (admin; `must_change_password`, `can_download` on add/patch) | accounts | AccountSettings |
 | `GET /api/security` (admin) → `{lockout_threshold, ip{mode,allow,block}, your_ip, netflow{folder,default_folder,custom,max_bytes,bytes,files,oldest,dropped}}` | security settings + traffic-log usage | SecuritySettings |
 | `PUT /api/security/lockout {threshold 1–50}` · `PUT /api/security/ip {mode, allow[{cidr,note}], block[…]}` (400 if it would block you) · `PUT /api/security/netflow {folder?, max_bytes?}` (`""` = default folder) (admin) | change them | SecuritySettings |
 | `GET /api/security/accounts` · `PUT /api/security/accounts/{id}/lock {locked}` (admin) | lock state per account / lock (signs out) or unlock | SecuritySettings |
@@ -595,6 +618,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/libraries/{id}/random`, `GET /api/items/{id}/random` | Play Random: `{type:"music", tracks}` (queue like /tracks) or `{type:"video", items}` (movies/episodes with a file, random, no Specials; `limit` ≤ 1000, default 100); items: show, season, artist, album | random.tsx |
 | `GET /api/items/{id}/tracks` | play queue of an artist/album/track, each with `playback`, `start`/`end` (CUE) | Music pages, NowPlaying |
 | `GET /api/libraries/{id}/playlists` · `GET /api/playlists/{id}` | imported playlists (`track_count`, `duration`, `missing`, `covers`) · one with its `tracks` (queue) | MusicLibrary, PlaylistPage |
+| `GET/POST /api/user-playlists` (`{name, description?, items?, copy_of?}`) · `GET/PATCH/DELETE /api/user-playlists/{id}` · `POST …/items {items}` → `{added, skipped, …}` · `PUT …/tracks {tracks}` (new order / taken out) | your own playlists (404 for anyone else's); items = songs, albums, artists | MusicLibrary, UserPlaylistPage, Playlists.tsx, TV PlaylistMenus |
+| `GET /api/items/{id}/download` · `GET /api/playlists/{id}/download` · `GET /api/user-playlists/{id}/download` · `GET /api/files/{id}/download` (Range, file name) | Android app downloads (403 unless `can_download`): manifest `{root, items, tracks, files[{id,name,size,url,items,audio,video,subtitles}], images, bytes, playlist?}`, then the original files | Android app (Bridge/DownloadService) |
 | `GET /api/musicbrainz/search?kind=album\|artist&q=&artist=` · `POST /api/items/{id}/music-match {mbid}` | music Fix match | MusicFixMatch |
 | `PUT /api/settings/music-lookup {enabled}` (state in `GET /api/settings` → `music_lookup`) | identification on/off | MusicSettings |
 | `PUT /api/settings/music-output {output: aac\|flac}` (admin; state in `GET /api/settings` → `music_output`) | what unplayable music is converted to | MusicSettings |
@@ -610,7 +635,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `PUT /api/me/prefs {home_hero?, home_rows?: [{id, show}], watchlist_name?}` | the signed-in user's display prefs (returned in `/api/auth/state` → `user.prefs`); only sent fields change | auth.tsx, HomeSettings |
 | `PUT /api/settings/watch {watched_percent 50–100, resume_after 0–600}` (admin; state in `GET /api/settings` → `watch`) | when titles count as watched / started | WatchSettings |
 | `GET /api/tmdb/search?kind=&q=` · `POST /api/items/{id}/match {tmdb_id}` | Fix match | FixMatch |
-| `GET /api/files/{id}/stream` | original bytes (Range), for playing; no file name sent (BAMS has no downloads since 0.9.2) | Player |
+| `GET /api/files/{id}/stream` | original bytes (Range), for playing; no file name sent (downloads are only for the Android app, `/download`) | Player |
 | `GET /api/files/{id}/remux?t=&audio=&ch=&passthrough=` · `/seek?t=` | audio-converting live stream (fallback; `passthrough`: AC3/EAC3 copied) / its real start | Player |
 | `GET /api/files/{id}/transcode?t=&audio=&h=&ch=&sub=` | video → H.264 + audio → AAC (fMP4), starting exactly at `t` (fallback; 503 at the limit). `sub` = picture track id or embedded stream number | Player |
 | `POST /api/files/{id}/hls {remux?, auto?, height?, audio?, channels?, burn?, passthrough?, start?}` → `{id, playlist, variants, copy, channels, passthrough}` | open an HLS session (503 at the limit, 409 if not probed / no keyframes, 422 unknown `burn` track) | Player |
@@ -675,6 +700,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run + runs start in the variant folder, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
 | `test_music_extras.py` | cue parsing, CUE image split / sheet edited or removed, queue `start`/`end`, real FLAC with an embedded sheet; playlist parsing, import, follow-the-file; a cover/artist image added later vs CAA/Commons; album merge + rescan + best file, unsure matches not merged; refresh; FLAC command + API |
+| `test_downloads.py` | Android downloads: the per-account switch (admins always; turned on/off), the original file with its name + Range resume, manifests for a movie, show/season/episode (with ancestors, sidecar subtitles as WebVTT), artist/album/track and an imported playlist |
+| `test_user_playlists.py` | your own playlists: make/fill (album, artist: each track once)/reorder/take out/rename/delete, private (404 for others), copy of an imported playlist, download manifest; quality fields on tracks, a real 24-bit FLAC |
 | `test_music_match.py` | identification against fake MusicBrainz/CAA/Wikimedia (`httpx.MockTransport`): matching, tag ids, unmatched/ambiguous, rescans keep data, local art wins, service down, settings toggle + Fix match API |
 
 ## 8. Where to change X
@@ -732,6 +759,11 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | When albums merge / how often music refreshes | `music_match._pinned`, `MERGE_SCORE`; `REFRESH_AFTER`, `REFRESH_PER_SCAN` |
 | CUE sheet reading / which sheet applies | `cue.parse`, `cue.file_for`; `scanner.scan_library` → `sheet_for` |
 | Playlist formats / entry matching | `playlists.parse_*`, `playlists.resolve` (`find`) |
+| Your own playlists (rules, what can go in) | `user_playlists.py` (`track_ids`, `add`, `set_tracks`), routes `/api/user-playlists*` in `app.py`; web `components/Playlists.tsx` + `UserPlaylistPage`; TV `PlaylistMenus.tsx` + `UserPlaylistScreen` |
+| The quality line under a playing song | `web/src/quality.ts` (shared: web NowPlaying, TV NowPlaying, phone App.tsx); fields from `stream.plan_audio` (`sample_rate`, `bit_depth`, `bitrate`, `channels`, `convert_to`) |
+| Android app: what's downloaded / how | server `_manifest`, `item_download`, `download_file` in `app.py`; app `Store.kt`, `DownloadService.kt`, `Bridge.kt`; web `components/Download.tsx`, `android.ts` |
+| Android app: offline pages, offline playback | `web/src/phone/` (rebuild `npm run build:app`, then the APK); `PlayerActivity.kt`, `MusicService.kt`, `Music.kt` |
+| Build / install the Android phone app | `android/README.md` (`source /mnt/Data/Sandboxes/Android/env.sh`, `./gradlew assembleDebug`) |
 | Gapless timing / music player behaviour | `web/src/music.tsx` (`PRELOAD_BEFORE`, `ARM_BEFORE`, `advance`, `tick`) |
 | Converted-music formats | `stream.MUSIC_OUTPUTS`, `stream.audio_cmd`; setting in `app.put_music_output` |
 | Add a music metadata source | `musicbrainz.py` (client) + `music_match.py` (apply) + credit in `pages/Music.tsx` `About` |

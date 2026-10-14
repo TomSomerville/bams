@@ -3,7 +3,7 @@
 // (/api/t/<ticket>/...) that the server hands out (GET /api/media-ticket). Server side: server/bams/devices.py.
 
 export type { ItemSummary, ItemDetail, ContinueItem, WatchlistItem, FileInfo, AudioTrack, SubtitleTrack, Probe, User, QueueTrack,
-  Playlist, PlaylistSummary, ServerLibrary, SubtitleSearch, SubtitleResult }
+  Playlist, PlaylistSummary, ServerLibrary, SubtitleSearch, SubtitleResult, UserPlaylist, UserPlaylistSummary }
   from "../../web/src/api";
 import type { User } from "../../web/src/api";
 import type { Source } from "../../web/src/everywhere";
@@ -123,6 +123,7 @@ export const api = {
   get: <T>(p: string) => call<T>("GET", p),
   post: <T>(p: string, b?: unknown) => call<T>("POST", p, b ?? {}),
   put: <T>(p: string, b: unknown, keepalive = false) => call<T>("PUT", p, b, { keepalive }),
+  patch: <T>(p: string, b: unknown) => call<T>("PATCH", p, b),
   del: <T>(p: string) => call<T>("DELETE", p),
   /** public endpoints (linking): no token sent */
   publicPost: <T>(p: string, b: unknown) => call<T>("POST", p, b, { auth: false }),
@@ -255,6 +256,7 @@ export type Api = {
   get: <T>(p: string) => Promise<T>;
   post: <T>(p: string, b?: unknown) => Promise<T>;
   put: <T>(p: string, b: unknown, keepalive?: boolean) => Promise<T>;
+  patch: <T>(p: string, b: unknown) => Promise<T>;
   del: <T>(p: string) => Promise<T>;
   text: (p: string) => Promise<string>;
 };
@@ -276,6 +278,7 @@ export function apiFor(rid: number | undefined): Api {
       get: (p) => go("GET", p),
       post: (p, b) => go("POST", p, b ?? {}),
       put: (p, b, keepalive) => go("PUT", p, b, keepalive),
+      patch: (p, b) => go("PATCH", p, b),
       del: (p) => go("DELETE", p),
       text: async (p) => {
         const e = findExtra(rid);

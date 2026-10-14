@@ -763,10 +763,15 @@ def plan_audio(probe_info: dict | None, rel_path: str, output: str = "aac") -> d
         source = "filename"
         ok = os.path.splitext(rel_path)[1].casefold() in _BROWSER_AUDIO_EXTS
     mode = "file" if ok or not ffmpeg_path() else "transcode"
+    first = audio[0] if audio else {}
     return {"method": "direct_play" if ok else "transcode", "mode": mode, "source": source, "container": container,
             "audio_codec": codec, "video_codec": None, "audio_ok": ok,
             "output": output if mode == "transcode" else None,
-            "duration": (probe_info or {}).get("duration")}
+            "convert_to": output,  # what a conversion would make (a player falling back to it: the TV)
+            "duration": (probe_info or {}).get("duration"),
+            # the file's quality, for the players' quality line (web/src/quality.ts)
+            "sample_rate": first.get("sample_rate"), "bit_depth": first.get("bit_depth"),
+            "channels": first.get("channels"), "bitrate": (probe_info or {}).get("bitrate")}
 
 
 def audio_cmd(path: Path, start: float, audio: dict | None = None, output: str = "aac") -> list[str]:

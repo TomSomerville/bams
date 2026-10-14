@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,7 +26,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
-from . import devices, netflow, opensubtitles, security, updates
+from . import devices, netflow, opensubtitles, security, updates, user_playlists
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
@@ -342,6 +343,7 @@ class UserIn(BaseModel):
     password: str = Field(max_length=1024)
     is_admin: bool = False
     must_change_password: bool = False  # they set their own password at their first sign-in
+    can_download: bool = False  # may download to the Android app (admins always may)
 
 
 class UserPatch(BaseModel):
@@ -349,6 +351,7 @@ class UserPatch(BaseModel):
     password: str | None = Field(None, max_length=1024)
     is_admin: bool | None = None
     must_change_password: bool | None = None  # on: signs them out; their next sign-in asks for a new password
+    can_download: bool | None = None
 
 
 class TwoFactorIn(BaseModel):
@@ -383,6 +386,26 @@ class NetflowIn(BaseModel):
 
 class LockIn(BaseModel):
     locked: bool
+
+
+class UserPlaylistIn(BaseModel):
+    name: str = Field(max_length=200)
+    description: str | None = Field(None, max_length=2000)
+    items: list[int] = Field(default_factory=list, max_length=10000)  # songs, albums, artists to start with
+    copy_of: int | None = None  # an imported playlist ("Make a copy")
+
+
+class UserPlaylistPatch(BaseModel):
+    name: str | None = Field(None, max_length=200)
+    description: str | None = Field(None, max_length=2000)
+
+
+class PlaylistItemsIn(BaseModel):
+    items: list[int] = Field(max_length=10000)
+
+
+class PlaylistTracksIn(BaseModel):
+    tracks: list[int] = Field(max_length=100000)
 
 
 class ProgressIn(BaseModel):
@@ -559,7 +582,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         finally:
             con.close()
         user = {"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"]),
-                "must_change": bool(u["must_change_password"])} if u else None
+                "must_change": bool(u["must_change_password"]), "can_download": auth.may_download(u)} if u else None
         with seen_lock:
             if len(seen) > 1000:
                 seen.clear()
@@ -637,8 +660,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         (`setup`), which this browser may do only from the server itself (`setup_here`)."""
         u = lookup(request_token(request))
         row = auth.get_user(con, u["id"]) if u else None
-        u = {k: v for k, v in auth.public(row).items()
-             if k in ("id", "name", "is_admin", "prefs", "must_change_password", "two_factor")} if row else None
+        keep = ("id", "name", "is_admin", "prefs", "must_change_password", "two_factor", "can_download")
+        u = {k: v for k, v in auth.public(row).items() if k in keep} if row else None
         empty = auth.user_count(con) == 0
         return {"user": u, "setup": empty, "setup_here": empty and auth.is_loopback(_client(request))}
 
@@ -759,10 +782,16 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     # -- apps on other devices (devices.py): finding the server, linking with a code, media tickets
     @app.get("/api/hello")
     def hello():
-        """Public: tells an app looking around the network that this is a BAMS server, and which."""
+        """Public: tells an app looking around the network that this is a BAMS server, and which. `id` stays the
+        same whatever address it's reached at (the Android app keeps a server's downloads under it)."""
         con = connect(paths.db)
         try:
-            return {"app": "bams", "version": VERSION, "name": server_name(con)["name"]}
+            uid = get_setting(con, "server_id")
+            if not uid:
+                with Tx(con):
+                    uid = get_setting(con, "server_id") or uuid.uuid4().hex
+                    set_setting(con, "server_id", uid)
+            return {"app": "bams", "version": VERSION, "name": server_name(con)["name"], "id": uid}
         finally:
             con.close()
 
@@ -896,7 +925,8 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     @app.post("/api/users", status_code=201, dependencies=ADMIN)
     def add_user(body: UserIn, con=Depends(db)):
         try:
-            uid = auth.create_user(con, body.name, body.password, body.is_admin, body.must_change_password)
+            uid = auth.create_user(con, body.name, body.password, body.is_admin, body.must_change_password,
+                                   body.can_download)
         except auth.AuthError as e:
             raise HTTPException(400, str(e)) from None
         sec.forget_name(body.name)
@@ -1498,16 +1528,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     @app.get("/api/items/{item_id}/tracks")
     def item_tracks(item_id: int, con=Depends(db)):
         """Every playable track of an artist, album or track, in play order: what a music queue needs."""
-        r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
-        if not r or r["kind"] not in MUSIC_KINDS:
-            raise HTTPException(404, "no such artist/album/track")
-        where = {"track": "t.id=?", "album": "al.id=?", "artist": "ar.id=?"}[r["kind"]]
-        ids = [x[0] for x in con.execute(f"""
-            SELECT t.id FROM items t JOIN items al ON al.id=t.parent_id JOIN items ar ON ar.id=al.parent_id
-            WHERE t.kind='track' AND {where}
-            ORDER BY al.year IS NULL, al.year, al.title COLLATE NOCASE, COALESCE(t.disc_number, 1),
-                     t.track_number IS NULL, t.track_number, t.title COLLATE NOCASE""", (item_id,))]
-        return _queue(con, ids)
+        try:
+            return _queue(con, user_playlists.track_ids(con, item_id))
+        except user_playlists.PlaylistError:
+            raise HTTPException(404, "no such artist/album/track") from None
 
     def _queue(con, ids: list[int]) -> list[dict]:
         """Tracks as a play queue, in the order of `ids` (a playlist may repeat one). A track with several files
@@ -1621,6 +1645,81 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             "SELECT item_id FROM playlist_items WHERE playlist_id=? ORDER BY position", (playlist_id,))]
         return {**_playlist_summary(con, r), "library_name": library.get(con, r["library_id"])["name"],
                 "tracks": _queue(con, ids)}
+
+    # -- your own playlists (user_playlists.py): private to their account, editable
+    def _user_playlist_summary(con, r: sqlite3.Row) -> dict:
+        covers = [_img(c[0]) for c in con.execute(
+            """SELECT al.poster FROM user_playlist_items pi JOIN items t ON t.id=pi.item_id JOIN items al ON al.id=t.parent_id
+               WHERE pi.playlist_id=? AND al.poster IS NOT NULL GROUP BY al.id ORDER BY MIN(pi.position) LIMIT 4""",
+            (r["id"],))]
+        n, length = con.execute("""SELECT COUNT(*), SUM(t.duration) FROM user_playlist_items pi
+                                   JOIN items t ON t.id=pi.item_id WHERE pi.playlist_id=?""", (r["id"],)).fetchone()
+        return {"id": r["id"], "user": True, "name": r["name"], "description": r["description"],
+                "track_count": n, "duration": length, "covers": covers,
+                "created_at": r["created_at"], "updated_at": r["updated_at"]}
+
+    def _own_playlist(con, me: dict, playlist_id: int) -> sqlite3.Row:
+        r = user_playlists.get(con, me["id"], playlist_id)
+        if not r:
+            raise HTTPException(404, "no such playlist")
+        return r
+
+    def _playlist_error(f):
+        try:
+            return f()
+        except user_playlists.PlaylistError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.get("/api/user-playlists")
+    def my_playlists(con=Depends(db), me=Depends(current_user)):
+        """Your own playlists, by name (nobody else sees them)."""
+        return [_user_playlist_summary(con, r) for r in user_playlists.all_of(con, me["id"])]
+
+    @app.post("/api/user-playlists", status_code=201)
+    def new_playlist(body: UserPlaylistIn, con=Depends(db), me=Depends(current_user)):
+        """Make a playlist: empty, with songs/albums/artists in it, or as a copy of an imported playlist."""
+        tracks: list[int] = []
+        if body.copy_of is not None:
+            if not con.execute("SELECT 1 FROM playlists WHERE id=?", (body.copy_of,)).fetchone():
+                raise HTTPException(404, "no such playlist")
+            tracks = [x[0] for x in con.execute(
+                "SELECT item_id FROM playlist_items WHERE playlist_id=? ORDER BY position", (body.copy_of,))]
+        for i in body.items:
+            tracks += _playlist_error(lambda: user_playlists.track_ids(con, i))
+        pid = _playlist_error(lambda: user_playlists.create(con, me["id"], body.name, body.description, tracks))
+        return _user_playlist_summary(con, user_playlists.get(con, me["id"], pid))
+
+    @app.get("/api/user-playlists/{playlist_id}")
+    def my_playlist(playlist_id: int, con=Depends(db), me=Depends(current_user)):
+        """One of your playlists with its tracks, in its order, ready to queue."""
+        r = _own_playlist(con, me, playlist_id)
+        return {**_user_playlist_summary(con, r), "tracks": _queue(con, user_playlists.items(con, playlist_id))}
+
+    @app.patch("/api/user-playlists/{playlist_id}")
+    def edit_playlist(playlist_id: int, body: UserPlaylistPatch, con=Depends(db), me=Depends(current_user)):
+        """Rename it or change its description."""
+        _own_playlist(con, me, playlist_id)
+        _playlist_error(lambda: user_playlists.update(con, playlist_id, body.name, body.description))
+        return _user_playlist_summary(con, _own_playlist(con, me, playlist_id))
+
+    @app.post("/api/user-playlists/{playlist_id}/items")
+    def add_to_playlist(playlist_id: int, body: PlaylistItemsIn, con=Depends(db), me=Depends(current_user)):
+        """Add songs, albums or artists at the end (each track once: ones already in it are skipped)."""
+        _own_playlist(con, me, playlist_id)
+        added, skipped = _playlist_error(lambda: user_playlists.add(con, playlist_id, body.items))
+        return {"added": added, "skipped": skipped, **_user_playlist_summary(con, _own_playlist(con, me, playlist_id))}
+
+    @app.put("/api/user-playlists/{playlist_id}/tracks")
+    def set_playlist_tracks(playlist_id: int, body: PlaylistTracksIn, con=Depends(db), me=Depends(current_user)):
+        """Its tracks in a new order, or with some taken out (the full list, as it should be)."""
+        _own_playlist(con, me, playlist_id)
+        user_playlists.set_tracks(con, playlist_id, body.tracks)
+        return my_playlist(playlist_id, con, me)
+
+    @app.delete("/api/user-playlists/{playlist_id}", status_code=204)
+    def delete_playlist(playlist_id: int, con=Depends(db), me=Depends(current_user)):
+        _own_playlist(con, me, playlist_id)
+        user_playlists.delete(con, playlist_id)
 
     def _unrecognized(con, lib_id: int | None) -> list[dict]:
         """Files the parser couldn't place (each with a hint about why), files placed by a best guess (auto fill,
@@ -1891,6 +1990,109 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         BAMS offers no downloads (owner's decision), so nothing suggests saving it."""
         p, name = _file_path(con, file_id)
         return FileResponse(p, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream")
+
+    # -- downloads to the Android app (owner 2026-10-13; the web and TV apps still offer none): an admin turns
+    # them on per account. The app asks for a manifest (what to fetch for a title), then fetches the original files.
+    def _may_download(me: dict) -> None:
+        if not me.get("can_download"):
+            raise HTTPException(403, "Downloads aren't turned on for your account. An admin can turn them on in "
+                                     "Settings → Accounts.")
+
+    @app.get("/api/files/{file_id}/download")
+    def download_file(file_id: int, con=Depends(db), me=Depends(current_user)):
+        """The original file, with its name, for the Android app's downloads (Range: a broken download resumes)."""
+        _may_download(me)
+        p, name = _file_path(con, file_id)
+        return FileResponse(p, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                            filename=name)
+
+    def _images_in(obj, out: set) -> None:
+        if isinstance(obj, dict):
+            for v in obj.values():
+                _images_in(v, out)
+        elif isinstance(obj, list):
+            for v in obj:
+                _images_in(v, out)
+        elif isinstance(obj, str) and obj.startswith("/api/images/"):
+            out.add(obj)
+
+    def _manifest(con, me, root: dict, details: list[dict], tracks: list[dict] | None = None) -> dict:
+        """What the Android app saves for a download: the items as the API shows them (so the app can show them
+        offline the same way), music's play queue, each file once (a CUE album's tracks share one), the text
+        subtitles as WebVTT and every picture they mention."""
+        files: dict[int, dict] = {}
+        for d in details:
+            for f in d.get("files") or []:
+                if f["available"] and (d["kind"] in watch.PLAYABLE or d["kind"] == "track"):
+                    e = files.setdefault(f["id"], {
+                        "id": f["id"], "name": Path(f["path"]).name, "size": f["size"],
+                        "url": f"/api/files/{f['id']}/download", "items": [],
+                        "audio": [a.get("codec") for a in (f["probe"] or {}).get("audio") or []],
+                        "video": ((f["probe"] or {}).get("video") or {}).get("codec"),
+                        "subtitles": [{"id": t["id"], "label": t["label"], "language": t["language"],
+                                       "forced": t["forced"], "url": t["url"]}
+                                      for t in f.get("subtitles") or [] if t.get("url")]})
+                    e["items"].append(d["id"])
+        for t in tracks or []:
+            if t["available"] and t["file_id"] not in files:
+                r = con.execute("SELECT rel_path, size, probe FROM files WHERE id=?", (t["file_id"],)).fetchone()
+                audio = [a.get("codec") for a in (jload(r["probe"]) or {}).get("audio") or []]
+                files[t["file_id"]] = {"id": t["file_id"], "name": Path(r["rel_path"]).name, "size": r["size"],
+                                       "url": f"/api/files/{t['file_id']}/download", "items": [],
+                                       "audio": audio, "video": None, "subtitles": []}
+            if t["file_id"] in files and t["id"] not in files[t["file_id"]]["items"]:
+                files[t["file_id"]]["items"].append(t["id"])
+        images: set[str] = set()
+        _images_in([details, tracks or []], images)
+        return {"root": root, "items": details, "tracks": tracks or [], "files": list(files.values()),
+                "images": sorted(images), "bytes": sum(f["size"] or 0 for f in files.values())}
+
+    @app.get("/api/items/{item_id}/download")
+    def item_download(item_id: int, con=Depends(db), me=Depends(current_user)):
+        """What to fetch to have a movie, episode, season, show, track, album or artist on the phone."""
+        _may_download(me)
+        r = con.execute("SELECT kind, title FROM items WHERE id=?", (item_id,)).fetchone()
+        if not r:
+            raise HTTPException(404, "no such item")
+        root = {"kind": r["kind"], "id": item_id, "title": r["title"]}
+        top = get_item(item_id, con, me)
+        # the show and season above an episode/season too, so the phone can list it under its show offline
+        details = [get_item(a["id"], con, me) for a in top["ancestors"]] + [top]
+        if r["kind"] in MUSIC_KINDS:
+            if r["kind"] == "artist":
+                details += [get_item(c["id"], con, me) for c in top["children"]]
+            return _manifest(con, me, root, details, item_tracks(item_id, con))
+        todo = [c["id"] for c in top["children"]]
+        while todo:  # show -> seasons -> episodes
+            d = get_item(todo.pop(0), con, me)
+            details.append(d)
+            if d["kind"] in ("season", "show"):
+                todo += [c["id"] for c in d["children"]]
+        return _manifest(con, me, root, details)
+
+    @app.get("/api/playlists/{playlist_id}/download")
+    def playlist_download(playlist_id: int, con=Depends(db), me=Depends(current_user)):
+        """What to fetch to have a playlist on the phone: its tracks (and their albums and artists, to show)."""
+        _may_download(me)
+        pl = get_playlist(playlist_id, con)
+        albums = list(dict.fromkeys(t["album_id"] for t in pl["tracks"]))
+        artists = list(dict.fromkeys(t["artist_id"] for t in pl["tracks"]))
+        details = [get_item(i, con, me) for i in artists + albums]
+        m = _manifest(con, me, {"kind": "playlist", "id": playlist_id, "title": pl["name"]}, details, pl["tracks"])
+        m["playlist"] = {k: v for k, v in pl.items() if k != "tracks"}
+        return m
+
+    @app.get("/api/user-playlists/{playlist_id}/download")
+    def user_playlist_download(playlist_id: int, con=Depends(db), me=Depends(current_user)):
+        """What to fetch to have one of your playlists on the phone."""
+        _may_download(me)
+        pl = my_playlist(playlist_id, con, me)
+        albums = list(dict.fromkeys(t["album_id"] for t in pl["tracks"]))
+        artists = list(dict.fromkeys(t["artist_id"] for t in pl["tracks"]))
+        details = [get_item(i, con, me) for i in artists + albums]
+        m = _manifest(con, me, {"kind": "user_playlist", "id": playlist_id, "title": pl["name"]}, details, pl["tracks"])
+        m["playlist"] = {k: v for k, v in pl.items() if k != "tracks"}
+        return m
 
     @app.get("/api/files/{file_id}/seek")
     def seek_point(file_id: int, t: float = Query(0, ge=0), con=Depends(db)):

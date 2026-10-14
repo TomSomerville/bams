@@ -301,3 +301,13 @@ p { margin: 0; }
 .queue-sub { font-size: 24px; color: var(--muted); }
 .round.small { width: 64px; height: 64px; flex: none; }
 .round:disabled { opacity: 0.3; }
+
+/* your own playlists (PlaylistMenus.tsx) */
+.playlist-form { display: flex; flex-direction: column; gap: 22px; margin-top: 18px; }
+.playlist-form .text-input { width: 100%; }
+.pick-list { display: flex; flex-direction: column; gap: 12px; max-height: 560px; overflow-y: auto; margin-top: 14px; padding: 4px; }
+.pick-list .btn.pick { justify-content: flex-start; width: 100%; }
+.pick-list .btn.pick small { margin-left: auto; font-size: 22px; color: var(--muted); font-weight: 600; }
+.np-quality { font-size: 17px; font-weight: 600; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.playlist-desc { font-size: 26px; color: var(--muted); margin-top: 10px; }
+.list-head { font-size: 32px; margin: 26px 0 18px; }
