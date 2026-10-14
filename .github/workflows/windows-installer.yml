@@ -1,0 +1,64 @@
+# Builds the Windows installer (BAMS-Setup-<version>.exe) on GitHub's Windows machine and attaches it to the
+# release, so a release no longer needs a Windows PC: publish the release (with the .deb, from Linux) and this adds
+# the .exe and its line in SHA256SUMS.txt. Run it by hand (Actions → Windows installer → Run workflow) to rebuild a
+# release's installer. Inno Setup only runs on Windows; see deploy/README.md.
+name: Windows installer
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach to (e.g. v0.17.1)"
+        required: true
+
+permissions:
+  contents: write  # upload release assets
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build
+        run: python deploy/build.py windows
+
+      - name: Version matches the tag
+        shell: bash
+        run: |
+          exe=$(ls dist/BAMS-Setup-*.exe)
+          test "$(basename "$exe")" = "BAMS-Setup-${TAG#v}.exe" || { echo "built $exe for tag $TAG: bump server/bams/config.py VERSION"; exit 1; }
+
+      - name: Attach to the release, update SHA256SUMS.txt
+        shell: bash
+        run: |
+          exe=$(ls dist/BAMS-Setup-*.exe)
+          name=$(basename "$exe")
+          gh release upload "$TAG" "$exe" --clobber
+          mkdir -p sums
+          gh release download "$TAG" -p SHA256SUMS.txt -D sums || touch sums/SHA256SUMS.txt
+          grep -v " \*\?$name\$" sums/SHA256SUMS.txt > sums/new.txt || true
+          echo "$(sha256sum "$exe" | cut -d' ' -f1)  $name" >> sums/new.txt
+          mv sums/new.txt sums/SHA256SUMS.txt
+          cat sums/SHA256SUMS.txt
+          gh release upload "$TAG" sums/SHA256SUMS.txt --clobber
