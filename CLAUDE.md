@@ -82,7 +82,7 @@ cd tv && npm run build && npm run firetv -- --install --device <fire-tv-ip>   # 
 cd web && npm run build:app && cd ../android && ./gradlew assembleDebug   # app/build/outputs/apk/debug/app-debug.apk
 # releases from Linux: .deb here (python3 deploy/build.py deb), the .exe is built by GitHub Actions when the release is
 # published (.github/workflows/windows-installer.yml); Fire TV key on Linux: /mnt/Data/Sandboxes/Android/bams-firetv.jks
-# Samsung on Linux: source /mnt/Data/Sandboxes/tizen-env.sh (Tizen CLI in /mnt/Data/Sandboxes/tizen-home, profile BAMS)
+# Samsung .wgt: only on Beached's Windows PC (he keeps the certificate passwords); no Tizen setup on the Linux PC
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
@@ -333,10 +333,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   its version (`android.appAtLeast`, from the user agent), so older apps keep working.
 - **Your own playlists are private**: every `/api/user-playlists/{id}` route must go through `_own_playlist` (404 for
   anyone else's). Imported playlists stay read-only (media folders are); editing means "Make a copy".
-- **Tizen Studio on Linux refuses folders outside the user's home** and replaces symlinks with real folders: it lives
-  in its own home, `/mnt/Data/Sandboxes/tizen-home` (installer/package manager run with `HOME=` and
-  `JAVA_TOOL_OPTIONS=-Duser.home=`, the `tz` helper in `tizen-env.sh`). Don't install `cert-add-on` there: it pulls the
-  IDE and `sudo apt install`s a 2016 WebKitGTK. Certificates are made on Windows, used on Linux. The BAMS author/distributor certificates are in
-  `/mnt/Data/Sandboxes/tizen-home/certificates/` (2026-10-15, both match the released 0.15.0 `.wgt`).
+- **Samsung builds stay on Beached's Windows PC**: he keeps the certificate passwords (2026-10-15), and Certificate
+  Manager's `.pwd` files only work on the machine that made them. A Tizen CLI setup on the Linux PC was removed. If it's
+  ever redone: Tizen Studio refuses folders outside the user's home and replaces symlinks (give it its own `HOME=` and
+  `JAVA_TOOL_OPTIONS=-Duser.home=`), and `cert-add-on` pulls the IDE and `sudo apt install`s a 2016 WebKitGTK.
 - **TV tests on the Linux PC** need `CHROME_PATH=/mnt/Data/Sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
