@@ -3,6 +3,7 @@ import "../src/styles.css";
 import "./nav.test";
 import "./firetv.test";
 import "./hold.test";
+import "./pckeys.test";
 import { runAll } from "./harness";
 
 void runAll();

@@ -3,6 +3,21 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## Unreleased
+
+### Added
+- **Theatre mode**: BAMS for a PC plugged into a TV, driven by a remote. The same screens as the BAMS TV apps, full
+  screen, at `http://<server>:8484/theatre/`, or from the web UI's account menu → **Theatre mode**. Arrows, OK and
+  Back move around; typing on a remote's keyboard (or any keyboard) opens Search; the player takes the remote's media
+  keys, Space, and Windows Media Center remote buttons; a mouse or air mouse works too. It fits any screen size. Sign
+  in once with name and password; the PC is listed under Settings → Your TVs and theatre PCs. To make a PC start in it
+  by itself (automatic sign-in, Chrome in kiosk mode), see [docs/THEATRE.md](docs/THEATRE.md); Settings → This browser
+  shows the start-up lines with your server's address. Use Chrome or Chromium: Edge's kiosk mode forgets the sign-in.
+
+### Fixed
+- After a server update or restart, a TV (or theatre PC) that had only slept showed no pictures and couldn't play
+  until it was restarted: it now fetches fresh media access by itself (TV apps: from their next release).
+
 ## 0.17.1 (2026-10-14)
 
 ### Added

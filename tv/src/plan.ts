@@ -8,6 +8,7 @@
 import type { FileInfo } from "./api";
 import { hasAvplay, hasExo } from "./engine";
 import { fireInfo } from "./firetv";
+import { pc } from "./platform";
 import { prefs } from "./prefs";
 
 type Caps = {
@@ -33,6 +34,35 @@ const BROWSER: Caps = {
   dvProfile5: false,
 };
 
+// A PC's browser (theatre mode, development) is asked what it decodes, the way the web player's canDecode() does
+// (web/src/pages/Player.tsx): Edge on Windows decodes Dolby and, with the hardware, HEVC; Chrome on Linux neither.
+// Containers as the server's own browser rules have them (stream.FILE_OK_CONTAINERS: Chromium plays these).
+const supported = (t: string): boolean => {
+  try {
+    return "MediaSource" in window ? MediaSource.isTypeSupported(t) : document.createElement("video").canPlayType(t) !== "";
+  } catch {
+    return false;
+  }
+};
+const VIDEO_TYPES: Record<string, (ten: boolean) => string> = {
+  HEVC: (ten) => `video/mp4; codecs="${ten ? "hvc1.2.4.L123.B0" : "hvc1.1.6.L123.B0"}"`,
+  AV1: (ten) => `video/mp4; codecs="av01.0.08M.${ten ? "10" : "08"}"`,
+  VP9: (ten) => `video/mp4; codecs="vp09.${ten ? "02" : "00"}.40.${ten ? "10" : "08"}"`,
+  VP8: () => 'video/webm; codecs="vp8"',
+};
+let pcAsked: Caps | null = null;
+function pcCaps(): Caps {
+  if (!pcAsked) {
+    const video = new Set(["H.264", ...Object.keys(VIDEO_TYPES).filter((c) => supported(VIDEO_TYPES[c](false)))]);
+    const audio = new Set(["AAC", "MP3", "Opus", "Vorbis", "FLAC"]);
+    if (supported('audio/mp4; codecs="ac-3"')) audio.add("AC3");
+    if (supported('audio/mp4; codecs="ec-3"')) audio.add("EAC3");
+    pcAsked = { containers: new Set(["MP4", "WebM", "MKV"]), video, audio, h264HighBit: false,
+      dvProfile5: supported('video/mp4; codecs="dvh1.05.06"') };
+  }
+  return pcAsked;
+}
+
 // ExoPlayer's file readers (no ASF/WMV); codecs come from the device
 const FIRE_CONTAINERS = new Set(["MKV", "MP4", "WebM", "TS", "AVI", "MPEG", "FLV", "OGG"]);
 
@@ -45,6 +75,7 @@ function fireCaps(): Caps | null {
 
 export function caps(): Caps {
   if (hasExo()) return fireCaps() ?? BROWSER;
+  if (pc()) return pcCaps();
   const c = hasAvplay() ? TV : BROWSER;
   if (prefs.dts && hasAvplay()) return { ...c, audio: new Set([...c.audio, "DTS"]) };
   return c;
@@ -68,6 +99,10 @@ export function plan(file: FileInfo, audio: number, burn: string | null): Plan {
       return { mode: "convert", why: "10-bit H.264" };
     }
     if (v.dv_profile === 5 && !c.dvProfile5) return { mode: "convert", why: "Dolby Vision without HDR10" };
+    // a PC's browser may decode a codec at 8 bits but not 10
+    if (pc() && (v.bit_depth ?? 8) > 8 && VIDEO_TYPES[v.codec] && !supported(VIDEO_TYPES[v.codec](true))) {
+      return { mode: "convert", why: `10-bit ${v.codec}` };
+    }
     const max = c.size?.[v.codec];
     if (max && v.width && v.height && (Math.min(v.width, v.height) > Math.min(max.w, max.h) || Math.max(v.width, v.height) > Math.max(max.w, max.h))) {
       return { mode: "convert", why: `${v.height}p ${v.codec}: bigger than this device decodes` };

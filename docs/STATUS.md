@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-12** (release 0.15.0).
+Last updated: **2026-10-15** (theatre mode, not released yet).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -176,6 +176,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-13 | **Playlists made in BAMS are each account's own and private** (`user_playlists`, schema v15); albums/artists add their tracks as they are now, each track once; imported playlists stay read-only with **"Make a copy"**; full editing on web, TV (hold-OK menus, TV keyboard) and the phone online; downloadable to the phone | Owner: "create playlist, name them, add a brief description, add individual songs, albums or artist… for all versions", then chose "personal and private" and full TV editing. Playlist files live in read-only media folders |
 | 10-13 | **Quality line** under a playing song's title and artist on every player (`web/src/quality.ts`): codec + bit depth/sample rate (lossless) or bitrate (lossy); a converted song shows both ("ALAC 24-bit / 96 kHz → AAC 256 kbps") | Owner: "list the current format/quality of the song… below the song name and artist" |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
+| 10-15 | **Theatre mode = the TV app's page in a browser**, served by the server at `/theatre/`, with a "Theatre mode" item in the web UI's account menu; a PC at a TV runs it in **Chrome kiosk mode** started at sign-in (`docs/THEATRE.md`). A native app (Qt WebEngine + libmpv under the page, like Plex HTPC / Jellyfin Desktop) was planned as a second step and **set aside by the owner** | Owner: PCs with USB remotes as "theatre" boxes like Plex HTPC, "if possible a toggle for the web version"; after trying it: "I think i can make this work on all my devices". The TV page already is BAMS's 10-foot UI, so the boxes show exactly what the TVs do. Cost: browser codecs (the server converts more than for the TVs), no Dolby/DTS bitstream to a receiver, HDR only where the browser does it |
+| 10-15 | **Theatre mode signs in with name and password only** (no link code / QR); the TVs keep the code. The theatre page uses its **own token, never the web UI's cookie** (`credentials: "omit"`; the server prefers a cookie over a bearer token) and **its own storage keys** (`bams.theatre.*`) on the shared origin | Owner: "remove the QR/link login, lets just do username and password" (a PC has a keyboard). Same origin as the web UI: its cookie would make the page act as whoever is signed in there, and both use `bams.servers` in different shapes |
+| 10-15 | **Chrome/Chromium for theatre boxes, not Edge's `--kiosk`** | Both of Edge's kiosk types run InPrivate (Microsoft's docs): the box would forget its sign-in at every boot; Edge kiosk isn't supported on Linux |
 
 ## 4. Built so far
 
@@ -332,6 +335,19 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
 
+### Theatre mode (the TV page in a browser on a PC at a TV)
+- The server serves `tv/dist` at `/theatre/` (`app.TheatreFiles`, `__main__._theatre_dir`, installers ship it as
+  `bams/theatre`); web: account menu → Theatre mode, Settings → This browser (start this browser in theatre mode,
+  start-up lines for Mint/Windows), "Your TVs and theatre PCs". Guide: `docs/THEATRE.md`.
+- On a PC (`tv/src/platform.ts`: theatre / dev) the page scales its 1920-wide layout to any window (`scale.ts`,
+  `--page-h`; `nav.ts` converts zoomed rectangles), maps PC and remote keys to the remote codes (`pckeys.ts`:
+  BrowserBack, Home, Menu, media keys, Media Center shortcuts, Media Session, Back history trap, type-to-search), shows
+  and uses the mouse (`pointer.ts`), asks the browser what it decodes (`plan.ts`) and follows the web player's order
+  (fMP4 copy-HLS, Dolby kept only where decoded, AAC remux before a full conversion). Sign-in with name and password
+  (or the web UI's account in that browser); a server that isn't up yet is retried every 5 s.
+- Everywhere (TVs too): media tickets are renewed when a picture or the player fails or the page comes back from a
+  sleep (tickets die with a server restart).
+
 ### Android phone app (`android/`, 0.2.1, release 0.17.1)
 - Android 8+ (tested: Android 16 emulator, owner's Galaxy A17 5G). Online: the server's web UI in a WebView with
   Download buttons (movie, episode, season, show, song, album, artist, playlist), a Downloads menu item and Settings →
@@ -367,16 +383,20 @@ Roughly in priority order:
 5. **OpenSubtitles leftovers:** not yet tried with a real key (built and tested against a fake; the API was read
    from their docs and probed with a made-up key); downloaded subtitles can be removed only on the web; machine-made
    translations are left out (their default); subtitles split over 2 CDs are skipped.
-6. **TV app leftovers:** the TV's music has no queue view/reorder and no gapless hand-over; renaming other servers'
+6. **Theatre mode leftovers:** not tried on Windows (Chrome kiosk, the PowerShell start-up) or with Firefox; no
+   bitstream passthrough or real HDR in a browser (a native app was planned and set aside, see the 10-15 decisions);
+   an on-screen keyboard for remotes without one; Samsung and Fire TV need a smoke test at their next release (shared
+   `tv/` code changed).
+7. **TV app leftovers:** the TV's music has no queue view/reorder and no gapless hand-over; renaming other servers'
    libraries is web-only (the TV only hides them); Samsung TVs other than the owner's 2022 Frame untested (codec table in
    `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
    README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
    Fire TV: video playback not yet tried on a real device (sign-in, Home, navigation, search and the keyboard were,
    on a Fire TV in the owner's home); no Amazon Appstore build; Vega OS sticks (2025+) would need a separate app.
-7. **Watch list leftovers:** no music on it; renamed on the web only (the TV's rail picks a new name up at its next
+8. **Watch list leftovers:** no music on it; renamed on the web only (the TV's rail picks a new name up at its next
    start, its Home at once); posters' bookmark needs a mouse (touch screens use the title page's button).
-8. **UI redesign** from the owner's mockups.
-9. **Android app leftovers:** music streamed online plays in the page (no lock-screen controls, may stop with the phone locked); new episodes of
+9. **UI redesign** from the owner's mockups.
+10. **Android app leftovers:** music streamed online plays in the page (no lock-screen controls, may stop with the phone locked); new episodes of
    a downloaded show aren't fetched by themselves; a downloaded playlist is a snapshot (Download again to update);
    Android 15+ allows background downloads 6 h a day (the rest goes on when the app is opened); no Play Store build;
    the offline video player uses Android's controls, not the web player's look.
@@ -417,6 +437,30 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-15: Theatre mode: the TV page in a browser on a PC at a TV (not released yet)
+- **What / why:** owner uses small PCs with USB remotes (keyboard on the back) at TVs, with Plex HTPC, and wanted that
+  for BAMS, "if possible a toggle for the web version". Planned as two steps (browser theatre mode, then a Qt WebEngine
+  + libmpv app); the owner tried step 1, liked it and set the app aside. The server serves the TV page at `/theatre/`;
+  the web UI's account menu opens it; on a PC the page scales to the window, maps PC/remote keys, takes the mouse,
+  asks the browser what it decodes and follows the web player's fallback order. Sign-in with name and password only
+  (owner: no QR/link code); its own token and storage apart from the web UI on the same origin. Tickets renewed after
+  a server restart (TVs too). Guide for automatic sign-in + Chrome kiosk at start-up.
+- **Files:** `server/bams/{app,__main__}.py`, `server/tests/test_theatre.py`; `tv/src/{platform,pckeys,pointer,scale}.ts`
+  (new), `api.ts`, `App.tsx`, `nav.ts`, `plan.ts`, `tizen.ts`, `styles.css`, `screens/{Link,Settings,Search,Player,…}`,
+  `tv/test/pckeys.test.ts`; `web/src/components/{TheatreSettings,TopBar,TvSettings}.tsx`, `web/src/main.tsx`,
+  `pages/Settings.tsx`; `deploy/build.py`; `docs/THEATRE.md`. The plan with the set-aside app design stayed outside the
+  repo (`plan.md` in the owner's checkout, untracked).
+- **Verified:** server tests 346 passed (Python 3.11 venv), TV tests 44 passed, web/TV `tsc`. Built page checked in the
+  preview browser against a sandbox copy (:8510): `/theatre` redirect, sign-in by keyboard, Home scaled to 1024×768 and
+  1920×1080, type-to-search, Enter to results, Back, scrolling under zoom; HEVC file played as-is, an E-AC-3 MKV as
+  fMP4 copy-HLS with AAC; Space / media key / Ctrl+P / Ctrl+Shift+P / BrowserBack in the player; a picture recovering
+  after a server restart (old ticket 401 → renewed); the web UI's menu item, "use this account", the redirect flag and
+  `?web`; Settings remote test and Leave theatre mode. Probed in Chrome 155 on a plain-http LAN page: no Keyboard
+  Lock/Clipboard, Media Session works; CSS zoom: rectangles zoomed, scrollTop not.
+- **Owner:** on the sandbox (:8485): "It works perfect so far".
+- **Left open:** see §5 item 6 (Windows/Firefox untried, no passthrough/HDR in browsers, on-screen keyboard, TV smoke
+  test at the next TV release). Not released: needs a server release to reach the owner's server.
 
 ### 2026-10-14: Lock-screen controls for streamed music in the Android app (release 0.17.1, app 0.2.1)
 - **What / why:** owner picked it from the left-open list: music streamed online in the app played in the page

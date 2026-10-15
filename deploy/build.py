@@ -3,7 +3,7 @@
     python deploy/build.py windows      -> dist/BAMS-Setup-<version>.exe   (run on Windows)
     python deploy/build.py deb          -> dist/bams_<version>_all.deb     (runs anywhere)
     python deploy/build.py all
-    --skip-web                          use the existing web/dist instead of rebuilding the UI
+    --skip-web                          use the existing web/dist and tv/dist instead of rebuilding them
 
 Needs uv and Node 20+ (npm); the Windows installer also needs Inno Setup 6 (`winget install
 JRSoftware.InnoSetup`). The version comes from server/bams/config.py VERSION: bump it before building an
@@ -11,9 +11,9 @@ update, then hand people the new installer. It installs over the old one and kee
 
 What goes in (see deploy/README.md):
   Windows: Python (embeddable, pinned in pins.json), the locked Python packages (requirements.txt, hashes
-           checked), BAMS + the built UI, WinSW (runs BAMS as a Windows service). FFmpeg is NOT bundled: the
+           checked), BAMS + the built UI and TV page (theatre mode), WinSW (runs BAMS as a Windows service). FFmpeg is NOT bundled: the
            installer downloads the pinned build from its publisher and checks its SHA-256.
-  .deb:    BAMS + the built UI, a wheelhouse of the locked packages for Python 3.11-3.14 on x86_64 and
+  .deb:    BAMS + the built UI and TV page, a wheelhouse of the locked packages for Python 3.11-3.14 on x86_64 and
            aarch64 (installed into a venv by postinst, offline), the systemd unit. apt pulls Python and FFmpeg.
 """
 
@@ -40,6 +40,7 @@ DEPLOY = ROOT / "deploy"
 BUILD = ROOT / "build"
 CACHE = BUILD / "cache"
 DIST = ROOT / "dist"
+TV_DIST = ROOT / "tv" / "dist"  # the TV page, served at /theatre/
 PINS = json.loads((DEPLOY / "pins.json").read_text(encoding="utf-8"))
 REQUIREMENTS = DEPLOY / "requirements.txt"
 
@@ -92,17 +93,26 @@ def build_web(skip: bool) -> Path:
             run(["npm", "ci"], cwd=web)
         run(["npx", "tsc", "-p", "."], cwd=web)
         run(["npm", "run", "build"], cwd=web)
+        # the TV page, which the server also serves at /theatre/ (theatre mode for PCs at a TV)
+        print("== TV page (theatre mode)")
+        if not (ROOT / "tv" / "node_modules").is_dir():
+            run(["npm", "ci"], cwd=ROOT / "tv")
+        run(["npm", "run", "build"], cwd=ROOT / "tv")  # tsc + vite
     dist = web / "dist"
     if not (dist / "index.html").is_file():
         sys.exit("error: web/dist is missing: build the UI (drop --skip-web)")
+    if not (TV_DIST / "index.html").is_file():
+        sys.exit("error: tv/dist is missing: build the TV page (drop --skip-web)")
     return dist
 
 
 def copy_app(dest: Path, web_dist: Path) -> None:
-    """server/bams -> dest/bams, the built UI -> dest/bams/web (where __main__._web_dir looks)."""
+    """server/bams -> dest/bams, the built UI -> dest/bams/web (where __main__._web_dir looks), the TV page ->
+    dest/bams/theatre (__main__._theatre_dir)."""
     shutil.copytree(ROOT / "server" / "bams", dest / "bams",
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "web"))
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "web", "theatre"))
     shutil.copytree(web_dist, dest / "bams" / "web")
+    shutil.copytree(TV_DIST, dest / "bams" / "theatre")
 
 
 # ------------------------------------------------------------------ licences
@@ -122,11 +132,13 @@ def _python_licences(dist_infos: list[Path]) -> list[tuple[str, str, str]]:
 
 
 def _web_licences() -> list[tuple[str, str, str]]:
-    lock = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))
-    out = []
-    for path, p in lock.get("packages", {}).items():
-        if path and not p.get("dev") and not p.get("optional") and "node_modules/" in path:
-            out.append((path.rsplit("node_modules/", 1)[1], p.get("version", ""), p.get("license", "see package")))
+    """The web UI's and the TV page's (theatre mode) libraries."""
+    out = set()
+    for app in ("web", "tv"):
+        lock = json.loads((ROOT / app / "package-lock.json").read_text(encoding="utf-8"))
+        for path, p in lock.get("packages", {}).items():
+            if path and not p.get("dev") and not p.get("optional") and "node_modules/" in path:
+                out.add((path.rsplit("node_modules/", 1)[1], p.get("version", ""), p.get("license", "see package")))
     return sorted(out)
 
 
@@ -138,7 +150,7 @@ def notices(python_pkgs: list[tuple[str, str, str]], extra: list[tuple[str, str,
              "*.dist-info folders next to them.",
              ""]
     for title, rows in (("Bundled programs", extra), ("Python packages", python_pkgs),
-                        ("Web UI libraries (compiled into the UI)", _web_licences())):
+                        ("Web UI and TV page libraries (compiled into them)", _web_licences())):
         if not rows:
             continue
         lines += [title, "-" * len(title)]

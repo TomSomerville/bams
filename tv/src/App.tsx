@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { addExtra, api, checkExtras, extras, getServer, getToken, hello, refreshTicket, savedUser, setSession, SIGNED_OUT, type Extra, type User } from "./api";
+import { addExtra, api, checkExtras, extras, getServer, getToken, hello, refreshTicket, renewTickets, savedUser, setSession, SIGNED_OUT, withFreshTicket, type Extra, type User } from "./api";
 import type { ServerLibrary } from "../../web/src/api";
 import { okDown, okUp } from "./hold";
 import { keyHandler } from "./keys";
 import { currentFid, move, settleFocus, type Dir } from "./nav";
 import { exitApp, isBack, KEY, registerKeys } from "./tizen";
+import { HOME, SEARCH } from "./pckeys";
+import { pc, session, theatre } from "./platform";
 import Connect from "./screens/Connect";
 import Link from "./screens/Link";
 import Home from "./screens/Home";
@@ -104,7 +106,11 @@ export default function App() {
     const server = getServer();
     if (!server) return setPhase("connect");
     if (!getToken()) {
-      return setPhase((await hello(server)) ? "link" : "connect");
+      if (await hello(server)) return setPhase("link");
+      // theatre mode: the server is the one the page came from; wait for it (the fatal screen retries) rather than
+      // asking for another
+      if (theatre()) return setFatal(`Waiting for the BAMS server at ${server.replace(/^https?:\/\//, "")}…`);
+      return setPhase("connect");
     }
     try {
       const st = await api.get<{ user: User | null }>("/api/auth/state");
@@ -136,6 +142,37 @@ export default function App() {
     };
     window.addEventListener(SIGNED_OUT, out);
     return () => window.removeEventListener(SIGNED_OUT, out);
+  }, []);
+
+  // On a PC the "can't reach the server" screen tries again by itself: a theatre box that came up before the server
+  // or its Wi-Fi must get going without anyone pressing a key.
+  useEffect(() => {
+    if (!fatal || !pc()) return;
+    const t = setTimeout(() => void start(), 5000);
+    return () => clearTimeout(t);
+  }, [fatal, start]);
+
+  // Tickets die with a server restart (api.ts renewTickets): a picture that fails to load gets a fresh ticket and
+  // one more try, and so does everything after the page was hidden (a TV or PC that slept).
+  useEffect(() => {
+    const onError = (e: Event) => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || img.dataset.retried || !img.src.includes("/api/t/")) return;
+      img.dataset.retried = "1";
+      void renewTickets().then(() => {
+        const url = withFreshTicket(img.src);
+        if (url && url !== img.src) img.src = url;
+      });
+    };
+    const onShow = () => {
+      if (!document.hidden && getToken()) void renewTickets();
+    };
+    window.addEventListener("error", onError, true);  // a picture's error doesn't bubble: catch it on the way down
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      window.removeEventListener("error", onError, true);
+      document.removeEventListener("visibilitychange", onShow);
+    };
   }, []);
 
   // keep the media ticket fresh while the app stays open
@@ -172,6 +209,26 @@ export default function App() {
       addServer: (again) => setAdding(again ?? "find"),
     };
   }, [stack, user, libraries, servers, reloadServers]);
+
+  // PC keys (pckeys.ts): Home, and Search (the Search key, or typing a letter outside a text box). On the Search
+  // screen itself, Search.tsx takes the letters.
+  useEffect(() => {
+    if (phase !== "main" || adding) return;
+    const home = () => nav.reset({ name: "home" });
+    const search = (e: Event) => {
+      if (nav.route.name === "search") return;
+      const text = (e as CustomEvent<string>).detail;
+      if (text) session.set("bams.q", text);
+      if (nav.route.name === "player") nav.replace({ name: "search" });
+      else nav.push({ name: "search" });
+    };
+    window.addEventListener(HOME, home);
+    window.addEventListener(SEARCH, search);
+    return () => {
+      window.removeEventListener(HOME, home);
+      window.removeEventListener(SEARCH, search);
+    };
+  }, [nav, phase, adding]);
 
   // the remote: the screen's own handler first (the player), then Back and the arrows
   useEffect(() => {

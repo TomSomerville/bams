@@ -48,6 +48,15 @@ def _web_dir() -> Path | None:
     return None
 
 
+def _theatre_dir() -> Path | None:
+    """The TV app's built page, served at /theatre/ for theatre PCs."""
+    for here in (Path(__file__).resolve().parent / "theatre",  # installed: the installers put it here
+                 Path(__file__).resolve().parents[2] / "tv" / "dist"):  # repo checkout
+        if (here / "index.html").is_file():
+            return here
+    return None
+
+
 def _new_password() -> str:
     pw = getpass.getpass("Password (input hidden): ")
     if getpass.getpass("Same password again: ") != pw:
@@ -132,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             con.close()
         log.info("BAMS %s  data dir: %s  http://%s:%s  (API docs at /docs)", VERSION, paths.root, a.host, a.port)
-        uvicorn.run(create_app(paths, web_dir=_web_dir()), host=a.host, port=a.port, log_level="info")
+        uvicorn.run(create_app(paths, web_dir=_web_dir(), theatre_dir=_theatre_dir()), host=a.host, port=a.port, log_level="info")
         return 0
 
     con = connect(paths.db)

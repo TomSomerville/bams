@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
-import { api, ApiError, getServer, publicPostTo, setSession, type User } from "../api";
+import { api, ApiError, getServer, linkWithWebUser, publicPostTo, setSession, webUser, type User } from "../api";
+import { deviceWord, theatre } from "../platform";
 import { focusFirst } from "../nav";
 import { deviceName } from "../tizen";
 
@@ -16,12 +17,17 @@ export default function Link({ onLinked, onChangeServer, target }: {
 }) {
   const [code, setCode] = useState<Start | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [withPassword, setWithPassword] = useState(false);
+  // theatre mode (a PC with a keyboard) signs in with name and password only, no link code (owner, 2026-10-15)
+  const codes = !theatre();
+  const [withPassword, setWithPassword] = useState(!codes);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [code2, setCode2] = useState("");          // two-step sign-in: the authenticator app's code
   const [askCode, setAskCode] = useState(false);
   const [busy, setBusy] = useState(false);
+  // theatre mode, opened from the web UI: the account signed in there, offered (never used silently: it may be an
+  // admin, and a theatre box is better off with a viewer account)
+  const [web, setWeb] = useState<User | null>(null);
   const alive = useRef(true);
   const linked = useRef(onLinked);  // App passes a new function every render: don't restart the code for that
   linked.current = onLinked;
@@ -33,6 +39,7 @@ export default function Link({ onLinked, onChangeServer, target }: {
   // a code, then a poll every 3 s; a fresh code when it runs out
   useEffect(() => {
     alive.current = true;
+    if (!codes) return () => { alive.current = false; };
     let timer: ReturnType<typeof setTimeout>;
     const begin = async () => {
       try {
@@ -70,7 +77,24 @@ export default function Link({ onLinked, onChangeServer, target }: {
 
   useEffect(() => {
     setTimeout(() => focusFirst());
-  }, [withPassword]);
+  }, [withPassword, web]);
+
+  useEffect(() => {
+    if (!target) void webUser().then((u) => alive.current && setWeb(u));
+  }, [target]);
+
+  const linkWebAccount = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await linkWithWebUser(deviceName());
+      done.current(r.token, r.user);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const signIn = async () => {
     setBusy(true);
@@ -98,7 +122,7 @@ export default function Link({ onLinked, onChangeServer, target }: {
     return (
       <div className="center-screen link">
         <img className="wordmark" src="bams-wordmark.png" alt="BAMS" />
-        <h1>Sign in</h1>
+        <h1>{target ? `Sign in to ${target.name}` : "Sign in"}</h1>
         <form className="signin" onSubmit={(e) => { e.preventDefault(); void signIn(); }}>
           <input className="text-input" placeholder="Name" value={name} onChange={(e) => { setName(e.target.value); setAskCode(false); }} data-autofocus />
           <input className="text-input" type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -108,7 +132,13 @@ export default function Link({ onLinked, onChangeServer, target }: {
             {busy ? "Signing in…" : "Sign in"}</button>
         </form>
         {err && <p className="error">{err}</p>}
-        <button className="btn ghost" onClick={() => { setErr(null); setWithPassword(false); }}>Use a code instead</button>
+        {web && (
+          <button className="btn" disabled={busy} onClick={() => void linkWebAccount()}>
+            Use {web.name}'s account (signed in on this browser)
+          </button>
+        )}
+        {codes && <button className="btn ghost" onClick={() => { setErr(null); setWithPassword(false); }}>Use a code instead</button>}
+        {!codes && target && <button className="btn ghost" onClick={onChangeServer}>Pick another server</button>}
       </div>
     );
   }
@@ -116,14 +146,14 @@ export default function Link({ onLinked, onChangeServer, target }: {
   return (
     <div className="center-screen link">
       <img className="wordmark" src="bams-wordmark.png" alt="BAMS" />
-      <h1>{target ? `Link this TV to ${target.name}` : "Link this TV to your BAMS account"}</h1>
+      <h1>{target ? `Link this ${deviceWord()} to ${target.name}` : `Link this ${deviceWord()} to your BAMS account`}</h1>
       <div className="link-body">
         <div className="link-steps">
           <p>On your phone, scan the code. Or on any computer, open</p>
           <p className="link-url">{server.replace(/^https?:\/\//, "")}/link</p>
           <p>sign in, and enter:</p>
           <div className="link-code">{code ? `${code.code.slice(0, 3)} ${code.code.slice(3)}` : "··· ···"}</div>
-          <p className="muted small">The TV signs in by itself once the code is entered. A new code appears every ten minutes.</p>
+          <p className="muted small">The {deviceWord()} signs in by itself once the code is entered. A new code appears every ten minutes.</p>
         </div>
         {qr && <div className="qr" dangerouslySetInnerHTML={{ __html: qr }} />}
       </div>

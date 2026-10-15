@@ -8,6 +8,7 @@ import { clock, metaLine, progressOf, runtime, sxe } from "../format";
 import { focusId } from "../nav";
 import { pickAudio, pickFile, plan } from "../plan";
 import { MusicDetail } from "./Music";
+import { session } from "../platform";
 
 /** A movie, show, season or episode: art, text, Play / Resume, on/off the watch list, and for shows the seasons and
  *  their episodes (holding OK on one puts it on the watch list or takes it off). `rid`: of another of this TV's
@@ -31,7 +32,7 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
     api.get<ItemDetail>(`/api/items/${id}`).then((d) => {
       setItem(d);
       if (d.kind === "show") {
-        const saved = Number(sessionStorage.getItem(seasonKey));
+        const saved = Number(session.get(seasonKey));
         const ids = d.children.map((c) => c.id);
         setSeason((s) => s ?? (ids.includes(saved) ? saved : d.children.find((c) => (c.unwatched ?? 0) > 0)?.id ?? ids[0] ?? null));
       }
@@ -44,7 +45,7 @@ export default function Detail({ id, rid }: { id: number; rid?: number }) {
   useEffect(() => {
     if (item?.kind === "season") return setEpisodes(item);
     if (season === null) return;
-    sessionStorage.setItem(seasonKey, String(season));
+    session.set(seasonKey, String(season));
     api.get<ItemDetail>(`/api/items/${season}`).then(setEpisodes).catch((e) => setErr((e as Error).message));
   }, [item, season, id]);
 

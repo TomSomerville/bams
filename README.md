@@ -38,6 +38,7 @@ Download the installer for your computer from the
    Watching.
 5. **Watch on other devices** (TV, phone, laptop): open `http://<computer-name>:8484` in their browser. Samsung TVs
    can also run the BAMS TV app, driven with the TV remote: see [Samsung TV app](#samsung-tv-app-the-frame) below.
+   A PC plugged into a TV can be a remote-driven BAMS box too: [theatre mode](docs/THEATRE.md).
 
 ### Updates
 

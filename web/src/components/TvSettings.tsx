@@ -41,14 +41,14 @@ export function TvSettings({ code: initial = "" }: { code?: string }) {
 
   return (
     <section className="lib-card settings-card" id="tv">
-      <div className="lib-head"><h3>Your TVs</h3></div>
-      <p className="muted">To sign in the BAMS app on a Samsung TV or a Fire TV, enter the code it shows. The TV then uses your
-        account (its own watch history is yours).</p>
+      <div className="lib-head"><h3>Your TVs and theatre PCs</h3></div>
+      <p className="muted">To sign in the BAMS app on a Samsung TV or a Fire TV, enter the code it shows. It then uses your
+        account (its watch history is yours). PCs in theatre mode sign in with name and password, and are listed here too.</p>
       <form className="key-row" onSubmit={link}>
-        <input className="text-input" placeholder="Code from the TV, e.g. K7P 2QX" value={code} maxLength={12}
-          onChange={(e) => { setCode(e.target.value.toUpperCase()); setMsg(null); }} aria-label="Code from the TV"
+        <input className="text-input" placeholder="Code it shows, e.g. K7P 2QX" value={code} maxLength={12}
+          onChange={(e) => { setCode(e.target.value.toUpperCase()); setMsg(null); }} aria-label="Code it shows"
           autoFocus={!!initial} />
-        <button className="btn small primary" disabled={busy || code.replace(/[^A-Za-z0-9]/g, "").length < 6}>Link TV</button>
+        <button className="btn small primary" disabled={busy || code.replace(/[^A-Za-z0-9]/g, "").length < 6}>Link</button>
       </form>
       {msg && <p className={`key-msg ${msg.ok ? "ok" : "bad"}`}>{msg.text}</p>}
       {devices && devices.length > 0 && (

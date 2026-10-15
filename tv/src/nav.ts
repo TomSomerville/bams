@@ -9,9 +9,11 @@
 // came from. A [data-cover] bar lies over the bottom of the page (the music bar): the page scrolls things above it.
 // Tests: tv/test/nav.test.ts (npm test).
 
+import { pageZoom } from "./scale";
+
 export type Dir = "left" | "right" | "up" | "down";
 
-const SELECTOR = "button:not([disabled]), input, [data-focus]";
+export const SELECTOR = "button:not([disabled]), input, [data-focus]";
 const SIDE = "[data-side]";
 const GROUP = "[data-group]";
 const rowMemory = new WeakMap<Element, HTMLElement>();
@@ -49,25 +51,32 @@ export function focus(el: HTMLElement | null | undefined): boolean {
   return true;
 }
 
+/** An element's rectangle in the page's own pixels, the unit of scrollTop/scrollLeft: on a PC the page is zoomed to
+ *  the window (scale.ts) and getBoundingClientRect() counts zoomed pixels. */
+function layoutRect(el: Element) {
+  const r = el.getBoundingClientRect(), z = pageZoom();
+  return { left: r.left / z, right: r.right / z, top: r.top / z, bottom: r.bottom / z, width: r.width / z, height: r.height / z };
+}
+
 /** Scroll the focused element into view: shelves scroll sideways, the page (and the rail) scroll to keep it
  *  comfortably inside, above a [data-cover] bar. */
 function reveal(el: HTMLElement) {
   const row = el.closest<HTMLElement>("[data-row]");
   if (row) {
-    const r = el.getBoundingClientRect();
-    const box = row.getBoundingClientRect();
+    const r = layoutRect(el);
+    const box = layoutRect(row);
     const pad = 80;
     if (r.left < box.left + pad) row.scrollLeft -= box.left + pad - r.left;
     else if (r.right > box.right - pad) row.scrollLeft += r.right - (box.right - pad);
   }
   const page = el.closest<HTMLElement>("[data-scroll]");
   if (page) {
-    const r = el.getBoundingClientRect();
-    const box = page.getBoundingClientRect();
+    const r = layoutRect(el);
+    const box = layoutRect(page);
     let end = box.bottom;
     for (const c of Array.from(document.querySelectorAll<HTMLElement>("[data-cover]"))) {
       if (c.contains(el) || page.contains(c) || !visible(c)) continue;
-      const cb = c.getBoundingClientRect();
+      const cb = layoutRect(c);
       if (cb.left < box.right && cb.right > box.left && cb.top < end) end = Math.max(box.top + box.height / 2, cb.top);
     }
     const top = box.top + (end - box.top) * 0.28;

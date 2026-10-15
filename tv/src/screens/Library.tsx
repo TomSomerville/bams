@@ -4,6 +4,7 @@ import { useFocusOnReady, useNav } from "../App";
 import { Poster } from "../Cards";
 import { PlayRandomButton } from "../random";
 import { MusicLibrary } from "./Music";
+import { session } from "../platform";
 
 const SORTS = [
   { id: "title", label: "A–Z" },
@@ -26,11 +27,11 @@ export default function Library({ id, rid }: { id: number; rid?: number }) {
 function VideoLibrary({ id, rid, name }: { id: number; rid?: number; name?: string }) {
   const nav = useNav();
   const key = rid === undefined ? `${id}` : `r${rid}.${id}`;  // remembered sort/genre, per server and library
-  const [sort, setSort] = useState<string>(() => sessionStorage.getItem(`bams.sort.${key}`) || "title");
+  const [sort, setSort] = useState<string>(() => session.get(`bams.sort.${key}`) || "title");
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [shown, setShown] = useState(PAGE);
   const [err, setErr] = useState<string | null>(null);
-  const [genre, setGenre] = useState<string | null>(() => sessionStorage.getItem(`bams.genre.${key}`));
+  const [genre, setGenre] = useState<string | null>(() => session.get(`bams.genre.${key}`));
 
   useEffect(() => {
     setItems(null);
@@ -44,13 +45,13 @@ function VideoLibrary({ id, rid, name }: { id: number; rid?: number; name?: stri
   const genres = useMemo(() => [...new Set((items ?? []).flatMap((i) => i.genres))].sort(), [items]);
   const list = (items ?? []).filter((i) => !genre || i.genres.includes(genre));
   const pickGenre = (g: string | null) => {
-    if (g) sessionStorage.setItem(`bams.genre.${key}`, g); else sessionStorage.removeItem(`bams.genre.${key}`);
+    if (g) session.set(`bams.genre.${key}`, g); else session.remove(`bams.genre.${key}`);
     setShown(PAGE);
     setGenre(g);
   };
 
   const pick = (s: string) => {
-    sessionStorage.setItem(`bams.sort.${key}`, s);
+    session.set(`bams.sort.${key}`, s);
     setShown(PAGE);
     setSort(s);
   };
