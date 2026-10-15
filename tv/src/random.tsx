@@ -8,6 +8,7 @@ import { apiFor, type QueueTrack } from "./api";
 import { useNav } from "./App";
 import Icon from "./Icon";
 import { useMusic } from "./music";
+import { session } from "./platform";
 
 export type VideoEntry = {
   id: number; kind: "movie" | "episode"; title: string; show: string | null;
@@ -22,7 +23,7 @@ const EMPTY: Stored = { rid: null, items: [] };
 
 function load(): Stored {
   try {
-    const s = JSON.parse(sessionStorage.getItem(KEY) ?? "null");
+    const s = JSON.parse(session.get(KEY) ?? "null");
     if (s && Array.isArray(s.items)) return s;
   } catch {
     /* nothing kept */
@@ -36,7 +37,7 @@ const listeners = new Set<() => void>();
 function set(s: Stored) {
   state = s;
   try {
-    sessionStorage.setItem(KEY, JSON.stringify(s));
+    session.set(KEY, JSON.stringify(s));
   } catch {
     /* lasts until the app restarts */
   }

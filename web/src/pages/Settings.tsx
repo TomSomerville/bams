@@ -10,6 +10,7 @@ import { PhoneSettings } from "../components/PhoneSettings";
 import { inApp } from "../android";
 import { ConnectServer, RemoteServers } from "../components/RemoteSettings";
 import { TvSettings } from "../components/TvSettings";
+import { TheatreSettings } from "../components/TheatreSettings";
 import Icon from "../components/Icon";
 import { AutofillSettings, UnrecognizedFiles } from "../components/Identify";
 import MusicSettings from "../components/MusicSettings";
@@ -299,6 +300,8 @@ export default function Settings() {
           <div className="lib-list"><PhoneSettings /></div></>}
         <div className="section-head"><h2 className="section-title">Your account</h2></div>
         <div className="lib-list"><AccountSettings /><TvSettings /><HomeSettings /></div>
+        {!inApp && <><div className="section-head"><h2 className="section-title">This browser</h2></div>
+          <div className="lib-list"><TheatreSettings /></div></>}
         <div className="section-head" id="servers">
           <h2 className="section-title">Other BAMS servers</h2>
           {!connecting && <button className="btn primary small" onClick={() => setConnecting(true)}>
@@ -443,6 +446,9 @@ function AdminSettings() {
 
       <div className="section-head"><h2 className="section-title">Accounts</h2></div>
       <div className="lib-list"><AccountSettings /><TvSettings /><UsersSettings /></div>
+
+      {!inApp && <><div className="section-head"><h2 className="section-title">This browser</h2></div>
+        <div className="lib-list"><TheatreSettings /></div></>}
 
       <div className="section-head" id="security"><h2 className="section-title">Security</h2></div>
       <SecuritySettings />

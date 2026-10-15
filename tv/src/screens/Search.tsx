@@ -6,6 +6,9 @@ import { Poster, Square } from "../Cards";
 import { clock } from "../format";
 import Icon from "../Icon";
 import { useMusic } from "../music";
+import { move } from "../nav";
+import { SEARCH } from "../pckeys";
+import { pc, session } from "../platform";
 
 type Item = Tagged<ItemSummary>;
 type Hits = { video: Item[]; music: Item[]; tracks: Item[] };
@@ -15,12 +18,12 @@ type Hits = { video: Item[]; music: Item[]; tracks: Item[] };
 export default function Search() {
   const nav = useNav();
   const music = useMusic();
-  const [q, setQ] = useState(() => sessionStorage.getItem("bams.q") || "");
+  const [q, setQ] = useState(() => session.get("bams.q") || "");
   const [hits, setHits] = useState<Hits | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    sessionStorage.setItem("bams.q", q);
+    session.set("bams.q", q);
     clearTimeout(timer.current);
     if (!q.trim()) return setHits(null);
     let alive = true;
@@ -37,14 +40,33 @@ export default function Search() {
 
   useFocusOnReady(true);
 
+  // a PC: a letter typed while the focus is on the results (pckeys.ts) goes on the end of the search
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const more = (e: Event) => {
+      const text = (e as CustomEvent<string>).detail;
+      if (text) setQ((v) => v + text);
+      input.current?.focus();
+    };
+    window.addEventListener(SEARCH, more);
+    return () => window.removeEventListener(SEARCH, more);
+  }, []);
+
   const artists = hits?.music.filter((i) => i.kind === "artist") ?? [];
   const albums = hits?.music.filter((i) => i.kind === "album") ?? [];
   const total = hits ? hits.video.length + hits.music.length + hits.tracks.length : 0;
   return (
     <div className="page">
       <div className="page-head"><h1>Search</h1></div>
-      <input className="text-input wide-input" data-fid="q" data-autofocus placeholder="Title, artist, album, track…" value={q}
-        onChange={(e) => setQ(e.target.value)} />
+      <input ref={input} className="text-input wide-input" data-fid="q" data-autofocus placeholder="Title, artist, album, track…" value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          // a PC: Enter goes to the results (on a TV, Enter opens its keyboard)
+          if (e.key === "Enter" && total && pc()) {
+            e.preventDefault();
+            move("down");
+          }
+        }} />
       {hits && !total && <p className="muted big">Nothing matches “{q}”.</p>}
       {!!hits?.video.length && (
         <section className="search-section">

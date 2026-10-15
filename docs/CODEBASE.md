@@ -26,14 +26,15 @@ bams/
 │   ├── STATUS.md              Build status, requirements, decisions log, dev environment
 │   ├── CODEBASE.md            ← this file
 │   ├── FORMATS.md             Every container/codec/subtitle/music format: browser support + BAMS handling
-│   └── READ-ONLY.md           How media folders are kept read-only (code + OS setup per platform)
+│   ├── READ-ONLY.md           How media folders are kept read-only (code + OS setup per platform)
+│   └── THEATRE.md             Theatre mode for a PC at a TV: using it, automatic sign-in, Chrome kiosk at start-up
 │
 ├── server/                    ── Python server (FastAPI + SQLite) ──────────────────────────
 │   ├── pyproject.toml         Package "bams"; deps: fastapi, uvicorn, httpx, guessit; dev: pytest
 │   ├── README.md              Server usage, CLI, API table
 │   ├── bams/
-│   │   ├── __main__.py        CLI entry (`python -m bams …` / `bams …`): serve, library, scan, tmdb-key, user, status
-│   │   ├── app.py             FastAPI app: bootstrap, serialisers, LoginRequired middleware, ALL HTTP routes, SPA hosting
+│   │   ├── __main__.py        CLI entry (`python -m bams …` / `bams …`): serve, library, scan, tmdb-key, user, status; `_web_dir` / `_theatre_dir` find the built pages
+│   │   ├── app.py             FastAPI app: bootstrap, serialisers, LoginRequired middleware, ALL HTTP routes, SPA hosting (web UI at `/`, the TV page at `/theatre/`: `TheatreFiles`)
 │   │   ├── auth.py            Accounts: scrypt hashes, users CRUD (last-admin rules), must-change-password, TOTP two-step codes, sessions (hashed tokens), Throttle
 │   │   ├── devices.py         Apps on other devices (the TV): LinkCodes (code + secret, approve, poll), Tickets (signed
 │   │   │                      media-path tickets), split_ticket_path, TV_AGENT
@@ -73,14 +74,14 @@ bams/
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
-│   └── tests/                 pytest: 343 tests, see §7
+│   └── tests/                 pytest: 346 tests, see §7
 │
 ├── web/                       ── React 19 + Vite + TypeScript UI ──────────────────────────
 │   ├── index.html · vite.config.ts (port 5173, /api proxy → :8484, polling watcher) · tsconfig.json
 │   ├── phone/index.html · vite.app.config.ts   The Android app's own pages: `npm run build:app` → dist-app (git-ignored), bundled into the APK
 │   ├── public/                favicon.png, brand/ (logo cut-outs used by the sidebar)
 │   └── src/
-│       ├── main.tsx           Mount: BrowserRouter > AuthProvider > SettingsProvider > MusicProvider > App; font import
+│       ├── main.tsx           Mount: BrowserRouter > AuthProvider > SettingsProvider > MusicProvider > App; font import; "start in theatre mode" redirect (`bams.startTheatre`, not with `?web`)
 │       ├── auth.tsx           AuthProvider/useAuth: sign-in + first-admin screens until signed in; re-keyed per user
 │       ├── App.tsx            Routes + layout (Sidebar, ConfigBanner, TopBar); /play/:id is full-screen
 │       ├── api.ts             fetch wrapper (ApiError; a 401 fires SIGNED_OUT) + TypeScript types for every server shape
@@ -101,7 +102,8 @@ bams/
 │       ├── components/
 │       │   ├── Sidebar.tsx    Logo, Home, the watch list (`/watchlist`, the user's name for it), this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Downloads (Android app only), Settings
 │       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
-│       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu
+│       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu (Theatre mode → /theatre/, not in the phone app)
+│       │   ├── TheatreSettings.tsx  Settings → This browser → Theatre mode: open it, start this browser in it, start-up lines (Mint/Windows) with this address
 │       │   ├── AccountSettings.tsx  Your account (password + confirm, sign out) + admins' "Who can sign in" (users CRUD)
 │       │   ├── RemoteSettings.tsx  Settings → Other BAMS servers: connect form, per-server card (rename/hide libraries, sign in again, disconnect)
 │       │   ├── ServerNameSettings.tsx  Settings → This server → Server name (admins; saving fires `SERVER_RENAMED` for the sidebar)
@@ -144,24 +146,27 @@ bams/
 │           ├── Search.tsx     /search?q= (shows & movies, artists, albums, tracks)
 │           └── Settings.tsx   Admins: libraries, unrecognized files, TMDB, music, playback, accounts. Viewers: their account only
 │
-├── tv/                       ── Samsung TV app (Tizen web app, React + Vite + TS; tv/README.md; also the Fire TV app's page) ──
+├── tv/                       ── Samsung TV app (Tizen web app, React + Vite + TS; tv/README.md; also the Fire TV app's page and theatre mode's, served at /theatre/) ──
 │   ├── tizen/config.xml       Manifest (app id BAMSmedia1.BAMS, privileges, pointing-device-support off) + icon.png
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
 │   ├── scripts/test.mjs       `npm test`: builds tv/test into one page, runs it in headless Chrome/Edge (CHROME_PATH) at 1920×1080, prints results
-│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), harness.ts (test/eq/mount), run.ts, index.html
+│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), pckeys.test.ts (PC/remote keys, type-to-search), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
 │       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
 │       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback; jump/move/remove for Up next); MusicProvider in main.tsx
 │       ├── random.tsx         Play Random: the video queue (module store, sessionStorage; queueNext for the player), PlayRandomButton
 │       ├── Queue.tsx          "Up next" panel ([data-trap]): rows with ▲ ▼ ✕, OK plays; video queue (Player) and music queue (NowPlaying)
 │       ├── api.ts             Server address, bearer token, fetch wrapper, media ticket + media() URL rewriting; other servers of this TV (extras: apiFor/mediaFor(rid), checkExtras, sources() for everywhere.ts)
-│       ├── nav.ts             Spatial navigation (arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
+│       ├── platform.ts        Which device: tizen / firetv / theatre (served at /theatre/) / dev; pc(); `local`/`session` storage with `bams.theatre.` keys in theatre mode
+│       ├── pckeys.ts          PCs: PC and remote keys → the remote's codes (press), Home/Menu/Search actions, type-to-search, Media Center shortcuts, Media Session, Back history trap; key watcher for Settings' remote test
+│       ├── scale.ts · pointer.ts  PCs: zoom the 1920-wide page to the window (--page-h, pageZoom) · the mouse (pointer shown while moving, hover focus, wheel, hidden-pointer clicks go to the focused element)
+│       ├── nav.ts             Spatial navigation (reveal() works in unzoomed pixels: layoutRect; arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
 │       ├── hold.ts            Holding OK: on a [data-hold] element a long press sends "contextmenu" instead of a click (key-up before HOLD_MS = press; repeats = hold, for remotes without key-ups); App.tsx calls okDown/okUp
-│       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo; on a Fire TV the bridge's)
+│       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo; on a Fire TV the bridge's); a theatre PC's name from the user agent
 │       ├── firetv.ts          Fire TV bridge: window.BamsAndroid (device info + FireCaps, exit, player calls) and window.bamsHost (keys, player events); no-op elsewhere
 │       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface
-│       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, BROWSER caps) → direct / remux / convert; convertHeight, pickFile, pickAudio
+│       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, a PC's browser asked like the web's canDecode) → direct / remux / convert; convertHeight, pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── ListMenu.tsx       Hold-OK menu: on/off the watch list (`setListed` on the item's server), `useListName`
 │       ├── PlaylistMenus.tsx  Your own playlists: HoldMenu, AddToPlaylistMenu, NewPlaylistMenu, EditPlaylistMenu, PlaylistTrackMenu (move up/down, take out)
@@ -651,6 +656,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/items/{id}/folders` (admin) → `{folders: [{path, files, missing}], more}` | a show's folders / a movie's files on the server | FixMatch |
 | `GET /api/files/{id}/audio?t=` | music converted to AAC (fMP4, `audio/mp4`) or FLAC (`audio/flac`, per `music_output`) from `t` | music.tsx |
 | `GET /api/images/{path}` | cached artwork (path-traversal checked) | everywhere |
+| `GET /theatre` → 308 `/theatre/`, `/theatre/…` | the TV page (`tv/dist`; installed `bams/theatre`), no fallback, page not cached (`TheatreFiles`) | — |
 | everything else | `web/dist` with SPA fallback (`SpaFiles`) | — |
 
 Every `/api/` route needs a session except `/api/auth/state|login|setup` (401 otherwise; the UI then shows the
@@ -709,6 +715,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 
 | I want to… | Go to |
 |---|---|
+| Theatre mode: a remote's key, the mouse, screen size | `tv/src/pckeys.ts` (+ a row in `tv/test/pckeys.test.ts`), `pointer.ts`, `scale.ts`; anything PC-only checks `platform.pc()` |
+| Theatre mode: what a PC's browser plays, the fallback order | `tv/src/plan.ts` (`pcCaps`), `screens/Player.tsx` `begin` / `fail` |
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
 | How hyphenated names are read | `parse._read` / `_protect` / `_GLUED` (what the other half may have been read as) |
 | OpenSubtitles: what's asked, how results are shown | `opensubtitles.lookup` / `_params` / `_result` / `search`; web `FindSubtitles.tsx`, TV `FindSubs` (`screens/Player.tsx`); languages in `web/src/subtitleLangs.ts` |

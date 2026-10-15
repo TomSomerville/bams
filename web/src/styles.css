@@ -830,3 +830,10 @@ button.nav-item { background: none; border: 0; font: inherit; text-align: left; 
 /* the playing song's format and quality (quality.ts), under its title and artist */
 .np-quality { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--cyan); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 720px) { .np-text { gap: 1px; } .np-title { font-size: 14px; } .np-artist { font-size: 12px; } }
+
+/* Settings → Theatre mode: start-up lines to copy */
+#theatre details { margin-top: 10px; }
+#theatre summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+#theatre h4 { margin: 14px 0 6px; font-size: 13px; }
+.code-block { background: var(--surface-2, #1d222b); border: 1px solid var(--border, #272d38); border-radius: 8px;
+  padding: 10px 12px; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; user-select: text; }

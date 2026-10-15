@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 import anyio
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -530,7 +530,19 @@ class SpaFiles(StaticFiles):
         return resp
 
 
-def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | None = None) -> FastAPI:
+class TheatreFiles(StaticFiles):
+    """The TV page for theatre PCs (/theatre/): static files, the page itself never cached (like SpaFiles), and no
+    fallback to index.html: the TV page has no URL routes, so a missing file is a 404."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        if resp.media_type == "text/html":
+            resp.headers["cache-control"] = "no-cache"
+        return resp
+
+
+def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | None = None,
+               theatre_dir: Path | None = None) -> FastAPI:
     bootstrap(paths)
     scheduler = Scheduler(paths)
     _con = connect(paths.db)
@@ -2392,6 +2404,16 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if os.path.commonpath([str(p), str(base)]) != str(base) or not p.is_file():
             raise HTTPException(404, "no such image")
         return FileResponse(p, headers={"cache-control": "public, max-age=604800"})
+
+    # -- theatre mode: the TV app's page for PCs at a TV (tv/ built), before the web UI so "/" doesn't swallow it.
+    # Starlette's mount doesn't match "/theatre" without the slash (it would fall through to the web UI), and the
+    # page's ./assets paths only resolve under the slash.
+    if theatre_dir and (theatre_dir / "index.html").is_file():
+        @app.get("/theatre", include_in_schema=False)
+        def theatre_slash():
+            return RedirectResponse("/theatre/", status_code=308)
+
+        app.mount("/theatre", TheatreFiles(directory=theatre_dir, html=True), name="theatre")
 
     # -- web UI (the built React app), if present
     if web_dir and (web_dir / "index.html").is_file():

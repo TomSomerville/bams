@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type ServerStatus } from "../api";
 import { useAuth } from "../auth";
 import Icon from "./Icon";
+import { inApp } from "../android";
 
 /** The signed-in user's initial; the menu has their account page and signing out. */
 function Account() {
@@ -22,6 +23,8 @@ function Account() {
         <div className="account-menu" role="menu">
           <div className="account-name">{user.name}<span className="muted">{user.is_admin ? "Admin" : "Viewer"}</span></div>
           <Link to="/settings#account" role="menuitem">Account &amp; password</Link>
+          {/* BAMS's TV screens for a PC at a TV (served at /theatre/); not in the phone app */}
+          {!inApp && <a href="/theatre/" role="menuitem">Theatre mode</a>}
           <button role="menuitem" onClick={signOut}>Sign out</button>
         </div>
       )}

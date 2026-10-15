@@ -7,6 +7,7 @@ export type { ItemSummary, ItemDetail, ContinueItem, WatchlistItem, FileInfo, Au
   from "../../web/src/api";
 import type { User } from "../../web/src/api";
 import type { Source } from "../../web/src/everywhere";
+import { local, theatre } from "./platform";
 
 export class ApiError extends Error {
   /** `data`: the server's whole answer ({detail, code_required…}) */
@@ -20,22 +21,16 @@ export const SIGNED_OUT = "bams:signed-out";
 
 const KEYS = { server: "bams.server", token: "bams.token", user: "bams.user" };
 
-function read(k: string): string | null {
-  try {
-    return localStorage.getItem(k);
-  } catch {
-    return null;
-  }
-}
+// theatre mode keeps its own keys, apart from the web UI's on the same origin (platform.ts)
+const read = (k: string): string | null => local.get(k);
 
 function write(k: string, v: string | null) {
-  try {
-    if (v === null) localStorage.removeItem(k);
-    else localStorage.setItem(k, v);
-  } catch { /* storage unavailable: this session only */ }
+  if (v === null) local.remove(k);
+  else local.set(k, v);
 }
 
-let server = read(KEYS.server);
+// theatre mode: the server the page came from is its first server (platform.ts)
+let server = theatre() ? location.origin : read(KEYS.server);
 let token = read(KEYS.token);
 let ticket: { prefix: string; at: number } | null = null;
 
@@ -82,7 +77,7 @@ export async function hello(base: string, timeoutMs = 2500): Promise<Hello | nul
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${base}/api/hello`, { signal: ctl.signal });
+    const r = await fetch(`${base}/api/hello`, { signal: ctl.signal, credentials: "omit" });
     const d = r.ok ? await r.json() : null;
     return d && d.app === "bams" ? d : null;
   } catch {
@@ -100,7 +95,7 @@ async function call<T>(method: string, path: string, body?: unknown, opts: { aut
   let r: Response;
   try {
     r = await fetch(server + path, {
-      method, headers, keepalive: opts.keepalive,
+      method, headers, keepalive: opts.keepalive, credentials: "omit",
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -128,11 +123,39 @@ export const api = {
   /** public endpoints (linking): no token sent */
   publicPost: <T>(p: string, b: unknown) => call<T>("POST", p, b, { auth: false }),
   text: async (p: string): Promise<string> => {
-    const r = await fetch(server + p, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+    const r = await fetch(server + p, { credentials: "omit", headers: token ? { authorization: `Bearer ${token}` } : {} });
     if (!r.ok) throw new ApiError(r.status, `HTTP ${r.status}`);
     return r.text();
   },
 };
+
+// Every request above omits cookies: in theatre mode the page shares its origin with the web UI, and the server
+// would take the web UI's session cookie over this page's token (and a sign-out would end the web UI's session).
+
+/** Theatre mode: who is signed in to the web UI in this browser (its cookie), or null. The one read that sends it. */
+export async function webUser(): Promise<User | null> {
+  if (!theatre()) return null;
+  try {
+    const r = await fetch("/api/auth/state", { credentials: "same-origin" });
+    return r.ok ? ((await r.json()) as { user: User | null }).user : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Theatre mode: link this page to the account signed in to the web UI here, like entering the link code on the web:
+ *  a code, approved with the web UI's cookie (same origin), then the token. */
+export async function linkWithWebUser(device: string): Promise<{ token: string; user: User }> {
+  const s = await api.publicPost<{ code: string; secret: string }>("/api/devices/link", { name: device });
+  const ok = await fetch("/api/devices/approve", {
+    method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: s.code }),
+  });
+  if (!ok.ok) throw new ApiError(ok.status, "The web UI's sign-in wasn't accepted. Sign in with name and password.");
+  const r = await api.publicPost<{ status: string; token?: string; user?: User }>("/api/devices/link/poll", { secret: s.secret });
+  if (r.status !== "linked" || !r.token || !r.user) throw new ApiError(0, "Linking didn't finish. Try again.");
+  return { token: r.token, user: r.user };
+}
 
 const TICKET_REFRESH = 6 * 3600 * 1000;  // the server's last 24 h; ask again well before that
 
@@ -217,7 +240,7 @@ async function fetchAt<T>(e: Extra, method: string, path: string, body?: unknown
   let r: Response;
   try {
     r = await fetch(e.url + path, {
-      method, keepalive: opts.keepalive, signal: ctl?.signal,
+      method, keepalive: opts.keepalive, signal: ctl?.signal, credentials: "omit",
       headers: { authorization: `Bearer ${e.token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -282,7 +305,7 @@ export function apiFor(rid: number | undefined): Api {
       del: (p) => go("DELETE", p),
       text: async (p) => {
         const e = findExtra(rid);
-        const r = await fetch(e.url + p, { headers: e.token ? { authorization: `Bearer ${e.token}` } : {} });
+        const r = await fetch(e.url + p, { credentials: "omit", headers: e.token ? { authorization: `Bearer ${e.token}` } : {} });
         if (!r.ok) throw new ApiError(r.status, `HTTP ${r.status}`);
         return r.text();
       },
@@ -323,11 +346,38 @@ export async function checkExtras(): Promise<Record<number, string | null>> {
   return out;
 }
 
+// ---- tickets after a server restart. A ticket is signed with a key that lives only in the server's process, so a
+// server update or restart kills every ticket, while a TV or theatre PC that only slept keeps its page (and its old
+// tickets) for hours. When media fails to load, or the page comes back from a sleep, ask every server again.
+
+let lastRenew = 0;
+
+/** Fresh media tickets from every server (at most every 20 s, however many pictures failed at once). */
+export async function renewTickets(): Promise<void> {
+  if (Date.now() - lastRenew < 20000) return;
+  lastRenew = Date.now();
+  extraTickets.clear();
+  await Promise.all([
+    token ? refreshTicket(true).catch(() => undefined) : undefined,
+    ...extras().filter((e) => e.token).map((e) => ensureExtraTicket(e).catch(() => undefined)),
+  ]);
+}
+
+/** A media URL made with an old ticket, made again with the current one ("…/api/t/<old>/images/x" → "…/api/t/<new>/images/x"). */
+export function withFreshTicket(url: string): string | null {
+  const m = /^(https?:\/\/[^/]+)\/api\/t\/[^/]+(\/.*)$/.exec(url);
+  if (!m) return null;
+  const [, base, rest] = m;
+  if (base === server) return media(`/api${rest}`);
+  const e = extras().find((x) => x.url === base);
+  return e ? mediaFor(e.id)(`/api${rest}`) : null;
+}
+
 /** POST to a public endpoint of a server that isn't on the TV yet (linking it). */
 export async function publicPostTo<T>(base: string, path: string, body: unknown): Promise<T> {
   let r: Response;
   try {
-    r = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    r = await fetch(base + path, { method: "POST", credentials: "omit", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch {
     throw new ApiError(0, `Can't reach the BAMS server at ${base.replace(/^https?:\/\//, "")}.`);
   }

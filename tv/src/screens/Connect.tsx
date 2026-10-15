@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { extras, getServer, hello, normalizeServer, setServer, type Hello } from "../api";
 import { focusFirst } from "../nav";
 import { localIp } from "../tizen";
+import { deviceWord } from "../platform";
 
 const PORT = 8484;
 
@@ -73,7 +74,7 @@ export default function Connect({ onConnected, adding }: {
         "running, and that it accepts connections from the network (not only from its own PC).");
     }
     if (adding) {
-      if (url === getServer()) return setErr(`${h.name} is already this TV's server.`);
+      if (url === getServer()) return setErr(`${h.name} is already this ${deviceWord()}'s server.`);
       return adding.onPick(url, h.name);  // already in the list: linking again is how a signed-out one comes back
     }
     setServer(url);
@@ -90,7 +91,7 @@ export default function Connect({ onConnected, adding }: {
         {found.map((f, i) => (
           <button key={f.url} className="btn server" data-autofocus={i === 0 || undefined} onClick={() => void connect(f.url)}>
             <strong>{f.hello.name}</strong>
-            <span>{f.url.replace(/^https?:\/\//, "")} · BAMS {f.hello.version}{adding && here(f.url) ? " · already on this TV" : ""}</span>
+            <span>{f.url.replace(/^https?:\/\//, "")} · BAMS {f.hello.version}{adding && here(f.url) ? ` · already on this ${deviceWord()}` : ""}</span>
           </button>
         ))}
         {scanning && <p className="muted">Looking on your network{looked ? ` (${looked})` : ""}… {scanning.done} of {scanning.total}</p>}

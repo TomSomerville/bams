@@ -17,6 +17,7 @@ import { useMusic } from "../music";
 import { focusId } from "../nav";
 import { QueuePanel } from "../Queue";
 import { PlayRandomButton } from "../random";
+import { session } from "../platform";
 
 const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists" } as const;
 type Tab = keyof typeof TABS;
@@ -25,7 +26,7 @@ type Tab = keyof typeof TABS;
 export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name: string }) {
   const nav = useNav();
   const key = rid === undefined ? `${id}` : `r${rid}.${id}`;
-  const [tab, setTab] = useState<Tab>(() => (sessionStorage.getItem(`bams.mtab.${key}`) as Tab) || "artist");
+  const [tab, setTab] = useState<Tab>(() => (session.get(`bams.mtab.${key}`) as Tab) || "artist");
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [lists, setLists] = useState<PlaylistSummary[] | null>(null);
   const [mine, setMine] = useState<UserPlaylistSummary[] | null>(null);
@@ -33,7 +34,7 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    sessionStorage.setItem(`bams.mtab.${key}`, tab);
+    session.set(`bams.mtab.${key}`, tab);
     setItems(null);
     setLists(null);
     const api = apiFor(rid);

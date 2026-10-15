@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFor, mediaFor, refreshTicket, type FileInfo, type ItemDetail, type SubtitleSearch, type SubtitleTrack } from "../api";
+import { apiFor, mediaFor, refreshTicket, renewTickets, type FileInfo, type ItemDetail, type SubtitleSearch, type SubtitleTrack } from "../api";
 import { useNav } from "../App";
 import { AvplayEngine, ExoEngine, hasAvplay, hasExo, VideoEngine, type Engine } from "../engine";
 import { clock, sxe } from "../format";
@@ -11,6 +11,7 @@ import { prefs, setPref } from "../prefs";
 import { QueuePanel } from "../Queue";
 import { entrySub, moveVideo, queueIndex, queueNext, removeVideo, useVideoQueue } from "../random";
 import { isBack, KEY } from "../tizen";
+import { pc } from "../platform";
 import { defaultLanguage, languageName, OS_LANGUAGES } from "../../../web/src/subtitleLangs";
 
 type Cue = { start: number; end: number; text: string };
@@ -55,7 +56,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
   // what callbacks need without re-binding
   const st = useRef({ file: null as FileInfo | null, audio: 0, sub: null as SubtitleTrack | null, mode: null as Mode | null,
     session: null as string | null, started: false, startAt: 0, fellBack: false, duration: null as number | null,
-    item: null as ItemDetail | null, seek: null as number | null, ended: false, sleep: sleeping ?? null as number | null });
+    item: null as ItemDetail | null, seek: null as number | null, ended: false, sleep: sleeping ?? null as number | null,
+    // a PC's fallback steps (fail): Dolby sound copied this time, AAC wanted instead, the remux tried
+    passed: false, noPass: false, triedRemux: false });
   const timers = useRef<{ osd?: ReturnType<typeof setTimeout>; seek?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setInterval> }>({});
 
   // Play Random (random.tsx): while this video is in the random queue, "next" is the queue's next, not the next episode
@@ -108,11 +111,13 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         url = media(f.stream_url);
       } else {
         if (!f.playback.hls_url) throw new Error("The server can't convert video (FFmpeg wasn't found there).");
-        // a Fire TV takes fMP4 (which keeps Dolby Vision); Dolby sound is copied when the device plays it
+        // a Fire TV and a PC's browser take fMP4 (which keeps Dolby Vision; hls.js refuses E-AC-3 in MPEG-TS);
+        // Dolby sound is copied when the device plays it (on a PC, until that failed once)
         const track = f.probe?.audio[s.audio];
+        s.passed = hasAvplay() || ((hasExo() || (pc() && !s.noPass)) && !!track && caps().audio.has(track.codec));
         const r = await api.post<{ id: string; playlist: string }>(f.playback.hls_url, {
-          remux: how.mode !== "convert", ts: !hasExo(), audio: s.audio, channels: 6, start: at,
-          passthrough: hasAvplay() || (hasExo() && !!track && caps().audio.has(track.codec)),
+          remux: how.mode !== "convert", ts: !hasExo() && !pc(), audio: s.audio, channels: 6, start: at,
+          passthrough: s.passed,
           height: how.mode === "convert" ? convertHeight() : undefined, burn: burn ?? undefined,
         });
         s.session = r.id;
@@ -130,13 +135,25 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     }
   }, []);
 
-  /** Something went wrong: fall back to the server converting everything once, else show the error. */
+  /** Something went wrong: fall back to the server converting everything once, else show the error. A PC's browser
+   *  first tries the cheap steps, as the web player does: Dolby sound converted to AAC, the file remuxed (video
+   *  copied, sound converted). Each retry first gets fresh media tickets: a server restart kills the old ones. */
   const fail = (msg: string) => {
     const s = st.current;
+    const now = engine.current?.time() || s.startAt;
+    const at = now > 0 ? now : s.startAt;
+    const retry = (mode: Mode) => void renewTickets().then(() => begin(at, mode));
+    if (pc() && s.mode === "remux" && s.passed && !s.noPass) {
+      s.noPass = true;
+      return retry("remux");
+    }
+    if (pc() && s.mode === "direct" && !s.triedRemux && st.current.file?.playback.hls_url) {
+      s.triedRemux = true;
+      return retry("remux");
+    }
     if (s.mode !== "convert" && !s.fellBack) {
       s.fellBack = true;
-      const at = engine.current?.time() || s.startAt;
-      return void begin(at > 0 ? at : s.startAt, "convert");
+      return retry("convert");
     }
     setBuffering(false);
     setError(msg || "This video couldn't be played.");

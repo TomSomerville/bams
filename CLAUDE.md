@@ -70,7 +70,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 343 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 346 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\owner\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -338,4 +338,23 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   ever redone: Tizen Studio refuses folders outside the user's home and replaces symlinks (give it its own `HOME=` and
   `JAVA_TOOL_OPTIONS=-Duser.home=`), and `cert-add-on` pulls the IDE and `sudo apt install`s a 2016 WebKitGTK.
 - **TV tests on the Linux PC** need `CHROME_PATH=~/sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`.
+- **Theatre mode is the TV page served at `/theatre/`, on the web UI's own origin** (docs/THEATRE.md). So: its storage
+  goes through `platform.ts` `local`/`session` (`bams.theatre.*` keys; the web UI uses `bams.servers` in another shape),
+  and every fetch in `tv/src/api.ts` has `credentials: "omit"`: `LoginRequired` takes a cookie over a bearer token, so
+  the web UI's cookie would make the page act as that user and its sign-out end the web session. PC-only behaviour
+  (keys, mouse, zoom, browser codecs) checks `platform.pc()`; the Samsung/Fire TV paths stay as they were. Theatre
+  mode signs in with name and password only (owner); keep the link code for the TVs.
+- **The PC page is zoomed to the window (CSS `zoom`, `scale.ts`):** `getBoundingClientRect()` is then in zoomed pixels
+  but `scrollTop`/`scrollLeft` aren't (measured in Chrome 155). Code mixing them must convert, as `nav.ts` `layoutRect`
+  does. Hover focus uses `focus({preventScroll})`, never `nav.focus()` (it would scroll the page under the pointer).
+- **Browsers get copy-HLS in fMP4, never MPEG-TS** (`ts` only for Samsung): hls.js refuses E-AC-3 in TS. A theatre box
+  runs Chrome/Chromium in kiosk mode with its own `--user-data-dir`; **Edge's `--kiosk` is always InPrivate** (the box
+  would forget its sign-in at every boot). A plain-http LAN page has no Keyboard Lock or Clipboard API (secure context
+  only): don't build on them.
+- **Media tickets die with a server restart** (the key lives in the process): the TV page renews them when a picture or
+  the player fails, or the page comes back from a sleep (`api.renewTickets`, `withFreshTicket`). Keep that for any new
+  media the page loads.
+- **`python -m bams` loads a `bams/` from the current folder first:** started from another checkout's `server/` (e.g. a
+  worktree), it runs that code and serves that checkout's builds. Start servers from a neutral folder (the sandbox's
+  `bams.sh` `cd`s to its own).
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

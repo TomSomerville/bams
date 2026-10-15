@@ -67,6 +67,8 @@ Settings live in `/etc/default/bams` (which account BAMS runs as, the address an
    library) lists files whose names didn't say what they are. Paste a TMDB or IMDb link for each, or type the show,
    season and episode (the fields suggest what's already there). Better still, rename them
    (`Show Name/Season 01/Show Name - S01E01.mkv`, `Movie Name (Year)/Movie Name (Year).mkv`).
+6. **A PC at a TV?** Theatre mode makes it a remote-driven BAMS box that starts by itself: see
+   [THEATRE.md](THEATRE.md).
 
 ## Updating
 

@@ -3,6 +3,7 @@
 // bridge answers instead of Tizen; its remote's keys arrive with the same codes).
 
 import { fireInfo, onFireTv } from "./firetv";
+import { theatre } from "./platform";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -56,7 +57,16 @@ export function deviceName(): string {
     const model = window.webapis?.productinfo?.getRealModel?.() || window.webapis?.productinfo?.getModel?.();
     if (model) return `Samsung ${model}`;
   } catch { /* fall through */ }
+  if (theatre()) return `Theatre · ${browserName()}`;
   return onTv() ? "Samsung TV" : "Browser";
+}
+
+/** "Chrome on Linux", from the user agent (a theatre PC's name in Settings → Your TVs on the web). */
+function browserName(): string {
+  const ua = navigator.userAgent;
+  const b = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : "a browser";
+  const os = /Windows/.test(ua) ? "Windows" : /CrOS/.test(ua) ? "ChromeOS" : /Mac OS/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${b} on ${os}` : b;
 }
 
 const isIp = (ip: unknown): ip is string => typeof ip === "string" && /^\d+\.\d+\.\d+\.\d+$/.test(ip) && ip !== "0.0.0.0";

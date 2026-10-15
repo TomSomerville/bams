@@ -46,7 +46,7 @@ tag (`gh workflow run windows-installer.yml -f tag=v0.17.1`). It checks the buil
 |---|---|---|
 | Python | embeddable CPython (pinned in `pins.json`), in `{app}\python`; its `._pth` file is the whole `sys.path` | the distribution's `python3` (3.11+), a venv in `/opt/bams/venv` built by `postinst` |
 | Python packages | `requirements.txt` (locked, hash-checked), installed at build time into `{app}\lib` | wheels for Python 3.11–3.14 × x86_64/aarch64 in `/opt/bams/wheels`, installed offline by `postinst` (PyPI only as a fallback) |
-| BAMS + UI | `{app}\app\bams`, UI in `bams\web` (found by `__main__._web_dir`) | `/opt/bams/lib/bams` (+ `web`), on the venv's path via `bams.pth` |
+| BAMS + UI | `{app}\app\bams`, UI in `bams\web` (found by `__main__._web_dir`), the TV page for theatre mode in `bams\theatre` (`_theatre_dir`) | `/opt/bams/lib/bams` (+ `web`, `theatre`), on the venv's path via `bams.pth` |
 | FFmpeg | **not bundled**: the installer downloads the pinned gyan.dev build (`pins.json`, SHA-256 checked) into `{app}\ffmpeg`, found by `probe.app_ffmpeg_dir` | apt dependency `ffmpeg` |
 | Runs as | Windows service `BAMS` (WinSW, LocalSystem, automatic start, restarts on failure) | systemd `bams.service` as the desktop user (`/etc/default/bams` → drop-in), `ProtectSystem=strict` |
 | Data | `C:\ProgramData\BAMS` (ACL: SYSTEM + Administrators only) | `/var/lib/bams` |
