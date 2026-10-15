@@ -297,7 +297,8 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   paths untouched by them and add a case to `tv/test/firetv.test.ts`. OK on a text box must stay a simulated tap
   (`MainActivity.kt`): asking Android for the keyboard directly opened it on a dead input connection and it closed at once.
 - **Fire TV releases need the release key** (`C:\Users\Beached\bams-firetv.jks`, passwords in git-ignored
-  `firetv/keystore.properties`, made at 0.12.0): an APK signed with any other key won't install over a released one.
+  `firetv/keystore.properties`, made at 0.12.0); a copy is on the Linux PC since 2026-10-15
+  (`/mnt/Data/Sandboxes/Android/bams-firetv.jks`, checked against the released 0.15.0 APK): an APK signed with any other key won't install over a released one.
   Never commit either; a lost key means every Fire TV reinstalls and signs in again. Debug and release builds don't
   install over each other (`adb uninstall media.bams.firetv` first).
 - **A saved position of 0 doesn't mean playback was stuck:** `watch.record_progress` stores positions under
@@ -335,6 +336,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Tizen Studio on Linux refuses folders outside the user's home** and replaces symlinks with real folders: it lives
   in its own home, `/mnt/Data/Sandboxes/tizen-home` (installer/package manager run with `HOME=` and
   `JAVA_TOOL_OPTIONS=-Duser.home=`, the `tz` helper in `tizen-env.sh`). Don't install `cert-add-on` there: it pulls the
-  IDE and `sudo apt install`s a 2016 WebKitGTK. Certificates are made on Windows, used on Linux.
+  IDE and `sudo apt install`s a 2016 WebKitGTK. Certificates are made on Windows, used on Linux. The BAMS author/distributor certificates are in
+  `/mnt/Data/Sandboxes/tizen-home/certificates/` (2026-10-15, both match the released 0.15.0 `.wgt`).
 - **TV tests on the Linux PC** need `CHROME_PATH=/mnt/Data/Sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
