@@ -3,7 +3,7 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
-## Unreleased
+## 0.18.0 (2026-10-15)
 
 ### Added
 - **Theatre mode**: BAMS for a PC plugged into a TV, driven by a remote. The same screens as the BAMS TV apps, full
@@ -17,6 +17,8 @@ accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating
 ### Fixed
 - After a server update or restart, a TV (or theatre PC) that had only slept showed no pictures and couldn't play
   until it was restarted: it now fetches fresh media access by itself (TV apps: from their next release).
+
+Update the server with the new installer. The TV apps are unchanged (0.15.0).
 
 ## 0.17.1 (2026-10-14)
 
