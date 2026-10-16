@@ -450,8 +450,8 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** TV tests 44 passed, `tsc`. Test copy (:8510) with six fake downloads at 1920x1080: with Timing shown,
   Down to the last subtitle keeps it on screen (list scrolled 302 px, bottom at 1020/1080); Right → Remove → OK takes
   it off (server row and file gone), focus back on the ticked option; removing the one in use → Off.
-- **Left open:** to be tried by the owner on the main server with real OpenSubtitles downloads; Samsung/Fire TV get the
-  menu fix at their next release.
+- **Owner:** on the main server (0.18.1) with real OpenSubtitles downloads: "It works".
+- **Left open:** Samsung/Fire TV get the menu fix at their next release.
 
 ### 2026-10-15: Theatre mode: the TV page in a browser on a PC at a TV (release 0.18.0)
 - **What / why:** owner uses small PCs with USB remotes (keyboard on the back) at TVs, with Plex HTPC, and wanted that
