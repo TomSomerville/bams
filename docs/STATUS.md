@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-15** (theatre mode, not released yet).
+Last updated: **2026-10-15** (release 0.18.0, theatre mode).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -438,7 +438,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
-### 2026-10-15: Theatre mode: the TV page in a browser on a PC at a TV (not released yet)
+### 2026-10-15: Theatre mode: the TV page in a browser on a PC at a TV (release 0.18.0)
 - **What / why:** owner uses small PCs with USB remotes (keyboard on the back) at TVs, with Plex HTPC, and wanted that
   for BAMS, "if possible a toggle for the web version". Planned as two steps (browser theatre mode, then a Qt WebEngine
   + libmpv app); the owner tried step 1, liked it and set the app aside. The server serves the TV page at `/theatre/`;
@@ -460,7 +460,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   Lock/Clipboard, Media Session works; CSS zoom: rectangles zoomed, scrollTop not.
 - **Owner:** on the sandbox (:8485): "It works perfect so far".
 - **Left open:** see §5 item 6 (Windows/Firefox untried, no passthrough/HDR in browsers, on-screen keyboard, TV smoke
-  test at the next TV release). Not released: needs a server release to reach the owner's server.
+  test at the next TV release). Released as 0.18.0 (server only; TV apps unchanged).
 
 ### 2026-10-14: Lock-screen controls for streamed music in the Android app (release 0.17.1, app 0.2.1)
 - **What / why:** owner picked it from the left-open list: music streamed online in the app played in the page
