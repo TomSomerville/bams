@@ -3,6 +3,16 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.18.1 (2026-10-15)
+
+### Fixed
+- **Subtitles menu in theatre mode**: with several subtitles the selection went down out of sight and the options
+  below (Check OpenSubtitles…) couldn't be reached. The list now scrolls. (TV apps: from their next release.)
+
+### Added
+- **Remove downloaded subtitles from the player** in theatre mode: press Right on a downloaded subtitle to reach
+  **Remove** (whoever downloaded it, or an admin), as on the web.
+
 ## 0.18.0 (2026-10-15)
 
 ### Added

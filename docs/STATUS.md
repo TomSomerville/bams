@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-15** (release 0.18.0, theatre mode).
+Last updated: **2026-10-15** (release 0.18.1).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -381,7 +381,7 @@ Roughly in priority order:
 3. **ISO / DVD / Blu-ray folders** (phase 3).
 4. **Packaging leftovers**: code-signing the `.exe` (SmartScreen warning).
 5. **OpenSubtitles leftovers:** not yet tried with a real key (built and tested against a fake; the API was read
-   from their docs and probed with a made-up key); downloaded subtitles can be removed only on the web; machine-made
+   from their docs and probed with a made-up key); downloaded subtitles can't be saved next to the video ("Download locally") from the TV/theatre player, only removed; machine-made
    translations are left out (their default); subtitles split over 2 CDs are skipped.
 6. **Theatre mode leftovers:** not tried on Windows (Chrome kiosk, the PowerShell start-up) or with Firefox; no
    bitstream passthrough or real HDR in a browser (a native app was planned and set aside, see the 10-15 decisions);
@@ -437,6 +437,21 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-15: Subtitle menu scrolls to its end; remove downloaded subtitles on the TV/theatre player (release 0.18.1)
+- **What / why:** owner testing theatre mode: with 3+ downloaded subtitles the selection went down out of sight (the
+  menu list had a fixed 900 px height under the title and the Timing control, so its bottom ran off a 1080 screen;
+  TVs too), and there was no way to remove the ones not wanted (web only). The menu list now fills the menu's height
+  left (flex) and scrolls; downloaded subtitles get a Remove button beside them (Right from the option) for whoever
+  downloaded them or an admin (same rule as `DELETE /api/files/{id}/subtitles/{track}`); removing the one in use
+  turns subtitles off.
+- **Files:** `tv/src/screens/Player.tsx` (`Menu` `remove`, `removeSub`, `mayRemove`), `tv/src/styles.css` (`.menu`
+  flex, `.menu-list`, `.menu-row`).
+- **Verified:** TV tests 44 passed, `tsc`. Test copy (:8510) with six fake downloads at 1920x1080: with Timing shown,
+  Down to the last subtitle keeps it on screen (list scrolled 302 px, bottom at 1020/1080); Right → Remove → OK takes
+  it off (server row and file gone), focus back on the ticked option; removing the one in use → Off.
+- **Left open:** to be tried by the owner on the main server with real OpenSubtitles downloads; Samsung/Fire TV get the
+  menu fix at their next release.
 
 ### 2026-10-15: Theatre mode: the TV page in a browser on a PC at a TV (release 0.18.0)
 - **What / why:** owner uses small PCs with USB remotes (keyboard on the back) at TVs, with Plex HTPC, and wanted that

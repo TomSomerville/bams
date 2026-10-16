@@ -213,11 +213,19 @@ p { margin: 0; }
 .round:focus, .pill:focus { background: #fff; color: #10131a; }
 .osd-mode { margin-left: auto; color: var(--muted); font-size: 22px; }
 .osd-hint { margin-top: 18px; font-size: 20px; color: rgba(255, 255, 255, 0.5); }
-.menu { position: absolute; top: 0; right: 0; bottom: 0; width: 760px; background: rgba(14, 16, 21, 0.97); padding: 60px 50px; }
+.menu { position: absolute; top: 0; right: 0; bottom: 0; width: 760px; background: rgba(14, 16, 21, 0.97); padding: 60px 50px;
+  display: flex; flex-direction: column; }
 /* a menu over a scrolled page (Settings), not over the player */
 .menu.over-page { position: fixed; z-index: 30; }
 .menu h2 { font-size: 40px; margin-bottom: 26px; }
-.menu-list { display: flex; flex-direction: column; gap: 8px; max-height: 900px; overflow: hidden; }
+/* the list takes the menu's height left under its title (and the subtitle timing): a fixed height ran off the bottom of
+   the screen, so the focus went down out of sight */
+.menu-list { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.menu > :not(.menu-list) { flex: none; }
+/* a menu row with a button beside the option (Remove a downloaded subtitle) */
+.menu-row { display: flex; gap: 12px; align-items: center; }
+.menu-row .menu-item { flex: 1; min-width: 0; }
+.menu-row .pill { flex: none; }
 .menu-item { display: flex; gap: 16px; padding: 18px 24px; border-radius: 12px; border: 3px solid transparent; font-size: 28px; }
 .menu-item .tick { width: 30px; color: var(--cyan); }
 .menu-item:focus { background: #fff; color: #10131a; }

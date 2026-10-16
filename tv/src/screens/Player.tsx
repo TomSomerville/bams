@@ -51,6 +51,8 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
   const [sleep, setSleep] = useState<number | null>(sleeping ?? null);  // null = off
   const [slept, setSlept] = useState(false);  // sleep mode stopped playback at the end
   const [found, setFound] = useState<SubtitleTrack[]>([]);  // fetched from OpenSubtitles while playing
+  const [removed, setRemoved] = useState<string[]>([]);      // downloaded subtitles taken off while playing
+  const [subNote, setSubNote] = useState<string | null>(null);  // why a removal failed
   const [osLang, setOsLang] = useState(() => defaultLanguage(prefs.osLang, prefs.subLang || null));
 
   // what callbacks need without re-binding
@@ -391,7 +393,26 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
   const show = item?.ancestors.find((a) => a.kind === "show");
   const title = show ? show.title : item?.title ?? "";
   const subtitle = item?.kind === "episode" ? `${sxe(item)} · ${item.title}` : null;
-  const subs = [...(file?.subtitles ?? []), ...found.filter((f) => !file?.subtitles?.some((x) => x.id === f.id))];
+  const subs = [...(file?.subtitles ?? []), ...found.filter((f) => !file?.subtitles?.some((x) => x.id === f.id))]
+    .filter((t) => !removed.includes(t.id));
+  // who may remove a downloaded subtitle: whoever downloaded it, or an admin (of the server the video is on)
+  const me = rid === undefined ? nav.user : nav.servers.find((x) => x.id === rid)?.user ?? null;
+  const mayRemove = (t: SubtitleTrack) => t.source === "download" && !!me && (me.is_admin || t.added_by === me.id);
+  const removeSub = async (t: SubtitleTrack) => {
+    setSubNote(null);
+    try {
+      await api.del(`/api/files/${file!.id}/subtitles/${t.id}`);
+    } catch (e) {
+      return setSubNote((e as Error).message);
+    }
+    setRemoved((r) => [...r, t.id]);
+    if (st.current.sub?.id === t.id) {
+      st.current.sub = null;
+      setSub(null);
+    }
+    // the focus was on its Remove button, which is gone: back on the ticked option
+    setTimeout(() => focus(document.querySelector<HTMLElement>(".menu .menu-item.on") ?? document.querySelector<HTMLElement>(".menu .menu-item")));
+  };
 
   return (
     <div className={`player ${osd ? "" : "hide-cursor"}`}>
@@ -450,19 +471,21 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
       )}
       {(menu === "audio" || menu === "subs") && file && (
         <Menu title={menu === "audio" ? "Sound" : "Subtitles"}
-          extra={menu === "subs" && sub && !sub.image ? (
-            <div className="menu-timing">
+          extra={menu === "subs" && (sub && !sub.image || subNote) ? (<>
+            {subNote && <p className="os-note bad">{subNote}</p>}
+            {sub && !sub.image && <div className="menu-timing">
               <span>Timing</span>
               <button className="pill" onClick={() => { const v = Math.round((subDelay - 0.1) * 10) / 10; setSubDelay(v); setPref("subDelay", v); }}>Earlier</button>
               <strong>{subDelay === 0 ? "0.0 s" : `${subDelay > 0 ? "+" : ""}${subDelay.toFixed(1)} s`}</strong>
               <button className="pill" onClick={() => { const v = Math.round((subDelay + 0.1) * 10) / 10; setSubDelay(v); setPref("subDelay", v); }}>Later</button>
-            </div>
-          ) : null}
+            </div>}
+          </>) : null}
           options={menu === "audio"
             ? (file.audio_tracks ?? []).map((t) => ({ key: `a${t.index}`, label: t.label, on: t.index === audio, pick: () => chooseAudio(t.index) }))
             : [{ key: "off", label: "Off", on: !sub, pick: () => chooseSub(null) },
               ...subs.map((t) => ({ key: t.id, label: t.label + (t.image ? " (the server converts the video)"
-                : t.source === "download" ? " (OpenSubtitles)" : ""), on: sub?.id === t.id, pick: () => chooseSub(t) })),
+                : t.source === "download" ? " (OpenSubtitles)" : ""), on: sub?.id === t.id, pick: () => chooseSub(t),
+                remove: mayRemove(t) ? () => void removeSub(t) : undefined })),
               ...(item?.opensubtitles ? [{ key: "os", label: "Check OpenSubtitles…", on: false, pick: () => setMenu("find") }] : [])]} />
       )}
 
@@ -495,8 +518,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
   );
 }
 
+/** A player menu (Sound, Subtitles). An option with `remove` gets a Remove button beside it (Right from the option). */
 function Menu({ title, options, extra }: { title: string; extra?: React.ReactNode;
-  options: { key: string; label: string; on: boolean; pick: () => void }[] }) {
+  options: { key: string; label: string; on: boolean; pick: () => void; remove?: () => void }[] }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     setTimeout(() => focus(ref.current?.querySelector<HTMLElement>(".on") ?? ref.current?.querySelector("button")));
@@ -506,11 +530,14 @@ function Menu({ title, options, extra }: { title: string; extra?: React.ReactNod
       <h2>{title}</h2>
       {extra}
       <div className="menu-list" data-scroll>
-        {options.map((o) => (
-          <button key={o.key} className={`menu-item ${o.on ? "on" : ""}`} onClick={o.pick}>
-            <span className="tick">{o.on ? "✓" : ""}</span>{o.label}
-          </button>
-        ))}
+        {options.map((o) => {
+          const option = (
+            <button key={o.key} className={`menu-item ${o.on ? "on" : ""}`} onClick={o.pick}>
+              <span className="tick">{o.on ? "✓" : ""}</span>{o.label}
+            </button>
+          );
+          return o.remove ? <div key={o.key} className="menu-row">{option}<button className="pill" onClick={o.remove}>Remove</button></div> : option;
+        })}
       </div>
     </div>
   );
