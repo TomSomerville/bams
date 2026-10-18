@@ -12,9 +12,8 @@ import { QueuePanel } from "../Queue";
 import { entrySub, moveVideo, queueIndex, queueNext, removeVideo, useVideoQueue } from "../random";
 import { isBack, KEY } from "../tizen";
 import { pc } from "../platform";
+import { cueAt, parseVtt, type Cue } from "../vtt";
 import { defaultLanguage, languageName, OS_LANGUAGES } from "../../../web/src/subtitleLangs";
-
-type Cue = { start: number; end: number; text: string };
 
 const OSD_HIDE = 5000;   // ms without a key before the controls fade while playing
 const SEEK_SETTLE = 700; // ms after the last left/right press before the seek is made
@@ -403,8 +402,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
 
   const now = seekTo ?? time;
   const dur = duration();
-  const subNow = now - subDelay;  // shown later by the timing set in the menu
-  const cue = cues.length ? cues.find((c) => subNow >= c.start && subNow <= c.end) : undefined;
+  const cue = cueAt(cues, now, subDelay);  // shown later by the timing set in the menu
   const show = item?.ancestors.find((a) => a.kind === "show");
   const title = show ? show.title : item?.title ?? "";
   const subtitle = item?.kind === "episode" ? `${sxe(item)} · ${item.title}` : null;
@@ -663,24 +661,4 @@ function pickSub(f: FileInfo, audio: number): SubtitleTrack | null {
   }
   const audioLang = f.audio_tracks?.find((t) => t.index === audio)?.language;
   return subs.find((s) => s.forced && !s.image && (!audioLang || s.language === audioLang)) ?? null;
-}
-
-/** WebVTT -> cues. Keeps <i>/<b>, drops other markup. */
-function parseVtt(text: string): Cue[] {
-  const out: Cue[] = [];
-  const t = (s: string) => {
-    const p = s.trim().split(":").map(Number);
-    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
-  };
-  for (const block of text.replace(/\r/g, "").split(/\n\n+/)) {
-    const lines = block.split("\n");
-    const i = lines.findIndex((l) => l.includes("-->"));
-    if (i < 0) continue;
-    const [a, b] = lines[i].split("-->");
-    const body = lines.slice(i + 1).join("<br>")
-      .replace(/<(?!\/?(i|b|br)>)[^>]*>/g, "")
-      .replace(/&(?!(amp|lt|gt|nbsp);)/g, "&amp;");
-    if (body.trim()) out.push({ start: t(a), end: t(b.trim().split(/\s/)[0]), text: body });
-  }
-  return out;
 }

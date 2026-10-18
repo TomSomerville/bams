@@ -443,6 +443,24 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-17: TV playback tests; sound in the first segment after a skip or resume (release 0.18.3)
+- **What / why:** owner: "run unit tests on both tv apps to verify the pausing is fixed. Sub titles still work and
+  synch, audio still syncs, and that navigation still works everywhere". The existing tests covered navigation (27 +
+  remote hold + PC keys) and the Fire TV bridge, but not a real paused stream, sound/picture sync on copy-HLS, or the
+  TV's subtitle timing. The new real-FFmpeg test found an older bug: FFmpeg seeks a hair early with B-frames (~0.13 s),
+  so a run started mid-file lands a keyframe or two early; the copied picture starts there but the converted sound
+  was trimmed to the exact seek, so that first segment had seconds of picture without sound (heard going back over a
+  skip, or after Play following a long pause). `hls_copy_cmd` now uses `-noaccurate_seek`, as the live remux does.
+- **Files:** `server/bams/stream.py` (`hls_copy_cmd`); tests `test_copy_hls_playback.py` (new); `tv/src/vtt.ts` (new:
+  `parseVtt`, `cueAt` moved out of `screens/Player.tsx`, no change in behaviour), `tv/test/subtitles.test.ts` (new).
+- **Verified:** 359 server tests (FFmpeg 9); on the owner's server (FFmpeg 6.1, /tmp copy) the playback, keyframe,
+  HLS, stream and subtitle tests pass but the known `test_encoder_choice_api`; the new test fails without the flag
+  (segment 3 silent) and passes with it, in TS and fMP4. Real files there (5, TS + fMP4): every segment exact frames
+  and sound, the first of each run included. TV tests 49 (Samsung and Fire TV page: navigation, remote, Fire TV
+  bridge, AVPlay, subtitles).
+- **Left open:** the TV apps' navigation tests run on fixture pages, not the live screens; the Fire TV app's Android
+  side has no unit tests; still not watched on the owner's TVs since 0.18.2.
+
 ### 2026-10-17: TV playback: no wait at the first play, a long pause goes on (release 0.18.2, TV apps 0.16.1)
 - **What / why:** owner: the Samsung app "has a very long pause to buffer/reload/load every time i start a video, or
   pause a video for more than a few seconds … 5 minutes later … it spins". The server's log and traffic log

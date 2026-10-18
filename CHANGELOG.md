@@ -3,6 +3,16 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.18.3 (2026-10-17)
+
+### Fixed
+- **A few seconds without sound after skipping, or after pressing Play following a long pause**, on the TVs and
+  wherever a video plays as-is with its sound converted. The server starts its work a keyframe or two before the
+  spot asked for, and that first stretch was made with picture but no sound: you heard it as a short silence when
+  you went back over it (skip ahead, then back 10 seconds). Every stretch now has its sound.
+
+Update the server with the new installer. The TV apps are unchanged (0.16.1).
+
 ## 0.18.2 (2026-10-17)
 
 ### Fixed

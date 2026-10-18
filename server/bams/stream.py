@@ -762,7 +762,10 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
         raise RuntimeError("FFmpeg not found")
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin"]
     if seek > 0:
-        cmd += ["-ss", f"{seek:.3f}"]
+        # noaccurate_seek: the converted sound starts where the copied picture does. FFmpeg seeks a hair early
+        # (B-frames), lands a keyframe or more before `seek`, and by default trims the sound to `seek`: the run's
+        # first segment had seconds of picture with no sound (heard after a skip, or Play after a long pause)
+        cmd += ["-noaccurate_seek", "-ss", f"{seek:.3f}"]
     cmd += ["-copyts", "-start_at_zero", "-i", str(path), "-map", "0:v:0", "-map", f"0:a:{audio_index}?",
             "-c:v", "copy"]
     if video_codec == "HEVC" and not ts:

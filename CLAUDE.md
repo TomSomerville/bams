@@ -70,7 +70,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 357 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 359 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\owner\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -151,6 +151,10 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   variant's folder** (`spawn(cwd=)`): FFmpeg ≤ 6.1 (Debian/Ubuntu) prefixes the playlist's folder even to an absolute
   name (ENOENT, every Ubuntu copy-HLS failed), FFmpeg 9 puts a bare name in the working dir; serve `init.mp4` only once a segment exists (it's written gradually). ffprobe applies the
   edit list, so compare segments by video packet pts or `tfdt`, not "first packet".
+- **Every FFmpeg input seek that copies the video and converts the sound needs `-noaccurate_seek`** (live remux, and
+  copy-HLS since 0.18.3): FFmpeg seeks ~0.13 s early when there are B-frames and lands a keyframe or two before the
+  target; the copied picture starts there, but by default the sound is trimmed to the exact target, so the start had
+  picture without sound (copy-HLS: a silent first segment; `test_copy_hls_playback.py` checks every segment's sound).
 - **Copy-HLS segments are named by time, never by FFmpeg's count** (0.18.2): FFmpeg cuts at every keyframe *it* sees,
   which can be more than the list has (its H.264 parser flags I-frames mkvmerge doesn't; mkvmerge leaves keyframes
   out of the Cues). Each run writes pieces into `<v>/run<n>/`; `hls._publish` times them by the run's start + FFmpeg's
