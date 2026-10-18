@@ -7,14 +7,20 @@ With HLS the player gets every segment listed up front (VOD playlists) and asks 
   "Auto" quality lists them all in a master playlist and hls.js picks one by measured throughput, which here
   includes how fast the server converts (a server that can't keep up drops to a smaller size too).
   A fixed quality is a single variant. A *copy* variant is the audio-only remux: video copied, audio -> AAC,
-  cut at the file's own keyframes (listed once with ffprobe and cached).
+  cut at the file's own keyframes (from its index or a full read: `stream.keyframes`, cached).
 - FFmpeg makes segments on demand. A request for a segment that isn't on disk and isn't about to be made
   (re)starts that variant's FFmpeg there. `stream.hls_cmd` / `hls_copy_cmd` keep the timestamps and cut on fixed
   boundaries, so segments from different FFmpeg runs line up.
+- A copy run cuts a piece at every keyframe FFmpeg sees, which can be more than the list has (an index leaves
+  some out). It writes into a run folder; `_publish` names each piece by the time it starts (the run's start plus
+  FFmpeg's own durations so far: exact) and appends one that starts on no listed keyframe to the segment before.
 - FFmpeg is stopped once it's AHEAD seconds past the last segment requested (a paused film doesn't keep
   converting) and restarted when the player gets there; a variant the player switched away from stops after
   SWITCHED seconds. Segments more than KEEP seconds from the playhead are deleted.
-- A session nobody has asked anything of for IDLE seconds is closed (the player also closes it).
+- A session nobody has asked anything of for IDLE seconds goes to sleep: FFmpeg stopped, segments deleted, no
+  longer counted against the limit. A paused player doesn't ask for anything, so the next request (playback going
+  on) wakes it and FFmpeg restarts where the player is. Asleep for FORGET seconds, it's closed (the player also
+  closes it when it leaves).
 - Everything lives in data/transcode/<session>/ (wiped at startup), never in a media folder.
 
 `Transcodes` also counts the plain fMP4 transcodes, so one limit covers every video conversion.
@@ -26,6 +32,7 @@ import bisect
 import json
 import logging
 import math
+import os
 import secrets
 import shutil
 import subprocess
@@ -43,9 +50,11 @@ AHEAD = 60.0       # seconds made past the last segment requested before FFmpeg 
 SOON = 24.0        # a missing segment this close to what FFmpeg is making is waited for, not restarted
 KEEP = 300.0       # seconds of segments kept either side of the playhead, for seeking back
 SWITCHED = 10.0    # a variant nothing was asked of for this long, while another one was, stops its FFmpeg
-IDLE = 90.0        # seconds without a request before a session is closed
+IDLE = 90.0        # seconds without a request before a session goes to sleep (FFmpeg stopped, segments deleted)
+FORGET = 86400.0   # seconds without a request before a session is closed (a player paused overnight still goes on)
 WAIT = 60.0        # longest a request waits for its segment
 POLL = 0.05
+PIECE_TOLERANCE = 0.004  # copy: a piece starting this close to a listed keyframe begins that segment (< 1 frame)
 LADDER = (1080, 720, 480)  # sizes under the full one that "Auto" offers
 
 
@@ -55,6 +64,19 @@ class Busy(Exception):
 
 class SegmentGone(Exception):
     """The player moved on (seeked elsewhere, or closed the session) before this segment was made."""
+
+
+@dataclass(eq=False)
+class Run:
+    """A copy variant's FFmpeg run: its pieces (`{n}.ts`/`.m4s` from 0, listed in `ffmpeg_0.m3u8`) in its own
+    folder, not yet published as segments."""
+    dir: Path
+    group: int                   # the segment the pieces being collected belong to (the run's first, to begin)
+    at: float                    # where the next piece starts (s): the run starts on a keyframe
+    seen: int = 0                # pieces taken from FFmpeg's list
+    pieces: list[Path] = field(default_factory=list)
+    listed: list[tuple[float, Path]] = field(default_factory=list)  # FFmpeg's list as last read: (length, piece)
+    stamp: tuple | None = None   # that list file's name, mtime and size then
 
 
 @dataclass(eq=False)
@@ -70,6 +92,9 @@ class Variant:
     resolution: tuple[int, int] | None = None
     gpu: bool = True             # the all-GPU path may be used (off after an FFmpeg run failed)
     seek: float = 0.0            # copy: the input seek of the current run (see stream.hls_copy_cmd)
+    first_key: float = 0.0       # copy: the first keyframe (bounds[0] is 0 whatever it is): a run from 0 starts here
+    run: Run | None = None       # copy: the current run's pieces
+    runs: int = 0                # copy: runs so far (each gets its own folder)
     proc: subprocess.Popen | None = None
     job_start: int = 0           # the segment the current FFmpeg run started at
     wanted: int = 0              # the segment asked for last (where the player is)
@@ -90,6 +115,11 @@ class Variant:
     def at(self, t: float) -> int:
         """The segment playing at `t` seconds."""
         return max(0, bisect.bisect_right(self.bounds, t + 0.001) - 1)
+
+    def starting(self, t: float) -> int | None:
+        """The segment that begins at `t` (a listed keyframe), if one does."""
+        i = bisect.bisect_left(self.bounds, t - PIECE_TOLERANCE)
+        return i if i < self.segments and abs(self.bounds[i] - t) <= PIECE_TOLERANCE else None
 
     def file(self, k: int) -> Path:
         return self.dir / f"{k}.{self.ext}"
@@ -134,6 +164,7 @@ class Session:
     video_codec: str | None = None
     copy_audio: bool = False     # copy variant: Dolby audio passed through as-is (the player's device decodes it)
     closed: bool = False
+    asleep: bool = False         # idle: nothing running or kept on disk until the player asks again
     last_access: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -201,8 +232,8 @@ class Keyframes:
 
 
 def _default_cmd(s: Session, v: Variant, k: int) -> list[str]:
-    if v.copy:
-        return stream.hls_copy_cmd(s.path, k, v.seek, s.video_codec, v.dir, s.audio, s.channels, s.copy_audio,
+    if v.copy:  # pieces numbered from 0 in the run's folder; _publish names them
+        return stream.hls_copy_cmd(s.path, 0, v.seek, s.video_codec, v.run.dir, s.audio, s.channels, s.copy_audio,
                                    ts=v.ts)
     return stream.hls_cmd(s.path, k, s.video, v.dir, s.audio, max_height=v.height, channels=s.channels,
                           burn=s.burn, gpu=v.gpu)
@@ -241,10 +272,11 @@ class Transcodes:
 
     def _count(self) -> int:
         """Open sessions count whether or not their FFmpeg is running right now (it's stopped while far
-        enough ahead), so a viewer never loses their place to a newcomer and gets "busy" mid-film.
-        Copy sessions (audio-only remux) cost little and aren't counted."""
+        enough ahead), so a viewer never loses their place to a newcomer and gets "busy" mid-film. One asleep
+        (idle for IDLE) gives its place up until it wakes. Copy sessions (audio-only remux) cost little and
+        aren't counted."""
         self._pipes = {p for p in self._pipes if p.poll() is None}
-        return len(self._pipes) + sum(1 for s in self._sessions.values() if not s.variants[0].copy)
+        return len(self._pipes) + sum(1 for s in self._sessions.values() if not s.variants[0].copy and not s.asleep)
 
     def _check(self) -> None:
         limit = self.limit()
@@ -283,7 +315,8 @@ class Transcodes:
             (d / "0").mkdir()
             w, h = (video or {}).get("width"), (video or {}).get("height")
             variants.append(Variant(0, copy_bounds(keyframes), duration, d / "0", copy=True, ts=ts,
-                                    bandwidth=bitrate or 8_000_000, resolution=(w, h) if w and h else None))
+                                    bandwidth=bitrate or 8_000_000, resolution=(w, h) if w and h else None,
+                                    first_key=keyframes[0] if keyframes else 0.0))
         else:
             for i, height in enumerate(heights or [None]):
                 (d / str(i)).mkdir()
@@ -333,17 +366,21 @@ class Transcodes:
         with s.lock:
             if s.closed:
                 raise SegmentGone(k)
+            self._wake(s)
             v.wanted = k
+            self._publish(v)
             if not f.exists() and not self._coming(v, k):
                 self._restart(s, v, k)
         deadline = time.monotonic() + WAIT
         while time.monotonic() < deadline:
-            if f.exists():
-                return f
             with s.lock:
+                self._publish(v)
+                if f.exists():
+                    return f
                 if s.closed or (v.wanted != k and not self._coming(v, k)):
                     raise SegmentGone(k)  # superseded by a seek; don't fight over FFmpeg
                 if not v.running():
+                    self._publish(v, ended=True)
                     if f.exists():
                         return f
                     self._after_exit(s, v, k)
@@ -351,27 +388,50 @@ class Transcodes:
         raise TimeoutError(k)
 
     def init(self, s: Session, vi: int) -> Path:
-        """A copy variant's fMP4 header (every FFmpeg run writes an identical one)."""
+        """A copy variant's fMP4 header (every FFmpeg run writes an identical one; `_publish` keeps the first)."""
         v = self.variant(s, vi)
         if not v.copy:
             raise KeyError("init")
         s.last_access = v.last_access = time.monotonic()
+        f = v.dir / "init.mp4"
         deadline = time.monotonic() + WAIT
         while time.monotonic() < deadline:
-            # the header is complete once a segment is: FFmpeg creates the file first and fills it as it starts
-            done = sorted((p for p in v.dir.glob("init_*.mp4") if p.stat().st_size and (
-                any(v.dir.glob("*.m4s")) or not v.running())), key=lambda p: p.stat().st_mtime)
-            if done:
-                return done[-1]
             with s.lock:
                 if s.closed:
                     raise SegmentGone("init")
+                self._wake(s)
+                self._publish(v)
+                if f.exists():
+                    return f
                 if not v.running():
                     self._after_exit(s, v, v.wanted, initial=v.proc is None)
             time.sleep(POLL)
         raise TimeoutError("init")
 
     # -- internals (callers hold s.lock)
+    def _wake(self, s: Session) -> None:
+        """The player asks again after a pause: a sleeping session takes its place back (Busy if a conversion
+        took it meanwhile). FFmpeg restarts on its own: no segment is on disk."""
+        if not s.asleep:
+            return
+        with self._lock:
+            if not s.variants[0].copy:
+                self._check()
+            s.asleep = False
+        log.info("HLS %s: woken", s.id)
+
+    def _sleep(self, s: Session) -> None:
+        for v in s.variants:
+            self._kill(v)
+            for f in v.dir.glob(f"*.{v.ext}"):
+                try:
+                    f.unlink()
+                except OSError:  # being served (Windows): the next reap gets it
+                    pass
+        with self._lock:
+            s.asleep = True
+        log.info("HLS %s: idle, FFmpeg stopped until the player asks again", s.id)
+
     def _after_exit(self, s: Session, v: Variant, k: int, initial: bool = False) -> None:
         """FFmpeg isn't running while segment k is wanted: start it, or report why it can't be made."""
         p = v.proc
@@ -398,11 +458,86 @@ class Transcodes:
             # before the one asked for. A dry run of the very same seek says where: numbering starts there, or
             # every segment would be misnamed. (A hair past the keyframe, so rounding can't go one further back.)
             v.seek = v.bounds[k] + 0.001 if k > 0 else 0.0
+            start = v.first_key
             if k > 0:
-                k = min(k, v.at(self._copy_start(s.path, v.seek, zero=True)))
-        v.proc = self._spawn(self._cmd(s, v, k), cwd=v.dir)  # the copy's init file is a bare name (hls_copy_cmd)
+                start = self._copy_start(s.path, v.seek, zero=True)
+                k = min(k, v.at(start))
+            v.runs += 1
+            v.run = Run(v.dir / f"run{v.runs}", k, start)
+            v.run.dir.mkdir()
+        # the copy's init file is a bare name (hls_copy_cmd): FFmpeg runs in the folder it writes to
+        v.proc = self._spawn(self._cmd(s, v, k), cwd=v.run.dir if v.copy else v.dir)
         v.job_start, v.killed = k, False
         log.debug("HLS %s/%d: FFmpeg from segment %d", s.id, v.index, k)
+
+    def _publish(self, v: Variant, ended: bool = False) -> None:
+        """Copy runs: turn the pieces FFmpeg has finished (listed in its playlist) into segments. A piece starting
+        on a listed keyframe begins that segment; any other belongs to the segment before (a keyframe the list
+        doesn't have). A segment is complete once the next one begins, or the run `ended` at the file's end."""
+        r = v.run
+        if r is None:
+            return
+        # FFmpeg rewrites its list (.tmp, then renamed over the old one). Read it only when it changed: on Windows
+        # the rename fails while the file is open here, and FFmpeg goes on with that list left as .tmp, which is
+        # the newest once the run is over.
+        src = r.dir / "ffmpeg_0.m3u8"
+        if ended and src.with_name(src.name + ".tmp").exists():
+            src = src.with_name(src.name + ".tmp")
+        try:
+            st = src.stat()
+            stamp = (src.name, st.st_mtime_ns, st.st_size)
+            if stamp != r.stamp:
+                lines = src.read_text(encoding="utf-8").splitlines()
+                r.listed, r.stamp, length = [], stamp, None
+                for line in lines:
+                    if line.startswith("#EXTINF:"):
+                        length = float(line[8:].split(",")[0])
+                    elif line and not line.startswith("#") and length is not None:
+                        r.listed.append((length, r.dir / line))
+                        length = None
+        except (OSError, ValueError):
+            pass  # not written yet, or caught mid-write: next time
+        for length, piece in r.listed[r.seen:]:
+            if not piece.exists():
+                break
+            k = v.starting(r.at) if r.seen else None  # (the first piece is where the run started)
+            if k is not None and k > r.group:
+                self._finish(v, r)
+                if k > r.group + 1:  # listed keyframes FFmpeg didn't cut at: never leave the player waiting
+                    log.warning("HLS: no cut at %d listed keyframe(s) after %.3f s; repeating a segment",
+                                k - r.group - 1, v.time(r.group))
+                    for gap in range(r.group + 1, k):
+                        if not v.file(gap).exists() and v.file(r.group).exists():
+                            shutil.copyfile(v.file(r.group), v.file(gap))
+                r.group = k
+            r.pieces.append(piece)
+            r.at += length
+            r.seen += 1
+        if not v.ts and r.seen and not (v.dir / "init.mp4").exists() and (r.dir / "init_0.mp4").exists():
+            shutil.copyfile(r.dir / "init_0.mp4", v.dir / "init.tmp")  # complete: a piece is
+            os.replace(v.dir / "init.tmp", v.dir / "init.mp4")
+        if ended and v.proc is not None and v.proc.returncode == 0:
+            self._finish(v, r)
+
+    def _finish(self, v: Variant, r: Run) -> None:
+        """The pieces collected make segment r.group: published under its name (joined if FFmpeg cut it in
+        several; MPEG-TS and fMP4 fragments both simply follow one another)."""
+        pieces, r.pieces = r.pieces, []
+        dest = v.file(r.group)
+        if not pieces or dest.exists():  # (already made by an earlier run: identical)
+            for p in pieces:
+                p.unlink(missing_ok=True)
+            return
+        if len(pieces) == 1:
+            os.replace(pieces[0], dest)
+            return
+        part = dest.with_name(dest.name + ".part")
+        with open(part, "wb") as out:
+            for p in pieces:
+                out.write(p.read_bytes())
+        os.replace(part, dest)
+        for p in pieces:
+            p.unlink(missing_ok=True)
 
     def _kill(self, v: Variant) -> None:
         if v.running():
@@ -417,6 +552,9 @@ class Transcodes:
                 tmp.unlink()
             except OSError:
                 pass
+        if v.run is not None:  # a copy run's pieces not published yet: the next run makes them again
+            shutil.rmtree(v.run.dir, ignore_errors=True)
+            v.run = None
 
     def _prune(self, v: Variant) -> None:
         here = v.time(v.wanted)
@@ -428,19 +566,25 @@ class Transcodes:
                 pass
 
     def reap(self) -> None:
-        """Close idle sessions, stop FFmpeg runs that are far enough ahead or that the player switched away
-        from, delete far-away segments."""
+        """Put idle sessions to sleep and close forgotten ones, stop FFmpeg runs that are far enough ahead or that
+        the player switched away from, delete far-away segments."""
         now = time.monotonic()
         with self._lock:
             sessions = list(self._sessions.values())
         for s in sessions:
-            if now - s.last_access > IDLE:
-                log.info("HLS %s: idle, closed", s.id)
+            if now - s.last_access > FORGET:
+                log.info("HLS %s: unused for %.0f h, closed", s.id, FORGET / 3600)
                 self.close(s.id)
                 continue
             with s.lock:
+                if s.closed or s.asleep:
+                    continue
+                if time.monotonic() - s.last_access > IDLE:  # (read again under the lock: a request may have come)
+                    self._sleep(s)
+                    continue
                 latest = max(v.last_access for v in s.variants)
                 for v in s.variants:
+                    self._publish(v, ended=not v.running())
                     if v.running() and (v.time(v.made_up_to()) > v.time(v.wanted) + AHEAD
                                         or (now - v.last_access > SWITCHED and v.last_access < latest)):
                         self._kill(v)

@@ -14,13 +14,17 @@ from bams.config import Paths
 
 class FakeFFmpeg:
     """Stands in for an HLS FFmpeg run: makes `make` segments at once, then one more per poll() while it
-    runs (if `grow`), like a real one working through the file."""
+    runs (if `grow`), like a real one working through the file. A copy run (`pieces`: where each piece it cuts
+    starts, from the run's start) numbers them from 0 and lists them with their lengths in ffmpeg_0.m3u8, as
+    hls_copy_cmd's FFmpeg does; each piece holds its start time, so a test can see what went into a segment."""
 
     def __init__(self, out: Path, start: int, total: int, make: int = 1, grow: bool = True, rc: int | None = None,
-                 ext: str = "ts", init: bool = False):
+                 ext: str = "ts", init: bool = False, pieces: list[float] | None = None, tmp_last: bool = False):
         self.out, self.next, self.total, self.grow, self.ext = out, start, total, grow, ext
         self.start = start
         self.returncode = rc
+        self.pieces = pieces
+        self.tmp_last = tmp_last
         if init:
             (out / f"init_{start}.mp4").write_bytes(b"init")
         for _ in range(make):
@@ -28,7 +32,18 @@ class FakeFFmpeg:
 
     def _make(self):
         if self.next < self.total:
-            (self.out / f"{self.next}.{self.ext}").write_bytes(b"ts")
+            if self.pieces is None:
+                (self.out / f"{self.next}.{self.ext}").write_bytes(b"ts")
+            else:
+                at, end = self.pieces[self.next], self.pieces[self.next + 1]
+                (self.out / f"{self.next}.{self.ext}").write_bytes(f"{at:g};".encode())
+                pl = self.out / "ffmpeg_0.m3u8"
+                entry = f"#EXTINF:{end - at:.6f},\n{self.next}.{self.ext}\n"
+                if self.next == self.total - 1 and self.tmp_last:  # Windows: the rename over a list being read failed
+                    pl.with_name(pl.name + ".tmp").write_text((pl.read_text() if pl.exists() else "") + entry)
+                else:
+                    with open(pl, "a") as f:
+                        f.write(entry)
             self.next += 1
 
     def poll(self):
@@ -52,18 +67,25 @@ def tc(tmp_path, monkeypatch):
     limit = [0]
     gpu = []  # the gpu flag of each run
 
+    keys = []  # copy variants: keyframes FFmpeg cuts at besides the listed ones
+
     def cmd(s, v, k):
         gpu.append(v.gpu)
-        p = FakeFFmpeg(v.dir, k, total=v.segments, ext=v.ext, init=v.copy, **how)
+        if v.copy:  # pieces from the run's start (where it landed) to the end, at every keyframe FFmpeg sees
+            cuts = sorted({v.first_key, *v.bounds[1:], *keys})
+            cuts = [c for c in cuts if c >= v.run.at - 0.0005] + [v.duration]
+            p = FakeFFmpeg(v.run.dir, 0, total=len(cuts) - 1, ext=v.ext, init=True, pieces=cuts, **how)
+        else:
+            p = FakeFFmpeg(v.dir, k, total=v.segments, ext=v.ext, **how)
         runs.append((k, p))
         return p
 
-    starts = {}  # copy variants: where FFmpeg's seek really lands, by requested time
-    cwds = []  # the folder each run was started in
+    starts = {}  # copy variants: where FFmpeg's seek really lands, by requested time (else on the keyframe asked
+    cwds = []    # for: seeks go a hair past it); the folder each run was started in
 
     t = hls.Transcodes(tmp_path / "transcode", lambda: limit[0], spawn=lambda c, cwd=None: cwds.append(cwd) or c,
-                       cmd=cmd, copy_start=lambda path, at, zero=False: starts.get(round(at, 3), at))
-    t.gpu_runs, t.starts, t.cwds = gpu, starts, cwds
+                       cmd=cmd, copy_start=lambda path, at, zero=False: starts.get(round(at, 3), round(at - 0.001, 3)))
+    t.gpu_runs, t.starts, t.cwds, t.keys = gpu, starts, cwds, keys
     yield t, runs, how, limit
     t.shutdown()
 
@@ -190,22 +212,67 @@ def test_copy_variant_numbers_segments_where_ffmpeg_really_starts(tc):
     s = new(t, duration=100.0, keyframes=kf)  # ...but a copy isn't a conversion
     v = s.variants[0]
     assert v.copy and v.segments == 9 and v.ext == "m4s"
-    assert t.init(s, 0).name == "init_0.mp4"  # the header comes from the first run
-    assert t.cwds[-1] == v.dir  # FFmpeg runs in the variant's folder: the init file name is a bare one
+    assert t.init(s, 0).name == "init.mp4"  # the header comes from the first run
+    assert t.cwds[-1] == v.dir / "run1"  # FFmpeg runs in the folder it writes to: the init file name is a bare one
     t.starts[60.001] = 40.0  # the file's index only lets FFmpeg start a keyframe earlier
-    assert t.segment(s, 0, 7).name == "7.m4s"
-    assert [k for k, _ in runs] == [0, 6]
+    seg = t.segment(s, 0, 7)
+    assert seg.name == "7.m4s" and seg.read_bytes() == b"60;"  # named by where it really starts
+    assert [k for k, _ in runs] == [0, 6] and (v.dir / "6.m4s").read_bytes() == b"40;"
+    assert not (v.dir / "run1").exists()  # the earlier run's pieces went with it
 
 
-def test_idle_session_is_closed(tc):
+def test_copy_segment_takes_in_keyframes_the_list_lacks(tc):
+    """FFmpeg cuts at keyframes the file's index doesn't list (its H.264 parser flags I-frames an mkvmerge file
+    doesn't): those pieces join the segment they fall in, so every segment still starts where the playlist says."""
+    t, runs, how, _ = tc
+    t.keys += [3.0, 10.0, 10.5]
+    s = new(t, duration=100.0, keyframes=[0.0, 2.0, 4.5, 9.0, 11.0, 15.0, 40.0, 60.0, 80.0], ts=True)
+    v = s.variants[0]
+    assert t.segment(s, 0, 1).read_bytes() == b"2;3;"
+    assert t.segment(s, 0, 3).read_bytes() == b"9;10;10.5;"
+    assert t.segment(s, 0, 4).read_bytes() == b"11;"
+    assert [k for k, _ in runs] == [1] and v.made_up_to() >= 5  # one run made them all
+    # a run that reaches the end of the file: its last segment is whole then, even when FFmpeg's last list was
+    # left as .tmp (Windows refuses the rename while the list is being read)
+    how.update(make=100, rc=0, tmp_last=True)
+    assert t.segment(s, 0, 8).read_bytes() == b"80;"
+    assert [k for k, _ in runs] == [1, 8]
+
+
+def test_idle_session_sleeps_and_wakes_where_the_player_is(tc):
+    """A paused player asks for nothing: after IDLE the session sleeps (FFmpeg stopped, segments deleted), and
+    playback going on minutes later wakes it instead of finding it gone (the TV fell back to a conversion)."""
     t, runs, _, _ = tc
     s = new(t)
-    t.segment(s, 0, 0)
+    v = s.variants[0]
+    t.segment(s, 0, 30)
     s.last_access -= hls.IDLE + 1
     t.reap()
-    assert not s.dir.exists() and runs[0][1].returncode == -9
+    assert s.asleep and runs[0][1].returncode == -9 and not list(v.dir.glob("*.ts"))
+    assert t.get(s.id) is s
+    assert t.segment(s, 0, 33).name == "33.ts"  # the player goes on: FFmpeg starts again there
+    assert not s.asleep and [k for k, _ in runs] == [30, 33]
+    s.last_access -= hls.FORGET + 1  # never asked again: closed after all
+    t.reap()
+    assert not s.dir.exists()
     with pytest.raises(KeyError):
         t.get(s.id)
+
+
+def test_a_sleeping_conversion_gives_its_place_up(tc):
+    t, runs, _, limit = tc
+    limit[0] = 1
+    a = new(t)
+    t.segment(a, 0, 0)
+    a.last_access -= hls.IDLE + 1
+    t.reap()
+    b = new(t)  # the place is free while a sleeps...
+    t.segment(b, 0, 0)
+    with pytest.raises(hls.Busy):  # ...so a can't wake while b converts
+        t.segment(a, 0, 5)
+    assert a.asleep
+    t.close(b.id)
+    assert t.segment(a, 0, 5).name == "5.ts" and not a.asleep
 
 
 def test_limit_on_simultaneous_conversions(tc):

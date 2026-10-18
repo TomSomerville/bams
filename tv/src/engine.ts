@@ -44,6 +44,7 @@ export class AvplayEngine implements Engine {
   private av = window.webapis.avplay;
   private state: "idle" | "ready" | "playing" | "paused" = "idle";
   private t = 0;
+  private loads = 0;  // a load() that finds this changed was overtaken (another load, destroy): hands off the player
   private onVis = () => {
     try {
       if (document.hidden) this.av.suspend();
@@ -56,6 +57,7 @@ export class AvplayEngine implements Engine {
   }
 
   async load(url: string, start: number): Promise<void> {
+    const n = ++this.loads;
     this.stop();
     const av = this.av;
     av.open(url);
@@ -81,8 +83,10 @@ export class AvplayEngine implements Engine {
     });
     this.ev.onBuffering(true);
     await new Promise<void>((resolve, reject) => av.prepareAsync(resolve, (e: unknown) => reject(new Error(String((e as { name?: string })?.name ?? e)))));
+    if (n !== this.loads) throw new Error("superseded");  // the one player now plays something else: leave it be
     this.state = "ready";
     if (start > 1) await this.seek(start);
+    if (n !== this.loads) throw new Error("superseded");
     this.t = start;
     av.play();
     this.state = "playing";
@@ -156,6 +160,7 @@ export class AvplayEngine implements Engine {
   }
 
   destroy() {
+    this.loads++;
     this.stop();
     document.removeEventListener("visibilitychange", this.onVis);
   }

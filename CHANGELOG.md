@@ -3,6 +3,25 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.18.2 (2026-10-17)
+
+### Fixed
+- **Long wait before a video starts on the TV** (and wherever the video is played as-is with its sound converted):
+  the first play of every episode or film waited while the server read the whole file to find its keyframes, 7 to
+  80 seconds over a network share. It now reads them from the file's own index (MKV, MP4, MOV, M4V) in under a
+  second. AVI and files without a usable index still take the long way the first time (remembered afterwards).
+- **Pausing for more than a minute and a half broke playback**: the server closed the paused stream, so pressing Play
+  spun, then fell back to converting the whole video (lower quality), and a second long pause ended in "Can't play
+  this". A paused stream now just stops working in the background and carries on when you press Play, even hours
+  later.
+- **TV apps (Samsung, Fire TV 0.16.1):** backing out of a video that was slow to start and picking another one could
+  end with the first video playing instead. A stream that breaks after playing fine for a while (the server
+  restarted) is now restarted the same way before falling back to a conversion. These are also the first published
+  TV builds with the TV fixes of 0.18.0 (pictures and playback after a server restart) and 0.18.1 (subtitle menu).
+
+Update the server with the new installer, the Samsung TV with `BAMS-SamsungTV-0.16.1.wgt` and the Fire TV with
+`BAMS-FireTV-0.16.1.apk`. The Android phone app is unchanged (0.2.1).
+
 ## 0.18.1 (2026-10-15)
 
 ### Fixed

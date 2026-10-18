@@ -21,7 +21,7 @@ import sys
 import threading
 from pathlib import Path
 
-from . import probe
+from . import keyindex, probe
 
 log = logging.getLogger(__name__)
 
@@ -662,9 +662,10 @@ def keyframes(path: Path, timeout: float = 900) -> list[float] | None:
     """Times (s, from the file's start) of every video keyframe, or None if they can't be read.
 
     An HLS version of the audio-only remux copies the video, so its segments can only start on the file's own
-    keyframes, and the playlist (made up front) has to know them all. ffprobe lists packets without decoding,
-    but has to read the whole file to do it: a second for an MP4 (its index), up to a minute or so for a large
-    MKV on a slow disk. Callers cache the result (`hls.Keyframes`)."""
+    keyframes, and the playlist (made up front) has to know them all. The file's index (MKV Cues, MP4 sample
+    tables: `keyindex`) has them in a fraction of a second, once a few stretches of the file show FFmpeg cuts at
+    them too (`_index_agrees`). Otherwise ffprobe lists the packets without decoding, but has to read the whole
+    file to do it: up to a minute or more for a large file on a NAS. Callers cache the result (`hls.Keyframes`)."""
     exe = probe.ffprobe_path()
     if not exe:
         return None
@@ -675,6 +676,10 @@ def keyframes(path: Path, timeout: float = 900) -> list[float] | None:
         start = float(st.stdout.decode().strip() or 0)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         start = 0.0
+    indexed = keyindex.read(path)
+    if indexed and _index_agrees(exe, path, indexed, flags):
+        # rounded as ffprobe prints them (6 places), so the list is the one reading the packets gives
+        return sorted(t for t in {round(float(f"{t:.6f}") - start, 3) for t in indexed} if t >= 0) or None
     try:
         r = subprocess.run([exe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,flags",
                             "-of", "csv=p=0", str(path)], capture_output=True, timeout=timeout,
@@ -693,6 +698,49 @@ def keyframes(path: Path, timeout: float = 900) -> list[float] | None:
                 pass  # pts N/A
     times = sorted(t for t in out if t >= 0)
     return times or None
+
+
+INDEX_CHECKS = (0.0, 0.5, 0.9)  # where in the file `_index_agrees` reads a stretch (fractions of its length)
+
+
+def _index_agrees(exe: str, path: Path, times: list[float], flags: int) -> bool:
+    """Whether every keyframe the index lists in a few stretches of the file is one FFmpeg cuts at (an MP4 edit
+    list read wrong, an odd muxer). FFmpeg may cut at more (`keyindex`): hls.Transcodes joins those pieces to the
+    segment they fall in. Each stretch holds a few keyframes; ffprobe seeks there, so it reads seconds of the
+    file, not all of it."""
+    gaps = sorted(b - a for a, b in zip(times, times[1:]))
+    span = min(20.0, max(6.0, 2.5 * gaps[len(gaps) // 2])) if gaps else 6.0
+    end = times[-1]
+    spots = [end * f for f in INDEX_CHECKS] if end > len(INDEX_CHECKS) * span else [0.0]
+    if spots == [0.0]:
+        span = end + span  # a short file: all of it
+    listed = sorted({round(float(f"{t:.6f}"), 3) for t in times})
+    for at in spots:
+        try:
+            r = subprocess.run([exe, "-v", "error", "-select_streams", "v:0", "-read_intervals", f"{at:.3f}%+{span:.3f}",
+                                "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", str(path)],
+                               capture_output=True, timeout=60, stdin=subprocess.DEVNULL, creationflags=flags)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        seen, keys = [], set()
+        for line in r.stdout.decode(errors="replace").splitlines():
+            pts, _, fl = line.partition(",")
+            try:
+                t = round(float(pts), 3)
+            except ValueError:
+                continue
+            seen.append(t)
+            if "K" in fl:
+                keys.add(t)
+        if r.returncode != 0 or not keys:
+            return False
+        lo, hi = min(keys), max(seen)
+        expected = {t for t in listed if lo <= t <= hi}
+        if not expected or not expected <= keys:
+            log.info("keyframe index of %s left unused: %d of its %d keyframes in %.0f-%.0f s aren't FFmpeg's",
+                     path.name, len(expected - keys), len(expected), lo, hi)
+            return False
+    return True
 
 
 def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None, out_dir: Path,
@@ -814,4 +862,7 @@ def _log_stderr(proc: subprocess.Popen) -> None:
     """FFmpeg runs with -loglevel error, so anything it says is worth logging (and the pipe must be drained)."""
     for line in proc.stderr:
         if text := line.decode(errors="replace").strip():
-            log.warning("ffmpeg: %s", text[:500])
+            # Windows: a copy-HLS run can't replace its list while hls._publish reads it; harmless (FFmpeg writes
+            # it again at the next piece, and the leftover .tmp is read once the run is over)
+            harmless = "failed to rename" in text and "ffmpeg_0.m3u8" in text
+            log.log(logging.DEBUG if harmless else logging.WARNING, "ffmpeg: %s", text[:500])

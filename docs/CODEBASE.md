@@ -61,7 +61,7 @@ bams/
 │   │   ├── stream.py          Playback plan (direct play / direct stream file|remux / transcode), FFmpeg remux,
 │   │   │                      video transcode (encoder detection, GPU decode, all-GPU filters for NVENC/QSV/
 │   │   │                      VAAPI/AMF + failure memory, output_size, filter chain, tone-mapping, subtitle burn-in,
-│   │   │                      transcode_cmd, hls_cmd), keyframes() + hls_copy_cmd; Dolby pass-through (PASSTHROUGH_AUDIO);
+│   │   │                      transcode_cmd, hls_cmd), keyframes() (index + _index_agrees, else a full read) + hls_copy_cmd; Dolby pass-through (PASSTHROUGH_AUDIO);
 │   │   │                      music: plan_audio() + audio_cmd() (any audio → AAC fMP4, or FLAC)
 │   │   ├── music.py           Music: parse_track() (tags + folder layout), parse_cue_tracks(), link_tracks(), album_alias(),
 │   │   │                      rollup(), fill_artwork() (folder art wins, picked up when added later; poster_src)
@@ -71,7 +71,9 @@ bams/
 │   │   ├── music_match.py     Music identification: match_album/match_artist/match_music_library (MusicBrainz & co.),
 │   │   │                      merge_same_release/merge_albums, refresh after REFRESH_AFTER
 │   │   ├── musicbrainz.py     HTTP clients: MusicBrainz (1 req/s, shared), Cover Art Archive, Wikidata/Wikipedia/Commons
-│   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper, limit, Keyframes cache
+│   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper (sleep/wake), limit,
+│   │   │                      copy runs' pieces published as segments (_publish), Keyframes cache
+│   │   ├── keyindex.py        Keyframe times from a file's own index (MKV Cues, MP4/MOV sample tables), for stream.keyframes
 │   │   ├── jobs.py            run_scan() (scan + match/identify + record) and the Scheduler (worker + timer threads, scan progress)
 │   │   └── fsbrowse.py        Server-side folder listing for the UI folder picker (names only)
 │   └── tests/                 pytest: 346 tests, see §7
@@ -151,7 +153,7 @@ bams/
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
 │   ├── scripts/test.mjs       `npm test`: builds tv/test into one page, runs it in headless Chrome/Edge (CHROME_PATH) at 1920×1080, prints results
-│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), pckeys.test.ts (PC/remote keys, type-to-search), harness.ts (test/eq/mount), run.ts, index.html
+│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), avplay.test.ts (an overtaken AVPlay load leaves the player alone; fake webapis.avplay), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), pckeys.test.ts (PC/remote keys, type-to-search), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
 │       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
 │       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback; jump/move/remove for Up next); MusicProvider in main.tsx
@@ -165,13 +167,13 @@ bams/
 │       ├── hold.ts            Holding OK: on a [data-hold] element a long press sends "contextmenu" instead of a click (key-up before HOLD_MS = press; repeats = hold, for remotes without key-ups); App.tsx calls okDown/okUp
 │       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo; on a Fire TV the bridge's); a theatre PC's name from the user agent
 │       ├── firetv.ts          Fire TV bridge: window.BamsAndroid (device info + FireCaps, exit, player calls) and window.bamsHost (keys, player events); no-op elsewhere
-│       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface
+│       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface (AvplayEngine.load hands the player over once overtaken: `loads`)
 │       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, a PC's browser asked like the web's canDecode) → direct / remux / convert; convertHeight, pickFile, pickAudio
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── ListMenu.tsx       Hold-OK menu: on/off the watch list (`setListed` on the item's server), `useListName`
 │       ├── PlaylistMenus.tsx  Your own playlists: HoldMenu, AddToPlaylistMenu, NewPlaylistMenu, EditPlaylistMenu, PlaylistTrackMenu (move up/down, take out)
 │       ├── Rail.tsx · Cards.tsx (Poster: `look` for watch list entries, `onHold`) · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Music (library tabs incl. your playlists, artist/album/playlist + your playlist (`my-playlist`), hold OK on a song: add to a playlist; NowPlaying bar + quality line), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles; Subtitles menu: Remove beside a downloaded subtitle, for whoever downloaded it or an admin)
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Music (library tabs incl. your playlists, artist/album/playlist + your playlist (`my-playlist`), hold OK on a song: add to a playlist; NowPlaying bar + quality line), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles; Subtitles menu: Remove beside a downloaded subtitle, for whoever downloaded it or an admin; `begin()` stops when a later start or leaving made it stale (`starts`): the TV has one AVPlay; `fail()` restarts a stream that played 10 s+ the same way once a minute before falling back)
 ├── firetv/                   ── Fire TV app (Fire OS 6+): Android shell around the tv/ page (firetv/README.md) ──
 │   ├── build.mjs              `cd tv && npm run firetv [-- --install --device <ip> --run --release]`: Gradle build, adb install, release APK → dist/BAMS-FireTV-<v>.apk
 │   ├── app/build.gradle.kts   copies tv/dist into assets/www each build; version from tv/package.json; release signing from keystore.properties (git-ignored)
@@ -390,12 +392,22 @@ FFmpeg, `bounds` (segment start times), `wanted`, `job_start`:
 - a fixed size → one conversion variant; `auto` → `hls.ladder()`: full size + 1080/720/480 below it (hls.js ABR,
   `capLevelToPlayerSize`); `burn` (track id or embedded stream number → `app._burn`) → `stream._transcode_parts(burn=)`;
 - `remux` → one **copy** variant (`ts`: MPEG-TS segments `{k}.ts`, no `init.mp4`; the TV app asks for it, Samsung's AVPlay
-  plays no fMP4 HLS): bounds = every keyframe (`Keyframes.get` → `stream.keyframes`, cached as
-  `data/cache/keyframes/{file}-{size}-{mtime}.json`), segments `{k}.m4s` + `init.mp4`, made by `hls_copy_cmd` (its init
-  file name is bare and every run starts in the variant's folder, `spawn(cwd=)`: FFmpeg ≤ 6.1 prefixes the playlist's
-  folder even to an absolute name, newer FFmpeg uses the working dir). Before
-  each run `_restart` dry-runs the seek (`remux_start(zero=True)`) and numbers from where it lands. Copy sessions don't
-  count against the limit. `passthrough` (AC3/EAC3 track) → `Session.copy_audio`: audio copied too.
+  plays no fMP4 HLS): bounds = the file's keyframes (`Keyframes.get` → `stream.keyframes`, cached as
+  `data/cache/keyframes/{file}-{size}-{mtime}.json`): from its index (`keyindex.read`: MKV Cues, MP4/MOV stss/stts/ctts/elst,
+  well under a second) once `_index_agrees` finds every listed keyframe is one FFmpeg cuts at in three short stretches
+  (ffprobe `-read_intervals`), else ffprobe reads every packet (7–80 s over a NAS). An index may list **fewer**
+  keyframes than FFmpeg cuts at (mkvmerge Cues; FFmpeg's H.264 parser flagging I-frames the container doesn't).
+  Segments `{k}.m4s` + `init.mp4` (or `{k}.ts`): each run of `hls_copy_cmd` writes into its own folder
+  `<v>/run<n>/` (pieces `{i}.m4s|ts` from 0, `ffmpeg_0.m3u8`, `init_0.mp4`; bare init name, FFmpeg started there with
+  `spawn(cwd=)`: FFmpeg ≤ 6.1 prefixes the playlist's folder even to an absolute name). `_publish` (under the session
+  lock, from `segment`, `init` and the reaper) times each listed piece from the run's start (the dry run's landing,
+  `remux_start(zero=True)`, or `first_key` for a run from 0) plus FFmpeg's EXTINF durations (exact), starts segment k
+  when a piece begins on `bounds[k]` (`Variant.starting`, `PIECE_TOLERANCE`) and appends any other piece to the segment
+  before; a segment is renamed into `<v>/` once the next one begins or the run ended (exit 0). On Windows FFmpeg's
+  rename of its list fails while it's read here: the list is read only when its stat changes, and a leftover
+  `ffmpeg_0.m3u8.tmp` is the newest once the run is over. `init.mp4` is copied from the first run. `_kill` drops a
+  run's unpublished pieces. Copy sessions don't count against the limit. `passthrough` (AC3/EAC3 track) →
+  `Session.copy_audio`: audio copied too.
 `GET /api/hls/{sid}/index.m3u8` = master playlist (one `STREAM-INF` per variant) → `/{v}/index.m3u8` (VOD, every
 segment listed up front) → `/{v}/{k}.ts|m4s` → `Transcodes.segment(s, v, k)` (blocking, thread pool):
 - on disk → served. Missing but within `SOON` of what the running FFmpeg is making → waited for. Otherwise FFmpeg
@@ -406,7 +418,10 @@ segment listed up front) → `/{v}/{k}.ts|m4s` → `Transcodes.segment(s, v, k)`
   gives up with 409 rather than restarting FFmpeg and fighting the newer request.
 - The reaper thread (every 2 s, `reap`): stops a variant's FFmpeg once it's `AHEAD` (60 s) past `wanted` (restarted
   when the player gets there) or when another variant was asked for and this one not for `SWITCHED` (10 s), deletes
-  segments more than `KEEP` (300 s) from `wanted`, closes sessions idle for `IDLE` (90 s). The player DELETEs its session when it leaves (also on `pagehide`).
+  segments more than `KEEP` (300 s) from `wanted`. A session idle for `IDLE` (90 s; a paused player asks for nothing)
+  **sleeps** (`_sleep`: FFmpeg stopped, segments deleted, not counted against the limit); its next request wakes it
+  (`_wake`: Busy if a conversion took its place) and FFmpeg restarts there. Closed after `FORGET` (24 h) unused.
+  The player DELETEs its session when it leaves (also on `pagehide`).
 - The limit (`settings.max_transcodes`, 0 = automatic: 4 GPU / 2 CPU) counts open sessions + running fMP4
   transcodes (`add_pipe`). A session keeps its place however often FFmpeg restarts.
 - `data/transcode/` is wiped at startup and on shutdown. The player loads hls.js with a dynamic `import()` only
@@ -704,7 +719,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration, files are streamed but never offered for download (no route, no `download_url`, no file name) |
 | `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache; the test uses the real options, VAAPI falls back to constant QP), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file, the live remux's audio starting at the keyframe (correlation with the original), an unprobed file probed when its episode is opened, and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
-| `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run + runs start in the variant folder, idle close, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
+| `test_keyindex.py` | index keyframes = a full ffprobe read (MKV, MP4, faststart MP4, MOV; B-frames, a delayed video track), sparse Cues used and played as real TS copy-HLS (every segment exactly its frames, a seek first), an index listing a non-keyframe refused, a long file checked in three stretches, no index (piped MKV, fragmented MP4, AVI) → full read |
+| `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run + runs in their own folder, pieces at keyframes the list lacks joined to their segment, the last segment of a finished run (also from a leftover `.tmp` list), idle sleep + wake, a sleeping conversion gives its place up, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |
 | `test_music.py` | music path/tag parsing, tag normalisation, codec names, scanning/moves/parser bumps, a real FLAC/ALAC/MP3 album (tags, embedded + folder art, transcode stream, media untouched), `plan_audio`, v1→v3 migration |
 | `test_music_extras.py` | cue parsing, CUE image split / sheet edited or removed, queue `start`/`end`, real FLAC with an embedded sheet; playlist parsing, import, follow-the-file; a cover/artist image added later vs CAA/Commons; album merge + rescan + best file, unsure matches not merged; refresh; FLAC command + API |
 | `test_downloads.py` | Android downloads: the per-account switch (admins always; turned on/off), the original file with its name + Range resume, manifests for a movie, show/season/episode (with ancestors, sidecar subtitles as WebVTT), artist/album/track and an imported playlist |
@@ -760,7 +776,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Music on the TV | `tv/src/music.tsx` (player), `tv/src/screens/Music.tsx` (pages, NowPlaying), media keys in `tv/src/App.tsx` |
 | Recognise more sidecar subtitle names / languages | `subtitles.sidecars`, `subtitles.tracks` (`_FLAGS`), `subtitles.language`; VobSub: `vobsub_streams` |
 | Auto quality sizes | `hls.LADDER`, `hls.ladder` |
-| How far ahead / behind HLS works | `AHEAD`, `SOON`, `KEEP`, `SWITCHED`, `IDLE` in `hls.py` (seconds) |
+| How far ahead / behind HLS works | `AHEAD`, `SOON`, `KEEP`, `SWITCHED`, `IDLE`, `FORGET` in `hls.py` (seconds) |
+| Copy-HLS keyframes (index formats, the check) | `keyindex.py` (`_matroska`, `_mp4`), `stream.keyframes` / `_index_agrees` (`INDEX_CHECKS`); tests `test_keyindex.py` |
 | Add a file type to index | `config.VIDEO_EXTS` / `config.AUDIO_EXTS` + FORMATS.md |
 | Recognise a new music folder/file layout | `music.parse_track` / `_clean_title` (+ a case in `test_music.py`, bump `music.PARSER_VERSION`) |
 | Which music formats play as-is | `stream.BROWSER_AUDIO_FILES` (+ `test_plan_audio`, FORMATS.md §5) |

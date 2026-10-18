@@ -60,7 +60,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     session: null as string | null, started: false, startAt: 0, fellBack: false, duration: null as number | null,
     item: null as ItemDetail | null, seek: null as number | null, ended: false, sleep: sleeping ?? null as number | null,
     // a PC's fallback steps (fail): Dolby sound copied this time, AAC wanted instead, the remux tried
-    passed: false, noPass: false, triedRemux: false });
+    passed: false, noPass: false, triedRemux: false,
+    // begin() calls so far (a later one, or leaving, makes an earlier one stale); when a stream that played was lost
+    starts: 0, lostAt: 0 });
   const timers = useRef<{ osd?: ReturnType<typeof setTimeout>; seek?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setInterval> }>({});
 
   // Play Random (random.tsx): while this video is in the random queue, "next" is the queue's next, not the next episode
@@ -93,6 +95,10 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     const s = st.current;
     const f = s.file, e = engine.current;
     if (!f || !e) return;
+    // A start can take a while (the server reading the file). If the viewer left meanwhile, or another start
+    // followed, this one must stop: the TV has one player, and a late load() took it over from the next video.
+    const n = ++s.starts;
+    const stale = () => n !== s.starts || engine.current !== e;
     const burn = s.sub?.image ? s.sub.id : null;
     const how = force ? { mode: force, why: "fallback" } : plan(f, s.audio, burn);
     setError(null);
@@ -103,6 +109,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     s.startAt = at;
     try {
       if (rid === undefined) await refreshTicket();  // another server's: kept fresh by its api calls
+      if (stale()) return;
       let url: string | null;
       let hls = false;
       // Samsung's player can't seek in a file it streams itself (resume and skipping froze), so on the TV even what
@@ -122,18 +129,20 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
           passthrough: s.passed,
           height: how.mode === "convert" ? convertHeight() : undefined, burn: burn ?? undefined,
         });
+        if (stale()) return void api.del(`/api/hls/${r.id}`).catch(() => undefined);
         s.session = r.id;
         url = media(r.playlist);
         hls = true;
       }
       if (!url) throw new Error("No address to play.");
       await e.load(url, at, hls);
+      if (stale()) return;
       if (how.mode === "direct" && !cut && (f.audio_tracks?.length ?? 0) > 1 && !e.selectAudio(s.audio) && s.audio !== 0) {
         return void begin(at, "remux");  // this player can't switch tracks itself: the server picks it
       }
       setPaused(false);
     } catch (err) {
-      fail((err as Error).message);
+      if (!stale()) fail((err as Error).message);
     }
   }, []);
 
@@ -145,6 +154,12 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     const now = engine.current?.time() || s.startAt;
     const at = now > 0 ? now : s.startAt;
     const retry = (mode: Mode) => void renewTickets().then(() => begin(at, mode));
+    // the stream played fine for a while, so it was lost (the server restarted), not unplayable: the same way again
+    // first, rather than the server converting a video this device plays (once a minute, so a dead server ends here)
+    if (s.mode && now > s.startAt + 10 && Date.now() - s.lostAt > 60000) {
+      s.lostAt = Date.now();
+      return retry(s.mode);
+    }
     if (pc() && s.mode === "remux" && s.passed && !s.noPass) {
       s.noPass = true;
       return retry("remux");

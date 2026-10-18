@@ -70,7 +70,7 @@ Files may have changed since you last looked, and work may exist that you never 
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 346 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # 357 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir C:\Users\owner\bams\data serve   # http://127.0.0.1:8484, API docs /docs
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -151,6 +151,19 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   variant's folder** (`spawn(cwd=)`): FFmpeg ≤ 6.1 (Debian/Ubuntu) prefixes the playlist's folder even to an absolute
   name (ENOENT, every Ubuntu copy-HLS failed), FFmpeg 9 puts a bare name in the working dir; serve `init.mp4` only once a segment exists (it's written gradually). ffprobe applies the
   edit list, so compare segments by video packet pts or `tfdt`, not "first packet".
+- **Copy-HLS segments are named by time, never by FFmpeg's count** (0.18.2): FFmpeg cuts at every keyframe *it* sees,
+  which can be more than the list has (its H.264 parser flags I-frames mkvmerge doesn't; mkvmerge leaves keyframes
+  out of the Cues). Each run writes pieces into `<v>/run<n>/`; `hls._publish` times them by the run's start + FFmpeg's
+  EXTINF and joins extra pieces to their segment. Don't let a copy run write `{k}.ts` into the variant folder. A
+  listed keyframe FFmpeg *doesn't* cut at can't be fixed there, so an index is checked against ffprobe
+  (`stream._index_agrees`), never against the container's own keyframe flags (they agreed with the sparse Cues).
+- **Windows: FFmpeg can't rename over a file Python has open.** A copy run's `ffmpeg_0.m3u8` is read only when its stat
+  changes, and once the run is over a leftover `ffmpeg_0.m3u8.tmp` is the newest list (`_publish`).
+- **Idle HLS sessions sleep, they don't close** (0.18.2): a paused player asks for nothing for minutes. `_sleep` stops
+  FFmpeg and deletes segments; the next request wakes it (`_wake`). Closing it made the TV fall back to a conversion.
+- **The Samsung TV has one AVPlay**: an async start (`Player.tsx` `begin()`) must check it's still the current one after
+  every `await` (`stale()`), and `AvplayEngine.load` after `prepareAsync`, or a slow start abandoned for another video
+  takes the player over later (`tv/test/avplay.test.ts`).
 - **Burned-in subtitles** must be read with a lead (second input, `SUB_LEAD`) or a run starting mid-line loses it.
   Hand-made subtitle streams get their times rebased to their first packet when muxed: start test PGS with an empty
   display set at 0 (`test_subtitles.pgs`).

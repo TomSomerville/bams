@@ -179,6 +179,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-15 | **Theatre mode = the TV app's page in a browser**, served by the server at `/theatre/`, with a "Theatre mode" item in the web UI's account menu; a PC at a TV runs it in **Chrome kiosk mode** started at sign-in (`docs/THEATRE.md`). A native app (Qt WebEngine + libmpv under the page, like Plex HTPC / Jellyfin Desktop) was planned as a second step and **set aside by the owner** | Owner: PCs with USB remotes as "theatre" boxes like Plex HTPC, "if possible a toggle for the web version"; after trying it: "I think i can make this work on all my devices". The TV page already is BAMS's 10-foot UI, so the boxes show exactly what the TVs do. Cost: browser codecs (the server converts more than for the TVs), no Dolby/DTS bitstream to a receiver, HDR only where the browser does it |
 | 10-15 | **Theatre mode signs in with name and password only** (no link code / QR); the TVs keep the code. The theatre page uses its **own token, never the web UI's cookie** (`credentials: "omit"`; the server prefers a cookie over a bearer token) and **its own storage keys** (`bams.theatre.*`) on the shared origin | Owner: "remove the QR/link login, lets just do username and password" (a PC has a keyboard). Same origin as the web UI: its cookie would make the page act as whoever is signed in there, and both use `bams.servers` in different shapes |
 | 10-15 | **Chrome/Chromium for theatre boxes, not Edge's `--kiosk`** | Both of Edge's kiosk types run InPrivate (Microsoft's docs): the box would forget its sign-in at every boot; Edge kiosk isn't supported on Linux |
+| 10-17 | **Copy-HLS keyframes come from the file's index** (MKV Cues, MP4/MOV sample tables; `keyindex.py`), checked against ffprobe in three short stretches; a full packet read only without a usable index (AVI, fragmented MP4, no Cues) | Owner: "a very long pause … every time I start a video" on the TV. The full read took 7–80 s per first play over the NAS (gigabit-bound, can't be made faster); the index takes under a second. On 69 of the owner's files the index matched the full read except two mkvmerge files, which list fewer keyframes than FFmpeg cuts at (next row) |
+| 10-17 | **A copy run's pieces are published by time** (`hls._publish`): FFmpeg writes each run into its own folder, every piece is timed from the run's start + FFmpeg's EXTINF durations, and a piece that starts on no listed keyframe joins the segment before | FFmpeg can cut at more keyframes than the container lists (its H.264 parser flags I-frames mkvmerge doesn't; mkvmerge leaves bursts of keyframes out of the Cues), and no container-level check can predict that. Numbering by FFmpeg's count misnumbered every later segment; timing by EXTINF was exact (0.00 ms on FFmpeg 6.1 and 9). Also makes a full keyframe list unnecessary for correctness |
+| 10-17 | **Idle HLS sessions sleep instead of closing** (FFmpeg stopped, segments deleted, off the limit) and wake on the next request; closed after 24 h unused | A paused player asks for nothing: after 90 s the session was closed, so the TV got 404s on Play, fell back to a full conversion, and a second long pause ended in "Can't play this" (owner's traffic log, 10-15) |
 
 ## 4. Built so far
 
@@ -230,7 +233,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   ProRes, 10-bit/4:2:2/4:4:4 H.264…, and HEVC/AV1/VP9 for browsers without them) to H.264 + AAC on the best working
   encoder (NVENC/QSV/AMF/VAAPI, else x264). Deinterlaces, squares anamorphic pixels, caps the size, tone-maps HDR
   (Dolby Vision through libplacebo). GPU decoding with a GPU encoder. **HLS sessions** (`hls.py`): segments made
-  on demand, native seeking, quality (max height) per session, bounded CPU/disk, idle sessions closed. A limit on
+  on demand, native seeking, quality (max height) per session, bounded CPU/disk, idle sessions asleep (woken by
+  the next request: a long pause goes on where it was). A limit on
   simultaneous conversions (Settings).
 - **Accounts:** `auth.py` (scrypt hashes, sessions, throttle), admin/viewer roles, first-admin setup from the server
   itself, login middleware on `/api/`, `bams user add|list|passwd|remove|unlock|2fa-off`. "Must change password at
@@ -251,7 +255,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   downloaded into the data dir and becomes a track (`d<n>`) of that file for everyone; removable.
 - **Audio:** track list with labels, any track via the remux, 5.1 AAC on request (`channels`/`ch`), Dolby (AC3/EAC3)
   pass-through on devices that decode it.
-- **HLS (more):** copy variants for the remux (keyframe-cut fMP4), Auto quality ladder, all-GPU filters with fallback
+- **HLS (more):** copy variants for the remux (keyframe-cut fMP4 or MPEG-TS; keyframes from the file's index in under a
+  second, FFmpeg's extra cuts joined to their segment), Auto quality ladder, all-GPU filters with fallback
   (NVIDIA tested; Quick Sync, VAAPI, AMF built but untested on hardware). Dolby Vision profile 5 verified on a real file.
 - **Scheduler:** one worker thread (scans run one at a time), timer queues due libraries, progress reporting
   (step, done/total, bytes, seconds into the step) shown in Settings.
@@ -372,8 +377,8 @@ docs/INSTALL.md, deploy/README.md, server/README.md.
 
 Roughly in priority order:
 1. **Playback leftovers (minor):** all-GPU filters on real Quick Sync/AMD hardware (built, untested; VAAPI works on the
-   owner's Intel HD 630 under Ubuntu 24.04); a copy-HLS session first reads every keyframe of the file (~8 s for a
-   Family Guy episode on the owner's NAS, cached afterwards); Dolby
+   owner's Intel HD 630 under Ubuntu 24.04); copy-HLS of a file with no usable index (AVI, fragmented MP4, MKV
+   without Cues) still reads every keyframe first (seconds to a minute on the NAS, cached afterwards); Dolby
    pass-through on a real Dolby device (tested only with a faked "supported"); Dolby Vision profile 5 without
    libplacebo/Vulkan fails to convert (zscale can't read it); text MicroDVD `.sub` sidecars (no `.idx`) aren't listed.
 2. **Music leftovers (minor):** sample-perfect gapless (Media Source Extensions); un-merging an album; `.cue` entries
@@ -437,6 +442,36 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-17: TV playback: no wait at the first play, a long pause goes on (release 0.18.2, TV apps 0.16.1)
+- **What / why:** owner: the Samsung app "has a very long pause to buffer/reload/load every time i start a video, or
+  pause a video for more than a few seconds … 5 minutes later … it spins". The server's log and traffic log
+  (`netflow`) showed three causes. (1) Every first play of a file waited for `stream.keyframes` to read the whole file
+  (7–80 s; 27 s for a 3 GB episode). Now read from the file's index (`keyindex.py`: MKV Cues, MP4/MOV sample tables,
+  0.2–0.9 s on the server incl. a check of three stretches with ffprobe, `stream._index_agrees`). Two of the owner's
+  mkvmerge files list fewer keyframes than FFmpeg cuts at (one show: FFmpeg's H.264 parser flags I-frames
+  the container doesn't; one episode: a burst left out of the Cues), so copy runs now write into their own
+  folder and `hls._publish` names each piece by its start time (run start + FFmpeg's EXTINF), joining extra pieces to
+  their segment. (2) A paused session was closed after 90 s: Play got 404s, the TV fell back to a full conversion,
+  and a second long pause ended in "Can't play this". Sessions now sleep and wake (`_sleep`/`_wake`, `FORGET` 24 h).
+  (3) A start abandoned during the long wait later called `load()` on the TV's single AVPlay and replaced the video
+  picked next (seen 10-17 18:40: an episode took over a film): `begin()` checks it's still current (`starts`),
+  `AvplayEngine.load` hands over when overtaken (`loads`). Also: a stream that played 10 s+ and then failed (server
+  restart) is restarted the same way before falling back to a conversion.
+- **Files:** `server/bams/keyindex.py` (new), `stream.py` (`keyframes`, `_index_agrees`, a harmless Windows FFmpeg
+  message at debug), `hls.py` (`Run`, `_publish`, `_finish`, `Variant.starting`/`first_key`, sleep/wake, `FORGET`);
+  tests `test_keyindex.py` (new), `test_hls.py`; `tv/src/screens/Player.tsx`, `tv/src/engine.ts`,
+  `tv/test/avplay.test.ts` (new); CHANGELOG, VERSION 0.18.2, `tv/package.json` 0.16.1.
+- **Verified:** 357 server tests (Windows, FFmpeg 9); on the server's FFmpeg 6.1 `test_keyindex/hls/stream` pass but
+  the known `test_encoder_choice_api`. On the owner's server (patched copy in /tmp, nothing changed there): index =
+  full read on 67 of 69 files (MKV and MP4, many release groups), the 2 others sparse as above; real TS and fMP4 copy
+  sessions of 5 files, segments at a resume point and around the extra keyframes each hold exactly their frames;
+  first segment 0.7–1.4 s after the session. TV tests 46 (the AVPlay tests fail without the fix). Test server :8508
+  with a sparse-Cue AC3 episode: web player and theatre page played, seeked, played to the end; theatre page paused
+  100 s → "idle, FFmpeg stopped", Play → "woken", playback went on past the buffer, no fallback.
+- **Left open:** not yet tried on the owner's TVs (AVPlay with joined TS segments). Copy-HLS of AVI (926 files) still
+  reads the whole file at first play. On Windows FFmpeg's list rename sometimes fails while BAMS reads it (logged at
+  debug, handled).
 
 ### 2026-10-15: Subtitle menu scrolls to its end; remove downloaded subtitles on the TV/theatre player (release 0.18.1)
 - **What / why:** owner testing theatre mode: with 3+ downloaded subtitles the selection went down out of sight (the
