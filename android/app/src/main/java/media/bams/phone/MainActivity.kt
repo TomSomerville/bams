@@ -49,6 +49,9 @@ class MainActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private var fullscreen: View? = null
     private var fullscreenDone: WebChromeClient.CustomViewCallback? = null
+    /** The web player asked for full screen (0.2.2+: it plays videos full screen from the start, no button): bars
+     *  hidden, landscape. Back leaves it (the player stays, with the bars), a second Back leaves the player. */
+    private var videoFull = false
     /** the server whose page is showing (null: the app's own pages) */
     private var current: Servers.Server? = null
     private var currentBase: String? = null
@@ -77,7 +80,7 @@ class MainActivity : Activity() {
         setContentView(root)
         // the page stays clear of the status bar, the navigation bar and a camera cut-out (Android 15 draws edge to edge)
         root.setOnApplyWindowInsetsListener { v, insets ->
-            if (fullscreen == null) {
+            if (fullscreen == null && !videoFull) {
                 val bars = if (Build.VERSION.SDK_INT >= 30)
                     insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime())
                 else null
@@ -110,6 +113,10 @@ class MainActivity : Activity() {
                 // IMDb, TMDB, Wikipedia…: the phone's browser
                 try { startActivity(Intent(Intent.ACTION_VIEW, request.url)) } catch (e: Exception) {}
                 return true
+            }
+
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                videoFullscreen(false)  // a new page: whatever asked for full screen is gone
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -250,6 +257,15 @@ class MainActivity : Activity() {
         DownloadService.start(this)
     }
 
+    /** Full screen for the web player's video (bridge "videoFullscreen"; the page turns it off when the player goes). */
+    fun videoFullscreen(on: Boolean) {
+        if (on == videoFull) return
+        videoFull = on
+        requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        bars(!on)
+        root.requestApplyInsets()
+    }
+
     private fun bars(show: Boolean) {
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.let {
@@ -270,6 +286,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             fullscreen != null -> web.webChromeClient?.onHideCustomView()
+            videoFull -> videoFullscreen(false)
             web.canGoBack() -> web.goBack()
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }

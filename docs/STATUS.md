@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-15** (release 0.18.1).
+Last updated: **2026-10-19** (release 0.18.4).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -355,7 +355,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - Everywhere (TVs too): media tickets are renewed when a picture or the player fails or the page comes back from a
   sleep (tickets die with a server restart).
 
-### Android phone app (`android/`, 0.2.1, release 0.17.1)
+### Android phone app (`android/`, 0.2.2, release 0.18.4)
 - Android 8+ (tested: Android 16 emulator, owner's Galaxy A17 5G). Online: the server's web UI in a WebView with
   Download buttons (movie, episode, season, show, song, album, artist, playlist), a Downloads menu item and Settings →
   This phone (phone storage / SD card, Wi-Fi only, space used, servers and addresses). Offline: its own pages (`web/src/phone/`,
@@ -442,6 +442,23 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-19: Android app plays videos full screen, no full-screen button (release 0.18.4, app 0.2.2)
+- **What / why:** owner: when the app plays a video it should go full screen at once, never show a "make full screen"
+  icon, and Back should bring it to a more normal state. Online the app shows the server's web player, whose button used
+  the WebView's full-screen path (`onShowCustomView`), which only follows a tap. Now the web player, in app 0.2.2+
+  (`android.appVideoFullscreen`, from the user agent), hides its button and asks the app through the bridge
+  (`videoFullscreen` on at mount, off at unmount); the app hides the system bars and turns to landscape
+  (`MainActivity.videoFullscreen`). Back leaves full screen first (the player stays), then the page's history as before;
+  a new page load turns it off. Older apps keep the button; browsers are unchanged. Offline (downloaded) videos were
+  already full screen in `PlayerActivity`.
+- **Files:** `web/src/{android.ts, pages/Player.tsx}`; `android/.../{MainActivity,Bridge}.kt`, `gradle.properties`
+  0.2.2.
+- **Verified:** web `tsc`; debug build on the Android 16 emulator against the sandbox, driven through the WebView's
+  DevTools: Play → `/play/<id>` in landscape (rotation 90, viewport 915×412: no bars), controls end at 1x / Original
+  (no full-screen button); Back → same player, same position, portrait with bars; Back → title page; Play again and the
+  player's own ← in full screen → title page, portrait, bars. Release APK signed with the BAMS key.
+- **Left open:** not yet tried on the owner's phone.
 
 ### 2026-10-19: Personal details removed from the repo and its history; privacy check before every commit
 - **What / why:** owner: scrub names, IPs, computer names, unrelated paths and file names, logs and non-BAMS images

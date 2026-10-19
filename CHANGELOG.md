@@ -3,6 +3,17 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.18.4 (2026-10-19)
+
+### Changed
+- **Android app: videos play full screen** (app 0.2.2). Playing a video in the app goes straight to full screen
+  (landscape, the phone's bars hidden), and the full-screen button is gone. The phone's Back first brings the player
+  back to a normal view (portrait, bars shown, still playing where it was); Back again leaves the player. Older app
+  versions keep the button as before.
+
+Update the server with the new installer and the phone with `BAMS-Android-0.2.2.apk` (installs over 0.2.1). Both are
+needed: the app shows the server's own player pages. The TV apps are unchanged.
+
 ## TV apps 0.16.2 (2026-10-19)
 
 ### Fixed

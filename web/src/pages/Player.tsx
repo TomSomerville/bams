@@ -9,6 +9,7 @@ import { useScope, type Call } from "../servers";
 import { useApi } from "../useApi";
 import { entryLabel, useVideoQueue } from "../random";
 import { useReorder } from "../components/useReorder";
+import { app, appVideoFullscreen } from "../android";
 
 // Three ways a file reaches <video>, chosen by the server (file.playback.mode) and the viewer's choices:
 //  "file"      - the original bytes with HTTP Range; the browser seeks by itself.
@@ -579,9 +580,17 @@ function Player({ id }: { id: string }) {
     nav(to(`/play/${nextId}`), { replace: true, state: sleep ? { sleep: sleep - 1 } : undefined });
   };
   const fullscreen = () => {
+    if (appVideoFullscreen) return;  // the app is full screen already (below)
     if (document.fullscreenElement) document.exitFullscreen();
     else shell.current?.requestFullscreen?.();
   };
+  // In the Android app (0.2.2+) a video plays full screen from the start: the app hides its bars and turns to
+  // landscape; its Back leaves full screen (the player stays), a second Back leaves the player.
+  useEffect(() => {
+    if (!appVideoFullscreen) return;
+    void app("videoFullscreen", { on: true }).catch(() => undefined);
+    return () => void app("videoFullscreen", { on: false }).catch(() => undefined);
+  }, []);
 
   // Key handler is registered once; read the latest position/seek through refs.
   const seekRef = useRef(seek);
@@ -876,7 +885,7 @@ function Player({ id }: { id: string }) {
               ))}
             </Menu>
           )}
-          <button className="icon-btn" title="Fullscreen (f)" onClick={fullscreen}><Icon name="fullscreen" size={24} /></button>
+          {!appVideoFullscreen && <button className="icon-btn" title="Fullscreen (f)" onClick={fullscreen}><Icon name="fullscreen" size={24} /></button>}
         </div>
       </div>
       {finding && file && (

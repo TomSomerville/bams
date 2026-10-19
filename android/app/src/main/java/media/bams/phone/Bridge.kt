@@ -108,6 +108,8 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
                 done(null)
             }
             "musicState" -> done(music.state())
+            // the web player (0.2.2+): its video full screen while it plays (android.ts videoFullscreen)
+            "videoFullscreen" -> { activity.videoFullscreen(m.optBoolean("on")); done(null) }
             else -> if (ownPage) appPage(m, done, fail, later) else fail("Not allowed here.")
         }
     }

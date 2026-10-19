@@ -60,6 +60,10 @@ export function appAtLeast(min: string): boolean {
  *  the page's own player, as before. */
 export const appPlaysMusic = inApp && appAtLeast("0.2.1");
 
+/** The app plays the web player's videos full screen from the start (no full-screen button; Back leaves full screen,
+ *  then the player): app 0.2.2 or later. An older app keeps the button. */
+export const appVideoFullscreen = inApp && appAtLeast("0.2.2");
+
 let next = 1;
 const waiting = new Map<number, { ok: (v: unknown) => void; fail: (e: Error) => void }>();
 

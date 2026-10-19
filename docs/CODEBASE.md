@@ -100,7 +100,7 @@ bams/
 │       ├── homeRows.ts        Home's rows: defaultRows(libs, genres, list) (default order, labels; `watchlist` after `continue`; one `genre:<name>` row per genre) + homeRows(saved, libs, genres, list) (user order merged with what exists; an old `genres` entry expands in place); `listName` / `WATCHLIST_NAME` ("My Watch List")
 │       ├── format.ts          sxe(), fmtRuntime(), fmtSize(), seasonsLabel(), subLabel(), PLAY_LABEL
 │       ├── quality.ts         The quality line under a playing song ("FLAC · 24-bit / 96 kHz", "MP3 · 320 kbps", "ALAC … → AAC 256 kbps"): fileQuality(), qualityLine(playback, converted); SHARED with the TV app and the phone pages (no React)
-│       ├── android.ts         The Android app's bridge (`window.bamsAndroid`, WebMessageListener): inApp, app(type, args), appApi (info, download, status, remove, location, Wi-Fi only, open Downloads/Servers), DOWNLOADS_CHANGED, unplayableAudio(); SHARED with the phone pages (no React)
+│       ├── android.ts         The Android app's bridge (`window.bamsAndroid`, WebMessageListener): inApp, appAtLeast, appPlaysMusic / appVideoFullscreen (version gates), app(type, args), appApi (info, download, status, remove, location, Wi-Fi only, open Downloads/Servers), DOWNLOADS_CHANGED, unplayableAudio(); SHARED with the phone pages (no React)
 │       ├── phone/             The Android app's own pages (offline, bundled in the APK; HashRouter): lib.ts (catalog + manifests → one library per server, pictures as /dl/<sid>/images/…), App.tsx (shell, online/offline banner, music bar from the app's player), pages.tsx (Downloads, Movies, TV Shows, Music, title/album/artist/playlist pages, Servers, start screen)
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
@@ -189,7 +189,7 @@ bams/
 ├── android/                  ── Android phone app (Android 8+): the server's web UI + downloads, offline pages (android/README.md) ──
 │   ├── app/build.gradle.kts   copies web/dist-app into assets/app each build; version `bamsVersion` (gradle.properties); release signing from keystore.properties (git-ignored)
 │   └── app/src/main/java/media/bams/phone/
-│       ├── MainActivity.kt    WebView: the server's page or the app's own (WebViewAssetLoader /app/, /dl/ pictures); finds a server at start, falls back to Downloads when its page fails; full-screen video, Back, insets
+│       ├── MainActivity.kt    WebView: the server's page or the app's own (WebViewAssetLoader /app/, /dl/ pictures); finds a server at start, falls back to Downloads when its page fails; full-screen video (the web player's, bridge `videoFullscreen`, 0.2.2: bars hidden, landscape), Back (out of full screen first), insets
 │       ├── Bridge.kt          window.bamsAndroid (origin rules: the app's servers + its own pages): download/status/remove/info/settings; own pages only: library, servers, playVideo, music
 │       ├── Servers.kt         servers by `/api/hello` id, each with every address (home/away), reach() tries them; cookie sign-in shared between addresses
 │       ├── Store.kt           downloads catalog: roots (what was asked for + manifest) and files (each once, ref-counted), status, library(); location / Wi-Fi only settings

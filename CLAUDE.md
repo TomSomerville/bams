@@ -366,6 +366,10 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   wrapper says otherwise for the lock screen, and the page seeks it through the `Streams.SEEK` session command (a
   controller drops a seek ExoPlayer said isn't available). Server-side web changes that need a newer app are gated by
   its version (`android.appAtLeast`, from the user agent), so older apps keep working.
+- **In the Android app (0.2.2+) the web player is full screen through the bridge** (`videoFullscreen`, gate
+  `android.appVideoFullscreen`), not the Fullscreen API: that needs a fresh tap and goes through the WebView's
+  `onShowCustomView`. The page turns it on at mount and off at unmount; the app's Back leaves it first. Keep older
+  apps' button (they don't know the message).
 - **Your own playlists are private**: every `/api/user-playlists/{id}` route must go through `_own_playlist` (404 for
   anyone else's). Imported playlists stay read-only (media folders are); editing means "Make a copy".
 - **Samsung builds stay on the owner's Windows PC**: he keeps the certificate passwords (2026-10-15), and Certificate
