@@ -41,3 +41,19 @@ branding/archive/**/concepts/
 # Samsung TV app (tv/scripts/wgt.mjs)
 /tv/build/
 *.wgt
+
+# Personal and machine-specific files: never commit (docs/SECURITY-PRACTICES.md)
+CLAUDE.local.md
+.privacy-patterns
+.claude/launch.json
+.claude/skills/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.pwd
+keystore.properties
+*.log
+*.jsonl

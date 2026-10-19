@@ -1,0 +1,11 @@
+#!/bin/sh
+# Refuse commits with personal or sensitive content (docs/SECURITY-PRACTICES.md).
+# Enable once per clone: git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel)
+for py in "$root/server/.venv/Scripts/python.exe" "$root/server/.venv/bin/python" python3 python; do
+    if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then
+        exec "$py" -I "$root/tools/privacy_check.py"
+    fi
+done
+echo "pre-commit: no Python found to run tools/privacy_check.py" >&2
+exit 1

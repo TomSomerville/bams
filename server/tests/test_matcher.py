@@ -7,7 +7,7 @@ from bams.scanner import scan_library
 from bams.tmdb import Tmdb
 from conftest import make_tree
 
-TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl"  # fake, JWT-shaped
+TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.c2lnbmF0dXJl"  # fake, JWT-shaped (privacy-check: ok)
 
 SIMPSONS = {"id": 456, "name": "The Simpsons", "original_name": "The Simpsons", "first_air_date": "1989-12-17",
             "overview": "Springfield.", "poster_path": "/simp.jpg", "backdrop_path": "/simp_bd.jpg",

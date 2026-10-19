@@ -135,7 +135,7 @@ How it works (`server/bams/subtitles.py`):
 
 ## 5. Music (audio-only files)
 
-Indexed in **Music** libraries (`config.AUDIO_EXTS`). Test albums are in `C:\Users\owner\MyMusic`.
+Indexed in **Music** libraries (`config.AUDIO_EXTS`). Test albums are in the owner's local music test folder (outside the repo).
 "Plays as-is" = the original file is streamed (seeking via HTTP Range). "Converted" = FFmpeg converts it while
 streaming (`/api/files/{id}/audio?t=`) to **AAC 256 kbps stereo** (≤ 48 kHz, fragmented MP4; the default) or, when
 the admin picks it in Settings → Music, **FLAC** (lossless: 24-bit kept, ≤ 96/88.2 kHz, channels kept; about 4x the

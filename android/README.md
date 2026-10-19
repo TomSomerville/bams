@@ -43,7 +43,7 @@ web UI is connected to, it uses that server's token.
 ## Build
 
 Needs Node (for `web/`), **JDK 17** and the **Android SDK** with platform 35. On the Linux PC these live in
-`~/sandboxes/Android` (`source ~/sandboxes/Android/env.sh` sets `JAVA_HOME`, `ANDROID_HOME` and
+its Android sandbox folder (`source env.sh` there sets `JAVA_HOME`, `ANDROID_HOME` and
 the Gradle cache).
 
 ```bash
@@ -55,7 +55,7 @@ Gradle copies `web/dist-app` into the APK (`assets/app`) on every build, so rebu
 `web/src/phone/`, `android.ts` or `styles.css`. The pages shown online come from the server: changing those means a
 server release (`npm run build` in `web/`). The app's version is `bamsVersion` in `gradle.properties`.
 
-**Emulator** (Android 16): AVD `bams36` in `~/sandboxes/Android/.android/avd`. Start it with
+**Emulator** (Android 16): AVD `bams36` in the sandbox's `.android/avd`. Start it with
 `emulator -avd bams36` (add `-sdcard <img>` to test SD cards). A server on the PC is `10.0.2.2:<port>` from the
 emulator. Debug builds can be inspected from Chrome on the PC at `chrome://inspect`.
 
@@ -68,13 +68,14 @@ addresses*.
 
 Android only installs an update signed with the same key as the copy already installed.
 
-- **Releases** (0.2.0 on) are signed with the BAMS release key **`~/sandboxes/Android/bams-android.jks`**
+- **Releases** (0.2.0 on) are signed with the BAMS release key **`bams-android.jks`** (location: `CLAUDE.local.md`, not in git)
   (alias `bams`, made 2026-10-14, SHA-256 `BD:86:B4:37:…:27:CD:70`). Its passwords are in
   **`android/keystore.properties`** (git-ignored; `storeFile`, `storePassword`, `keyAlias`, `keyPassword`). Never commit
   either. **Keep a backup of both**: a lost key means every phone uninstalls (losing its downloads) and reinstalls.
+  The Windows PC has a copy too (its `android/keystore.properties` points there).
   `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`; check it with
   `apksigner verify --print-certs`.
-- **Debug builds** are signed with the build PC's debug key (`~/sandboxes/Android/.android/debug.keystore`).
+- **Debug builds** are signed with the build PC's debug key (the sandbox's `.android/debug.keystore`).
   A release build doesn't install over a debug build or the other way round: uninstall first (the phone loses its
   downloads and sign-in).
 

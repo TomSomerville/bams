@@ -162,7 +162,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-11 | **Another server's library order is kept per browser** (dragged in the sidebar, `bams.servers` → `order`), by anyone; this server's own order stays the admin's, shared by everyone. This server's libraries sit under its **name** in the sidebar, like other servers' | Owner: "allow me to drag and re-arrange the library order on other servers" and "This should say your server name, not Libraries". Kept where that browser's names and hidden flags for the server already are: no admin rights needed there, nothing changes for its other users |
 | 10-11 | **Fix match lists the title's folders** (shows: the folder above the season folders, as the parser picks it, with file counts; movies: their files), admins only | Tester request: check the right folder is being fixed. Server paths are admin information (`/api/status` hides them from viewers too) |
 | 10-11 | **The Fire TV app is the Samsung TV app** (`tv/`, built page bundled as APK assets) in a full-screen WebView, with **ExoPlayer** drawing under the see-through page and the device's decoders read from Android (`Caps.kt`), not a table. Fire OS 6+ only (not Vega OS) | One app to keep in step with the web/TV look (owner wants web and TV to show the same). ExoPlayer seeks inside a streamed file (AVPlay can't), so files the device decodes play from `/stream`; Fire TV models differ too much for a codec table |
-| 10-11 | **Fire TV releases are signed with a release key** made for BAMS (`C:\Users\owner\bams-firetv.jks`, passwords in git-ignored `firetv/keystore.properties`); debug builds use this PC's debug key | Owner's choice at release 0.12.0. Android installs an update only over an app signed with the same key: losing it means every Fire TV uninstalls, reinstalls and signs in again |
+| 10-11 | **Fire TV releases are signed with a release key** made for BAMS (`bams-firetv.jks`, location in `CLAUDE.local.md`, passwords in git-ignored `firetv/keystore.properties`); debug builds use this PC's debug key | Owner's choice at release 0.12.0. Android installs an update only over an app signed with the same key: losing it means every Fire TV uninstalls, reinstalls and signs in again |
 | 10-11 | **Quality menu: sizes up to the file's own** (the 16:9 box it fills: 1920×800 counts as 1080p), 4K/1440p only on a GPU encoder (`/api/status.video_encoder.hardware`); a size picked in this player applies even at the file's own size (converted), one **remembered** from another video only shrinks bigger files | Owner: "add a 1080P and 4k option". The CPU encoder stops at 1080p (`stream._box`), so 4K there was a 1080p picture. Remembering "1080p" from one workaround must not convert every 1080p file afterwards |
 | 10-11 | **One watch list across every server, stored on the servers**: each server keeps the watch list entries of its own items per account (table `watchlist`, schema v12); the web and TV apps put every connected server's part into one list (newest added first, `everywhere.listedOrder`). It sits under Home in the sidebar/rail, above the first library, and is a Home row (`watchlist`, after Continue Watching) | Owner: "a universal watch list, where episodes from EVERY server can be added… stored server side so all clients sync it". Keeping each item on its own server honours the 10-10 rule that servers store nothing about other servers; any device signed in to those servers shows the same list. A device not connected to a server doesn't see that server's entries (it couldn't play them either) |
 | 10-11 | The watch list holds **movies, shows, seasons and episodes** (not music); watching something **doesn't** take it off; its **name** is a per-account pref (`watchlist_name`, "" = "My Watch List") on the client's first server, renamed on the web list page | Owner: "ALL files I should be able to add… 'My Watch List' will be its default name". A watch list is for video; removal stays the person's choice (Netflix-style), with the watched tick shown on the card |
@@ -172,7 +172,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-13 | Sound the phone can't decode offline (DTS, TrueHD, AC3 on some phones): **warn on Download**, play another track the file has; **no FFmpeg in the app** | Owner's choice; bundling an FFmpeg decoder would break "FFmpeg is never bundled" |
 | 10-13 | The app knows a server by **`/api/hello` `id`** (new, stable) with **every address it was reached at** (home LAN, away), trying each; the WebView's sign-in cookie is shared between them | Owner: the server is reachable only sometimes (walks: nothing; trips: internet). Downloads must stay one server's whichever address answers |
 | 10-14 | **Releases are made from the Linux PC**: `.deb` and APKs built there, the Windows `.exe` by **GitHub Actions** on GitHub's Windows machine when the release is published; the Fire TV release key gets a copy on the Linux PC; Samsung builds stay on the Windows PC (10-15: the maintainer keeps the Samsung certificate passwords; the Tizen CLI tried on Linux was removed) | Owner: "configure everything needed for me to deploy windows and firetv builds" from Linux, and "I don't think we need Wine". Inno Setup runs only on Windows; a hosted Windows runner is a real Windows build without a Windows PC |
-| 10-14 | **Android releases are signed with a BAMS release key** (`~/sandboxes/Android/bams-android.jks`, passwords in git-ignored `android/keystore.properties`), first used for 0.2.0 | Owner's go-ahead. Updates install only over the same key; switching from the debug builds meant one reinstall while there was little to re-download |
+| 10-14 | **Android releases are signed with a BAMS release key** (`bams-android.jks`, location in `CLAUDE.local.md`, passwords in git-ignored `android/keystore.properties`), first used for 0.2.0 | Owner's go-ahead. Updates install only over the same key; switching from the debug builds meant one reinstall while there was little to re-download |
 | 10-13 | **Playlists made in BAMS are each account's own and private** (`user_playlists`, schema v15); albums/artists add their tracks as they are now, each track once; imported playlists stay read-only with **"Make a copy"**; full editing on web, TV (hold-OK menus, TV keyboard) and the phone online; downloadable to the phone | Owner: "create playlist, name them, add a brief description, add individual songs, albums or artist… for all versions", then chose "personal and private" and full TV editing. Playlist files live in read-only media folders |
 | 10-13 | **Quality line** under a playing song's title and artist on every player (`web/src/quality.ts`): codec + bit depth/sample rate (lossless) or bitrate (lossy); a converted song shows both ("ALAC 24-bit / 96 kHz → AAC 256 kbps") | Owner: "list the current format/quality of the song… below the song name and artist" |
 | 10-10 | The **encoder test uses the real rate-control options**; VAAPI falls back to **constant QP** (`-rc_mode CQP -qp 23`, no bitrate cap) when the driver refuses a bitrate | Owner's Ubuntu server (Intel HD 630, Ubuntu's free `intel-media-va-driver`) supports only CQP: the old option-less test passed and every real conversion failed. Bitrate modes stay where the driver has them |
@@ -182,6 +182,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-17 | **Copy-HLS keyframes come from the file's index** (MKV Cues, MP4/MOV sample tables; `keyindex.py`), checked against ffprobe in three short stretches; a full packet read only without a usable index (AVI, fragmented MP4, no Cues) | Owner: "a very long pause … every time I start a video" on the TV. The full read took 7–80 s per first play over the NAS (gigabit-bound, can't be made faster); the index takes under a second. On 69 of the owner's files the index matched the full read except two mkvmerge files, which list fewer keyframes than FFmpeg cuts at (next row) |
 | 10-17 | **A copy run's pieces are published by time** (`hls._publish`): FFmpeg writes each run into its own folder, every piece is timed from the run's start + FFmpeg's EXTINF durations, and a piece that starts on no listed keyframe joins the segment before | FFmpeg can cut at more keyframes than the container lists (its H.264 parser flags I-frames mkvmerge doesn't; mkvmerge leaves bursts of keyframes out of the Cues), and no container-level check can predict that. Numbering by FFmpeg's count misnumbered every later segment; timing by EXTINF was exact (0.00 ms on FFmpeg 6.1 and 9). Also makes a full keyframe list unnecessary for correctness |
 | 10-17 | **Idle HLS sessions sleep instead of closing** (FFmpeg stopped, segments deleted, off the limit) and wake on the next request; closed after 24 h unused | A paused player asks for nothing: after 90 s the session was closed, so the TV got 404s on Play, fell back to a full conversion, and a second long pause ended in "Can't play this" (owner's traffic log, 10-15) |
+| 10-19 | **No personal or machine-specific content in git** ([SECURITY-PRACTICES.md](SECURITY-PRACTICES.md)): the owner's machine details live in git-ignored `CLAUDE.local.md`; skills and `launch.json` are local only; `tools/privacy_check.py` runs as the pre-commit hook; commits use the GitHub no-reply email; history rewritten once to remove what had been committed | Owner's request, so the repo can be public |
 
 ## 4. Built so far
 
@@ -407,23 +408,21 @@ Roughly in priority order:
    Android 15+ allows background downloads 6 h a day (the rest goes on when the app is opened); no Play Store build;
    the offline video player uses Android's controls, not the web player's look.
 
-## 6. Dev environment (owner's machine)
+## 6. Dev environment
+
+The owner's machines, addresses, accounts and paths (dev PC, Linux PC, the server BAMS runs on, the TV, signing-key
+locations, test media folders) are **not in git**: they're in `CLAUDE.local.md` (git-ignored, loaded by Claude Code),
+per [SECURITY-PRACTICES.md](SECURITY-PRACTICES.md). What's generic:
 
 | | |
 |---|---|
-| OS / GPU | Windows 11, RTX 5070 Ti 16 GB |
-| Repo | `C:\Users\owner\bams` → github.com/TomSomerville/bams (**private**) |
 | Python | `server\.venv` (3.11 via `uv`) |
 | Node | 23 (`web/`) |
-| FFmpeg | winget `Gyan.FFmpeg` (found automatically, even without PATH) |
-| Server data dir | `C:\Users\owner\bams\data` (gitignored): DB, image cache, logs |
-| Owner's server (since 10-10) | Ubuntu 24.04 at `192.168.1.10` (Intel HD 630, FFmpeg 6.1.1), the `.deb`, running as `owner`; data `/var/lib/bams`, log `/var/lib/bams/logs/bams.log`, media on `/mnt/media`. Read-only access for agents: `ssh <server>` (key `~/.ssh/<key>` on the owner's PC; `owner` is in `render`, so FFmpeg/VAAPI tests run there). Installing a package needs the owner's sudo |
-| Linux PC (2026-10-13) | Debian 13 at `10.0.0.20`, user `owner`, repo `~/bams`. **Sandbox server** `~/sandboxes/bams/bams.sh {start\|stop\|update\|…}` (:8485, its own copy of the code, generated mock media; `BAMS_HOST=0.0.0.0` for the phone). Android tools in `~/sandboxes/Android` (`source env.sh`: JDK 17, SDK 35, AVD `bams36` = Android 16 emulator), Chrome for Testing (TV tests: `CHROME_PATH=~/sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`). No Tizen tools: Samsung `.wgt` builds are made on the Windows PC only (tv/README.md). Not on the TV's network (10.0.0.x vs 192.168.1.x) |
-| Ports | 8484 = the owner's server · 8485 = scratch test instances (`.claude/launch.json` → `bams-test`, data dir in the session scratchpad: edit the path) · 5173 = Vite dev |
-| Test media | `C:\Users\owner\Shows` (TV) · `C:\Users\owner\Movies` (2 movies) · `C:\Users\owner\MyMusic` (8 CC0/CC BY albums, 4 artists, `CREDITS.txt`) · `C:\Users\owner\TestMedia` (Jellyfin DV profile 5 clip + its SDR version, CC BY-SA 4.0, `CREDITS.txt`) |
-| Libraries on the owner's server | 1 = "TV Shows" (`…\Shows`), 2 = "Movies" (`…\Movies`); the owner adds "Music" (`…\MyMusic`) when testing |
+| FFmpeg | Windows: winget `Gyan.FFmpeg` (found automatically, even without PATH); Linux: the distro's |
+| Server data dir (dev) | `data/` in the repo (gitignored): DB, image cache, logs |
+| Ports | 8484 = the owner's server · 8485+ = scratch test instances (local `.claude/launch.json`, git-ignored, data dir in the session scratchpad) · 5173 = Vite dev |
 | Art tools | local ComfyUI (Qwen Image); `tools/brand_art/rework.py` redraws the logo set from the supplied art |
-| Samsung TV | The Frame LS03B (2022, Tizen 6.5) at `192.168.1.150`, Developer Mode with host `192.168.1.100` (the owner's PC). Tizen Studio 6.1 in `C:	izen-studio` (TV Extensions, Samsung Certificate Extension); signing profile **BAMS** (`C:UsersownerSamsungCertificateBAMS`, keep it: updates must be signed with the same author certificate). `sdb connect 192.168.1.150`; remote inspector: `sdb shell 0 debug BAMSmedia1.BAMS` → port, `sdb forward tcp:P tcp:P`, then the DevTools protocol on `127.0.0.1:P` |
+| Samsung TV | Developed on a 2022 The Frame (Tizen 6.5). Tizen Studio 6.1 (TV Extensions, Samsung Certificate Extension); signing profile **BAMS** (keep it: updates must be signed with the same author certificate). Remote inspector: `sdb shell 0 debug BAMSmedia1.BAMS` → port, `sdb forward tcp:P tcp:P`, then the DevTools protocol on `127.0.0.1:P` |
 
 ## 7. Repo state notes
 - Initial commit `3c79290` (plan, branding, UI prototype). Everything after it, server included, was
@@ -443,6 +442,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-19: Personal details removed from the repo and its history; privacy check before every commit
+- **What / why:** owner: scrub names, IPs, computer names, unrelated paths and file names, logs and non-BAMS images
+  from the repo and all of its history, and stop them coming back. Personal machine details moved to git-ignored
+  `CLAUDE.local.md`; `.claude/skills/` and `.claude/launch.json` untracked (local only); real release-group names in
+  parser tests replaced by invented ones; docs say "the owner's server/PC" with made-up example addresses. New
+  `docs/SECURITY-PRACTICES.md` (what never to commit, where it goes instead), `tools/privacy_check.py` + `.githooks/pre-commit`
+  (generic checks + the owner's own strings from git-ignored `.privacy-patterns`); CLAUDE.md says to review the
+  practices before every commit. History rewritten with `git filter-repo` (same replacements, removed files dropped,
+  commit emails → GitHub no-reply).
+- **Files:** `docs/SECURITY-PRACTICES.md`, `tools/privacy_check.py`, `.githooks/pre-commit`, `.gitignore`, `CLAUDE.md`,
+  STATUS §6, CODEBASE tree, READMEs, `server/tests/test_parse.py`/`test_scanner.py`/`test_matcher.py`/`test_readonly.py`.
+- **Verified:** full server test suite; `privacy_check.py --all` passes; the rewritten history searched for every
+  pattern in `.privacy-patterns` (none left).
+- **Left open:** other clones (the Linux PC) must re-clone or reset to the rewritten history, copy `CLAUDE.local.md`,
+  `.privacy-patterns` and the skills over, and run `git config core.hooksPath .githooks`.
 
 ### 2026-10-19: Fire TV subtitles can be turned off (TV apps 0.16.2, Fire TV only)
 - **What / why:** owner: "the firetv app always has subtitles on and you cannot turn them off. even when they are on
@@ -731,7 +746,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   sign-in: 409 with the key message, account not kept); `tools/hwcheck/`, `.claude/skills/`, `.claude/launch.json`
   (scratch servers); README, CODEBASE (tree), CHANGELOG, VERSION 0.13.2.
 - **Verified:** 330 server tests (clean worktree of the release commit too); on the owner's server (read-only, over
-  SSH): key 32 letters/digits verified 2026-10-12 15:23 UTC, the account's tier, sign-in 200 in the
+  SSH): key verified, the account's sign-in 200 in the
   traffic log; the key and password themselves were never read (length/shape only).
 - **Left open:** no subtitle downloaded with the tester's account yet (0 rows in `subtitle_downloads` when checked); the
   tester's own server still needs its key checked (Test) or pasted again.
@@ -1562,7 +1577,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **What / why:** owner asked for every video/audio format in the design docs, and for open-licensed test
   albums.
 - **Files:** `docs/FORMATS.md`; `config.VIDEO_EXTS` extended to match it (asf, wtv, dvr-ms, f4v, 3g2, rm, rmvb,
-  mpe). Music: `C:\Users\owner\MyMusic` (outside the repo), 4 artists / 8 albums / 81 MP3s, CC0 + CC BY,
+  mpe). Music: a local test folder (outside the repo), 4 artists / 8 albums / 81 MP3s, CC0 + CC BY,
   with `CREDITS.txt`.
 - **Verified:** every MP3 MD5 matched archive.org's published checksum; 68 tests pass.
 - **Left open:** music libraries themselves (phase 3).
@@ -1607,7 +1622,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **What / why:** owner: "server first". Read-only crawler, parser, TMDB matcher, scheduler, REST API, CLI,
   systemd unit.
 - **Files:** everything in `server/`, `deploy/linux/bams.service`, `docs/READ-ONLY.md`.
-- **Verified:** 54 tests at the time. A real scan of `C:\Users\owner\Shows` (≈200 files) changed 0 of 211 file
+- **Verified:** 54 tests at the time. A real scan of the owner's test shows folder (≈200 files) changed 0 of 211 file
   attributes. All shows matched once the key was set.
 - **Left open:** see §5.
 

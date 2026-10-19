@@ -14,12 +14,13 @@ STATUS.md §8 Work log.
 ```
 bams/
 ├── CLAUDE.md                  Rules + pitfalls for Claude sessions (auto-loaded)
+├── CLAUDE.local.md            NOT IN GIT (ignored): the owner's machines, addresses, key locations (auto-loaded)
 ├── README.md                  Project intro, how to run
 ├── LICENSE                    MIT
-├── .gitignore / .gitattributes   (LF line endings everywhere; data/, .venv/, node_modules/, dist/ ignored)
-├── .claude/launch.json        Preview-pane servers: "web" (Vite :5173), "bams-test" (a scratch server on :8485), one scratch server per session that added one ("bams-android-test" :8506 on the Linux PC)
-├── .claude/skills/            Project skills for Claude sessions: bams-server (SSH to the owner's Ubuntu server: log, read-only DB,
-│                              FFmpeg repro, linux-tests.sh in Docker), tv-connection (sdb to the Samsung TV on/off/check)
+├── .gitignore / .gitattributes   (LF line endings everywhere; data/, .venv/, node_modules/, dist/, local files ignored)
+├── .claude/launch.json        NOT IN GIT (ignored): preview-pane servers ("web" :5173, scratch servers on :8485+)
+├── .claude/skills/            NOT IN GIT (ignored): bams-server (SSH to the owner's server), tv-connection (sdb to the TV)
+├── tools/privacy_check.py     Pre-commit check for personal/sensitive content (docs/SECURITY-PRACTICES.md)
 │
 ├── docs/
 │   ├── PLAN.md                Architecture, how Plex works, metadata licensing, phases
@@ -27,6 +28,7 @@ bams/
 │   ├── CODEBASE.md            ← this file
 │   ├── FORMATS.md             Every container/codec/subtitle/music format: browser support + BAMS handling
 │   ├── READ-ONLY.md           How media folders are kept read-only (code + OS setup per platform)
+│   ├── SECURITY-PRACTICES.md  What must never be committed, where personal details go, the pre-commit check
 │   └── THEATRE.md             Theatre mode for a PC at a TV: using it, automatic sign-in, Chrome kiosk at start-up
 │
 ├── server/                    ── Python server (FastAPI + SQLite) ──────────────────────────
@@ -793,7 +795,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | Android app: what's downloaded / how | server `_manifest`, `item_download`, `download_file` in `app.py`; app `Store.kt`, `DownloadService.kt`, `Bridge.kt`; web `components/Download.tsx`, `android.ts` |
 | Android app: streamed music (lock screen) | web `music.tsx` `AppMusicProvider` (gate `android.appPlaysMusic`); app `Music.stream`, `Streams.kt`, bridge `musicStream` |
 | Android app: offline pages, offline playback | `web/src/phone/` (rebuild `npm run build:app`, then the APK); `PlayerActivity.kt`, `MusicService.kt`, `Music.kt` |
-| Build / install the Android phone app | `android/README.md` (`source ~/sandboxes/Android/env.sh`, `./gradlew assembleDebug`) |
+| Build / install the Android phone app | `android/README.md` (source the Android `env.sh`, `./gradlew assembleDebug`) |
 | Gapless timing / music player behaviour | `web/src/music.tsx` (`PRELOAD_BEFORE`, `ARM_BEFORE`, `advance`, `tick`) |
 | Converted-music formats | `stream.MUSIC_OUTPUTS`, `stream.audio_cmd`; setting in `app.put_music_output` |
 | Add a music metadata source | `musicbrainz.py` (client) + `music_match.py` (apply) + credit in `pages/Music.tsx` `About` |

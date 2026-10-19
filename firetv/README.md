@@ -86,9 +86,9 @@ keyAlias=bams
 keyPassword=<the key password>
 ```
 
-On the Linux PC the key lives next to the phone app's: `~/sandboxes/Android/bams-firetv.jks`, with
-`firetv/keystore.properties` pointing at it (`storeFile=~/sandboxes/Android/bams-firetv.jks`); build with
-`source ~/sandboxes/Android/env.sh` first. Keep the copy on the Windows PC as a backup.
+On the Linux PC the key lives next to the phone app's (location: `CLAUDE.local.md`, not in git), with
+`firetv/keystore.properties` pointing at it (`storeFile=<path>/bams-firetv.jks`); build with
+the Android sandbox's `env.sh` sourced first. Keep the copy on the Windows PC as a backup.
 
 `npm run firetv -- --release` then builds `app-release.apk` and copies it to `dist/BAMS-FireTV-<version>.apk`.
 A release build doesn't install over a debug build (or the other way round): `adb uninstall media.bams.firetv`

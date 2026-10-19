@@ -2,7 +2,7 @@
 
 Each job feeds one of the supplied logo files to Qwen 2.1 as a reference image
 and asks for a crisp, higher-res redraw (and, for the lockups, the new tagline
-"Bad Ass Media Server"). Laptop first, like ComfyDriver's tools/comfy.py; the
+"Bad Ass Media Server"). Laptop first, like the local ComfyUI driver (comfy.py); the
 laptop's builds of the same weights are aliased by filename in HOSTS.
 
     python tools/brand_art/rework.py render --out <dir> [--seeds 3] [--only logo,icon] [--host laptop]
@@ -89,7 +89,7 @@ TURBO_NODES = (1.0, 0.9375, 0.875, 0.75, 0.5, 0.25)  # Viggle's 6 student timest
 
 
 def turbo_sigmas(w: int, h: int) -> str:
-    """Same schedule as ComfyDriver comfy.py turbo_sigmas()."""
+    """Same schedule as the ComfyUI driver's turbo_sigmas()."""
     tokens = (h // 16) * (w // 16)
     mu = 0.5 + (0.9 - 0.5) * (tokens - 256) / (8192 - 256)
     e = math.exp(mu)

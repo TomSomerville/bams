@@ -26,7 +26,20 @@ Files may have changed since you last looked, and work may exist that you never 
    - add new pitfalls to the list below.
    Don't log work that's still in progress or was rejected. Mention unfinished work only as "left open" in your entry.
 
+## Before every commit: read docs/SECURITY-PRACTICES.md
+
+**Whenever you commit (or stage, or write something meant for git), first review
+[docs/SECURITY-PRACTICES.md](docs/SECURITY-PRACTICES.md) and follow it.** This repo may be public. Never commit
+personal or security-sensitive content: people's names/emails (beyond the GitHub handle in the repo URL), real IP
+addresses, hostnames, computer or account names, home-folder or machine-specific paths, SSH/server access details,
+signing-key or certificate locations, logs or debugging output from the owner's machines, real media file or folder
+names from the owner's library, screenshots of anything that isn't BAMS, other private projects. The owner's real
+machine details live in **`CLAUDE.local.md`** (git-ignored; read it when you need them). Run
+`server\.venv\Scripts\python tools\privacy_check.py` on the staged changes before every commit; it must pass.
+Be security-conscious by default: when in doubt, leave it out and ask the owner.
+
 **Read before working:**
+- `CLAUDE.local.md` (git-ignored, may be missing on a fresh clone): the owner's machines, addresses, key locations.
 - [docs/STATUS.md](docs/STATUS.md): what's built, what isn't, decisions and their reasons, requirements, dev environment.
 - [docs/CODEBASE.md](docs/CODEBASE.md): every file and what it does, data flow, DB schema, API, "where to change X".
 - [docs/PLAN.md](docs/PLAN.md) (architecture, phases, licensing) · [docs/FORMATS.md](docs/FORMATS.md) (all formats and handling) · [docs/READ-ONLY.md](docs/READ-ONLY.md).
@@ -71,18 +84,18 @@ Files may have changed since you last looked, and work may exist that you never 
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
 server\.venv\Scripts\python -m pytest -q                      # 359 tests, all must pass
-server\.venv\Scripts\python -m bams --data-dir C:\Users\owner\bams\data serve   # http://127.0.0.1:8484, API docs /docs
+server\.venv\Scripts\python -m bams --data-dir data serve   # http://127.0.0.1:8484, API docs /docs (data/ is gitignored)
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
-# Samsung TV app (tv/README.md): Tizen Studio in C:	izen-studio, signing profile "BAMS", TV at 192.168.1.150
+# Samsung TV app (tv/README.md): Tizen Studio, signing profile "BAMS", TV address in CLAUDE.local.md
 cd tv && npm install && npx tsc -p . && npm test && npm run build && npm run package -- --install --run   # --release: dist/BAMS-SamsungTV-<v>.wgt
-# Fire TV app (firetv/README.md): JDK 17 + Android SDK 35; release key C:\Users\owner\bams-firetv.jks via firetv/keystore.properties
+# Fire TV app (firetv/README.md): JDK 17 + Android SDK 35; release key via firetv/keystore.properties (location: CLAUDE.local.md)
 cd tv && npm run build && npm run firetv -- --install --device <fire-tv-ip>   # --release: dist/BAMS-FireTV-<v>.apk
-# Android phone app (android/README.md), on the Linux PC: source ~/sandboxes/Android/env.sh first
+# Android phone app (android/README.md), on the Linux PC: source the Android env.sh first (CLAUDE.local.md)
 cd web && npm run build:app && cd ../android && ./gradlew assembleDebug   # app/build/outputs/apk/debug/app-debug.apk
 # releases from Linux: .deb here (python3 deploy/build.py deb), the .exe is built by GitHub Actions when the release is
-# published (.github/workflows/windows-installer.yml); Fire TV key on Linux: ~/sandboxes/Android/bams-firetv.jks
-# Samsung .wgt: only on owner's Windows PC (he keeps the certificate passwords); no Tizen setup on the Linux PC
+# published (.github/workflows/windows-installer.yml); the Fire TV key has a copy on the Linux PC (CLAUDE.local.md)
+# Samsung .wgt: only on the owner's Windows PC (he keeps the certificate passwords); no Tizen setup on the Linux PC
 # installers (deploy/README.md): bump server/bams/config.py VERSION first
 server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-<v>.exe + dist\bams_<v>_all.deb
 ```
@@ -197,11 +210,12 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Hand identifications win over file names:** the scanner goes through `identify.parsed_for`, never `parse.parse`
   directly, or a rescan would undo what an admin entered (`files.manual`).
 - **The owner's server is a remote Ubuntu 24.04 machine** (since 2026-10-10; before that the Windows service in
-  `C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`, unreadable without admin). `ssh <server>` (key
-  `~/.ssh/<key>`, user `owner` = the account BAMS runs as, in `render`) reads `/var/lib/bams/logs/bams.log`,
+  `C:\Program Files\BAMS`, data `C:\ProgramData\BAMS`, unreadable without admin). Agents reach it read-only over SSH
+  (address, alias and account: `CLAUDE.local.md` and the local `bams-server` skill, neither in git): it reads
+  `/var/lib/bams/logs/bams.log`,
   the DB (open it `?mode=ro`, or `sqlite3` backup into `/tmp`) and runs FFmpeg/VAAPI tests; write only to `/tmp` and
   clean up, change nothing else there without asking. It runs the released `.deb`, not this checkout: a fix reaches it
-  with a new release, and installing needs the owner's sudo. Docs: STATUS.md §6.
+  with a new release, and installing needs the owner's sudo. Never copy its logs, paths or file names into git.
 - **Home row ids are stored in users' prefs** (`home_rows`: `continue`, `watchlist`, `recent`, `lib:<id>`, `top_rated`, `genre:<name>`; older saves have one `genres`
   entry, which `homeRows()` expands in place: keep that).
   Renaming an id silently resets that row for everyone who reordered; add new rows in `homeRows.ts` `defaultRows`.
@@ -241,7 +255,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Media tickets** (`/api/t/<ticket>/…`) are rewritten to the real path in `LoginRequired`; they open only
   `MEDIA_PREFIXES` and only GET/HEAD. New media routes the TV must load need their prefix there.
 - **The released `.wgt` is signed for the owner's TV only** (Samsung distributor certificate = the TV's DUID). Updates
-  must be signed with the same author certificate (`C:UsersownerSamsungCertificateBAMS`) or the TV treats
+  must be signed with the same author certificate (profile `BAMS`, location in `CLAUDE.local.md`) or the TV treats
   them as another app. Certificate Manager 3.1.3 won't start on Tizen Studio's bundled Java 8 with `--add-modules` in
   `toolscertificate-managereclipse.ini` (removed on the owner's PC; original kept as `eclipse.ini.orig`).
 - **`web/src/homeRows.ts` is shared with the TV app** (`tv/src/screens/Home.tsx` imports it): keep it free of browser,
@@ -316,9 +330,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **The Fire TV's ExoPlayer must show no subtitles of its own** (`Video.kt` disables `C.TRACK_TYPE_TEXT`,
   `MainActivity.kt` hides `subtitleView`): left alone it picks a file's default-flagged track (most MKVs) and its
   `PlayerView` draws it under the page whatever the menu says (TV apps 0.16.2). Subtitles are the page's.
-- **Fire TV releases need the release key** (`C:\Users\owner\bams-firetv.jks`, passwords in git-ignored
-  `firetv/keystore.properties`, made at 0.12.0); a copy is on the Linux PC since 2026-10-15
-  (`~/sandboxes/Android/bams-firetv.jks`, checked against the released 0.15.0 APK): an APK signed with any other key won't install over a released one.
+- **Fire TV releases need the release key** (`bams-firetv.jks`, location in `CLAUDE.local.md`, passwords in git-ignored
+  `firetv/keystore.properties`, made at 0.12.0); a copy is on the Linux PC since 2026-10-15 (checked against the
+  released 0.15.0 APK): an APK signed with any other key won't install over a released one.
   Never commit either; a lost key means every Fire TV reinstalls and signs in again. Debug and release builds don't
   install over each other (`adb uninstall media.bams.firetv` first).
 - **A saved position of 0 doesn't mean playback was stuck:** `watch.record_progress` stores positions under
@@ -334,8 +348,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   This phone settings) ship with a **server** release. Its offline pages (`web/src/phone/`, `npm run build:app`) are
   bundled in the APK: rebuild the APK after changing them, `web/src/android.ts`, `quality.ts` or `styles.css`.
   `android.ts` and `quality.ts` are shared like `everywhere.ts` (no React/router/storage).
-- **Android releases need the release key** (`~/sandboxes/Android/bams-android.jks`, passwords in git-ignored
-  `android/keystore.properties`, made 2026-10-14): give the owner `assembleRelease` builds, never debug ones (they
+- **Android releases need the release key** (`bams-android.jks` on the Linux PC with a Windows copy, locations in
+  `CLAUDE.local.md`, passwords in git-ignored `android/keystore.properties`, made 2026-10-14): give the owner
+  `assembleRelease` builds, never debug ones (they
   won't install over each other; switching costs the phone's downloads). Never commit either file.
 - **Bump `bamsVersion` (android/gradle.properties) for every APK handed to the owner**: they sideload it, and a
   stale 0.1.0 install looked exactly like a bug in 0.1.1. The version shows at the bottom of offline Downloads.
@@ -353,11 +368,11 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   its version (`android.appAtLeast`, from the user agent), so older apps keep working.
 - **Your own playlists are private**: every `/api/user-playlists/{id}` route must go through `_own_playlist` (404 for
   anyone else's). Imported playlists stay read-only (media folders are); editing means "Make a copy".
-- **Samsung builds stay on owner's Windows PC**: he keeps the certificate passwords (2026-10-15), and Certificate
+- **Samsung builds stay on the owner's Windows PC**: he keeps the certificate passwords (2026-10-15), and Certificate
   Manager's `.pwd` files only work on the machine that made them. A Tizen CLI setup on the Linux PC was removed. If it's
   ever redone: Tizen Studio refuses folders outside the user's home and replaces symlinks (give it its own `HOME=` and
   `JAVA_TOOL_OPTIONS=-Duser.home=`), and `cert-add-on` pulls the IDE and `sudo apt install`s a 2016 WebKitGTK.
-- **TV tests on the Linux PC** need `CHROME_PATH=~/sandboxes/chrome/chrome-headless-shell-linux64/chrome-headless-shell`.
+- **TV tests on the Linux PC** need `CHROME_PATH` set to its Chrome headless shell (path in `CLAUDE.local.md`).
 - **Theatre mode is the TV page served at `/theatre/`, on the web UI's own origin** (docs/THEATRE.md). So: its storage
   goes through `platform.ts` `local`/`session` (`bams.theatre.*` keys; the web UI uses `bams.servers` in another shape),
   and every fetch in `tv/src/api.ts` has `credentials: "omit"`: `LoginRequired` takes a cookie over a bearer token, so
