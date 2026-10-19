@@ -181,7 +181,7 @@ bams/
 │   ├── app/src/main/java/media/bams/firetv/
 │   │   ├── MainActivity.kt    full-screen WebView over ExoPlayer's view; see-through page while playing; Back/OK/media keys → page (Samsung key codes); OK on a text box = simulated tap (keyboard)
 │   │   ├── Bridge.kt          window.BamsAndroid: device name/model/IP/version + caps, exit, player load/play/pause/seek/stop
-│   │   ├── Video.kt           ExoPlayer (one per load) under the page; events back to the page (firetv.ts FirePlayerEvent)
+│   │   ├── Video.kt           ExoPlayer (one per load) under the page; events back to the page (firetv.ts FirePlayerEvent); its own text tracks off (the page draws subtitles)
 │   │   └── Caps.kt            what this device decodes (Android codec list + audio output) in BAMS probe names, with sizes
 │   └── art.py                 launcher icons + TV banner from the logo (Pillow)
 ├── android/                  ── Android phone app (Android 8+): the server's web UI + downloads, offline pages (android/README.md) ──

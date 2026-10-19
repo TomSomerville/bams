@@ -335,7 +335,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   decoders and audio output (`Caps.kt` → `plan.ts`: sizes too, a 1080p stick converts 4K; conversions no taller than
   its H.264 decoder), device name/IP and exit (`Bridge.kt` ↔ `tv/src/firetv.ts`). Remote: Back/OK/media keys passed
   on with the Samsung key codes; OK on a text box simulates a tap so the Fire TV keyboard opens. Files it decodes
-  play from `/stream` (ExoPlayer seeks in them), others through copy-HLS in fMP4 or a conversion.
+  play from `/stream` (ExoPlayer seeks in them), others through copy-HLS in fMP4 or a conversion. Subtitles are the
+  page's, as on Samsung: ExoPlayer's own text tracks are turned off and its subtitle view hidden (0.16.2).
 - Build: `cd tv && npm run build && npm run firetv` (Gradle 8.11.1, JDK 17, Android SDK 35); `--install --device <ip>`
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
@@ -442,6 +443,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-19: Fire TV subtitles can be turned off (TV apps 0.16.2, Fire TV only)
+- **What / why:** owner: "the firetv app always has subtitles on and you cannot turn them off. even when they are on
+  the off setting." ExoPlayer chose a file's own subtitle track when the file flags it default (and would for one
+  matching Android's caption setting), and the `PlayerView` under the page drew it. The page's own subtitles did
+  honour Off. The file the Fire TV last played (Bob's Burgers S04E10, MKV played from `/stream`) has an English SubRip
+  track with `default: 1`; the Fire TV's system captions were off. ExoPlayer's text tracks are now disabled
+  (`setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)`) and its subtitle view hidden; text subtitles stay the page's
+  (server WebVTT), picture ones burned in by the server, as before.
+- **Files:** `firetv/app/src/main/java/media/bams/firetv/Video.kt` (`load`), `MainActivity.kt` (`subtitleView`
+  hidden); `tv/package.json` + lock 0.16.2 (the APK's version); `CHANGELOG.md`.
+- **Verified:** debug and release builds; `BAMS-FireTV-0.16.2.apk` (release key) installed over 0.16.1 on the owner's
+  Fire TV with `adb install -r` (sign-in kept). Played S04E10 as-is with subtitles Off: adb screenshots at ~2:05–2:15,
+  where the track has lines throughout, showed none. Owner: "Subtitles stay off now and turn on when I pick one."
+- **Left open:** no Samsung build for 0.16.2 (Samsung code unchanged; its next build takes the number); the APK isn't
+  attached to a GitHub release yet; the Fire TV's Android side still has no unit tests.
 
 ### 2026-10-17: TV playback tests; sound in the first segment after a skip or resume (release 0.18.3)
 - **What / why:** owner: "run unit tests on both tv apps to verify the pausing is fixed. Sub titles still work and

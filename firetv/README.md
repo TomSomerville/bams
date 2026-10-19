@@ -10,6 +10,7 @@ full-screen WebView; Android adds what a web page can't do itself:
 - **Video through ExoPlayer** (`Video.kt`), drawn under the see-through page the way Samsung's AVPlay draws under
   it. Unlike Samsung's player, ExoPlayer seeks inside a file it streams, so files the Fire TV decodes play straight
   from `/stream`. Other files go through the server's copy-HLS (in fMP4, which keeps Dolby Vision) or a conversion.
+  ExoPlayer shows no subtitles of its own (text tracks off, subtitle view hidden): the page draws them, as on Samsung.
 - **What the device decodes** (`Caps.kt`): read from Android's decoders and the audio output, not from a table.
   Fire TV models differ a lot (4K or not, AV1, Dolby Vision, DTS only through an AV receiver), and `tv/src/plan.ts`
   decides from that. Conversions are never taller than the H.264 decoder takes.

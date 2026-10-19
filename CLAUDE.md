@@ -313,6 +313,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   (Gradle copies `tv/dist` in). Fire TV code paths are `hasExo()` / `fireInfo()` branches; keep the Samsung and browser
   paths untouched by them and add a case to `tv/test/firetv.test.ts`. OK on a text box must stay a simulated tap
   (`MainActivity.kt`): asking Android for the keyboard directly opened it on a dead input connection and it closed at once.
+- **The Fire TV's ExoPlayer must show no subtitles of its own** (`Video.kt` disables `C.TRACK_TYPE_TEXT`,
+  `MainActivity.kt` hides `subtitleView`): left alone it picks a file's default-flagged track (most MKVs) and its
+  `PlayerView` draws it under the page whatever the menu says (TV apps 0.16.2). Subtitles are the page's.
 - **Fire TV releases need the release key** (`C:\Users\owner\bams-firetv.jks`, passwords in git-ignored
   `firetv/keystore.properties`, made at 0.12.0); a copy is on the Linux PC since 2026-10-15
   (`~/sandboxes/Android/bams-firetv.jks`, checked against the released 0.15.0 APK): an APK signed with any other key won't install over a released one.

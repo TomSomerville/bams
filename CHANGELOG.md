@@ -3,6 +3,13 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## TV apps 0.16.2 (2026-10-19)
+
+### Fixed
+- **Fire TV: subtitles couldn't be turned off.** In a file the Fire TV plays as-is (most MKV and MP4), a subtitle
+  track the file marks as its default showed all the time, whatever the Subtitles menu said. Off is off now, and a
+  subtitle you pick still shows. The Samsung app is unchanged (no new Samsung build); no server update needed.
+
 ## 0.18.3 (2026-10-17)
 
 ### Fixed

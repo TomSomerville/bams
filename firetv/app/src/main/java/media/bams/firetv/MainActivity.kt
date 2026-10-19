@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.os.SystemClock
 import android.view.InputDevice
@@ -66,6 +67,7 @@ class MainActivity : Activity() {
             setShutterBackgroundColor(Color.BLACK)
             isFocusable = false
             descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            subtitleView?.visibility = View.GONE  // the page draws subtitles (Video.kt turns ExoPlayer's text tracks off)
         }
         web = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)

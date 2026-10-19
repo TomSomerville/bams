@@ -93,6 +93,12 @@ class Video(private val context: Context, private val view: PlayerView, private 
                 true,
             )
             .build()
+        // the page draws text subtitles (the server's WebVTT, with Off and the timing control) and has the server
+        // burn in picture ones: ExoPlayer must show none of its own, or a file's "default" subtitle track (or one
+        // matching the system's caption setting) stays on screen whatever the page's menu says
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
         p.addListener(listener)
         view.player = p
         val item = MediaItem.Builder().setUri(url)
