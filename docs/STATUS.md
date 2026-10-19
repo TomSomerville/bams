@@ -457,8 +457,11 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** debug and release builds; `BAMS-FireTV-0.16.2.apk` (release key) installed over 0.16.1 on the owner's
   Fire TV with `adb install -r` (sign-in kept). Played S04E10 as-is with subtitles Off: adb screenshots at ~2:05–2:15,
   where the track has lines throughout, showed none. Owner: "Subtitles stay off now and turn on when I pick one."
-- **Left open:** no Samsung build for 0.16.2 (Samsung code unchanged; its next build takes the number); the APK isn't
-  attached to a GitHub release yet; the Fire TV's Android side still has no unit tests.
+- **Released:** `BAMS-FireTV-0.16.2.apk` (same certificate as 0.12.0–0.16.1, SHA-256 4dbd7910…) added to the
+  **v0.18.3** GitHub release at the owner's request, with a "Fire TV 0.16.2" section in its notes and its line in
+  SHA256SUMS.txt (re-downloaded and checked).
+- **Left open:** no Samsung build for 0.16.2 (Samsung code unchanged; its next build takes the number); the Fire TV's
+  Android side still has no unit tests.
 
 ### 2026-10-17: TV playback tests; sound in the first segment after a skip or resume (release 0.18.3)
 - **What / why:** owner: "run unit tests on both tv apps to verify the pausing is fixed. Sub titles still work and
