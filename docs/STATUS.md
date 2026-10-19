@@ -392,8 +392,8 @@ Roughly in priority order:
    translations are left out (their default); subtitles split over 2 CDs are skipped.
 6. **Theatre mode leftovers:** not tried on Windows (Chrome kiosk, the PowerShell start-up) or with Firefox; no
    bitstream passthrough or real HDR in a browser (a native app was planned and set aside, see the 10-15 decisions);
-   an on-screen keyboard for remotes without one; Samsung and Fire TV need a smoke test at their next release (shared
-   `tv/` code changed).
+   an on-screen keyboard for remotes without one. (The shared `tv/` changes reached Samsung and Fire TV in TV apps
+   0.16.0, installed on the owner's Frame and Fire TV.)
 7. **TV app leftovers:** the TV's music has no queue view/reorder and no gapless hand-over; renaming other servers'
    libraries is web-only (the TV only hides them); Samsung TVs other than the owner's 2022 Frame untested (codec table in
    `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
