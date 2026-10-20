@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-19** (release 0.18.4).
+Last updated: **2026-10-19** (release 0.18.5).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -442,6 +442,21 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-19: Theatre player back arrow; the browser's Back stays inside BAMS (release 0.18.5)
+- **What / why:** owner: once a video plays in theatre mode there's no way back, and the browser's Back goes to the
+  page before BAMS. (1) A back arrow at the top left of the player, left of the title, on PCs only (`platform.pc()`;
+  TV players unchanged): Up from the controls reaches it, Down returns, OK leaves the player; a mouse moving shows the
+  controls, which now take clicks while the pointer shows (`.osd` had `pointer-events: none`). (2) The Back history
+  trap (`pckeys.ts`) added its entry at load and again inside `popstate`, without a key press or click, so Chrome's
+  back-button intervention skipped them and Back left BAMS. Entries are now added only during a key press or click,
+  three at a time (`TRAP_DEPTH`), never in `popstate`.
+- **Files:** `tv/src/{pckeys.ts, Icon.tsx, styles.css, screens/Player.tsx}`.
+- **Verified:** TV tests 49 passed, `tsc`. Preview browser against the sandbox: Up, Up → arrow focused, OK → title
+  page; mouse move shows the controls, clicking the arrow → title page; three browser Backs in a row stay in BAMS
+  (title page → Home). Chrome's skipping itself didn't reproduce in the preview browser.
+- **Owner:** in the sandbox in their Chrome: "it works".
+- **Left open:** none.
 
 ### 2026-10-19: Android app plays videos full screen, no full-screen button (release 0.18.4, app 0.2.2)
 - **What / why:** owner: when the app plays a video it should go full screen at once, never show a "make full screen"

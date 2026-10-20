@@ -200,6 +200,10 @@ p { margin: 0; }
 .osd.on { opacity: 1; }
 .osd-top { padding: 50px 80px 120px; background: linear-gradient(rgba(0, 0, 0, 0.8), transparent); }
 .osd-top h1 { font-size: 48px; }
+/* a PC (theatre mode): a back arrow left of the title, reached with Up from the buttons */
+.osd-title-row { display: flex; align-items: center; gap: 32px; }
+/* the controls take a PC mouse's clicks while the pointer shows (pointer.ts) */
+html.pointer .osd.on button { pointer-events: auto; }
 .osd-sub { font-size: 30px; color: #d6dae2; }
 .osd-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 140px 80px 50px; background: linear-gradient(transparent, rgba(0, 0, 0, 0.88)); }
 .scrub { display: flex; align-items: center; gap: 30px; font-size: 28px; font-variant-numeric: tabular-nums; }

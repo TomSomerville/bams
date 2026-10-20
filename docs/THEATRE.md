@@ -14,7 +14,8 @@ Open it from BAMS in any browser (account menu → **Theatre mode**), or set a P
   Holding OK on a card, or the remote's **Menu** key, opens its menu (e.g. remove from Continue Watching).
 - **Searching:** start typing anywhere and Search opens with what you typed; Enter jumps to the results.
 - **In the player:** ◀ ▶ skip back 10 s / ahead 30 s, OK or Space pauses, ▲ ▼ show the controls (Sound,
-  Subtitles, Next episode, Up next, Sleep). The remote's media keys work, and so do Windows Media Center remotes.
+  Subtitles, Next episode, Up next, Sleep); Up once more reaches the back arrow at the top left, which leaves the
+  player. The remote's media keys work, and so do Windows Media Center remotes.
 - **Home** on the remote goes to Home. A mouse or air mouse works too: the pointer shows while it moves.
 - **Settings → This browser → Test the remote** shows what each button sends and what BAMS does with it. If a
   button does nothing, tell us its name.

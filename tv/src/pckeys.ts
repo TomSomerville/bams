@@ -112,14 +112,24 @@ export function installPcKeys() {
     set("seekforward", KEY.FF);
     set("seekbackward", KEY.RW);
   }
-  // The browser's own Back (a mouse's back button, Alt+Left) would leave the page: keep one history entry above
-  // it and treat going back to the one below as Back. (Chrome skips such entries only on pages never interacted
-  // with; any key press counts.)
+  // The browser's own Back (its toolbar button, a mouse's back button, Alt+Left) would leave the page: keep spare
+  // history entries above it, and treat going back onto one below as the remote's Back. Chrome's back button skips
+  // entries a page added without a key press or click (its "history manipulation intervention"): added at load or
+  // inside popstate they were skipped, and Back jumped past BAMS to the page before. So they're only ever added
+  // during a key press or click, TRAP_DEPTH of them, so a few Backs in a row stay inside BAMS too.
   try {
-    history.pushState({ bams: true }, "");
+    let spare = 0;  // our entries above where we are
+    const arm = () => {
+      for (; spare < TRAP_DEPTH; spare++) history.pushState({ bams: true }, "");
+    };
+    window.addEventListener("keydown", arm, true);
+    window.addEventListener("pointerdown", arm, true);
     window.addEventListener("popstate", () => {
-      history.pushState({ bams: true }, "");
+      spare = Math.max(0, spare - 1);
       press(KEY.BACK);
     });
   } catch { /* no history API: nothing to catch */ }
 }
+
+/** Spare history entries kept above the page (see installPcKeys). */
+export const TRAP_DEPTH = 3;

@@ -253,6 +253,12 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     timers.current.osd = setTimeout(hide, OSD_HIDE);
   }, []);
   useEffect(() => { wake(); }, [wake]);
+  // a PC's mouse moving shows the controls too (they take its clicks while the pointer shows: styles.css)
+  useEffect(() => {
+    if (!pc()) return;
+    window.addEventListener("mousemove", wake);
+    return () => window.removeEventListener("mousemove", wake);
+  }, [wake]);
 
   const toggle = () => {
     const e = engine.current;
@@ -368,7 +374,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu === "audio" ? "audio" : "subs"}"]`))); return true; }
         return false;  // arrows and OK move within the menu
       }
-      const inButtons = !!(document.activeElement as HTMLElement | null)?.closest(".osd-buttons");
+      const active = document.activeElement as HTMLElement | null;
+      const onExit = !!active?.closest(".osd-exit");  // a PC's back arrow, top left
+      const inButtons = onExit || !!active?.closest(".osd-buttons");
       switch (k) {
         case KEY.PLAY_PAUSE: toggle(); return true;
         case KEY.PLAY: if (engine.current?.paused()) toggle(); return true;
@@ -394,7 +402,18 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         }
         return true;
       }
-      if (k === KEY.UP) { (document.activeElement as HTMLElement).blur(); return true; }
+      if (onExit) {
+        if (k === KEY.DOWN) { focusFirst(document.querySelector(".osd-buttons") ?? document); return true; }
+        if (k === KEY.UP) { active!.blur(); return true; }
+        if (k === KEY.LEFT || k === KEY.RIGHT) return true;
+        return false;  // OK presses it (App.tsx)
+      }
+      if (k === KEY.UP) {
+        const exit = document.querySelector<HTMLElement>(".osd-exit");
+        if (exit) focus(exit);  // a PC: up to the back arrow
+        else (document.activeElement as HTMLElement).blur();
+        return true;
+      }
       return false;  // left/right/OK among the buttons
     });
     return () => setKeyHandler(null);
@@ -438,8 +457,21 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
 
       <div className={`osd ${osd ? "on" : ""}`}>
         <div className="osd-top">
-          <h1>{title}</h1>
-          {subtitle && <div className="osd-sub">{subtitle}</div>}
+          {pc() ? (
+            <div className="osd-title-row">
+              {/* a PC: the browser's Back can't be relied on, so the player has its own (Up from the buttons) */}
+              <button className="round osd-exit" data-fid="osd-exit" aria-label="Back" onClick={() => nav.back()}>
+                <Icon name="arrowLeft" />
+              </button>
+              <div>
+                <h1>{title}</h1>
+                {subtitle && <div className="osd-sub">{subtitle}</div>}
+              </div>
+            </div>
+          ) : (<>
+            <h1>{title}</h1>
+            {subtitle && <div className="osd-sub">{subtitle}</div>}
+          </>)}
         </div>
         <div className="osd-bottom">
           <div className="scrub">

@@ -3,6 +3,19 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.18.5 (2026-10-19)
+
+### Added
+- **Theatre mode: a back arrow in the player**, top left beside the title. With the remote: Up shows the controls, Up
+  again reaches the arrow, OK leaves the player. A mouse works too: moving it shows the controls, and they now take
+  clicks.
+
+### Fixed
+- **Theatre mode: the browser's Back left BAMS** (it went to the page before BAMS) in Chrome. It now stays inside
+  BAMS and goes back a screen, also a few times in a row.
+
+Update the server with the new installer. The TV and Android apps are unchanged.
+
 ## 0.18.4 (2026-10-19)
 
 ### Changed

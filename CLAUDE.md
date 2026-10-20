@@ -390,6 +390,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   runs Chrome/Chromium in kiosk mode with its own `--user-data-dir`; **Edge's `--kiosk` is always InPrivate** (the box
   would forget its sign-in at every boot). A plain-http LAN page has no Keyboard Lock or Clipboard API (secure context
   only): don't build on them.
+- **Theatre mode's Back history trap adds entries only during a key press or click** (`pckeys.ts`, `TRAP_DEPTH`):
+  Chrome's back button skips history entries a page added without one, so entries pushed at load or inside `popstate`
+  let Back jump past BAMS. Never push them anywhere else.
 - **Media tickets die with a server restart** (the key lives in the process): the TV page renews them when a picture or
   the player fails, or the page comes back from a sleep (`api.renewTickets`, `withFreshTicket`). Keep that for any new
   media the page loads.
