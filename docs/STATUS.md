@@ -421,7 +421,7 @@ Roughly in priority order:
    the offline video player uses Android's controls, not the web player's look.
 11. **Holiday / account switching leftovers:** holidays are a fixed list (no admin-added ones); episodes match by
    words only (TMDB keywords are fetched for movies); setting a title's holidays by hand is web-only; the TV apps
-   (Samsung, Fire TV) have no account switching and need new builds for the holiday rows; the Unidentified filter is
+   (Samsung, Fire TV) have no account switching; Samsung needs its 0.17.0 build for the holiday rows; the Unidentified filter is
    web-only.
 
 ## 6. Dev environment
@@ -459,7 +459,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
-### 2026-10-19: Upcoming / Recent Holiday, Unidentified filter, quick account switching (unreleased)
+### 2026-10-19: Upcoming / Recent Holiday, Unidentified filter, quick account switching (release 0.19.0, TV apps 0.17.0)
 - **What / why:** owner asked for three things, "secure lightweight" and without slowing the UI or playback.
   (1) **Holidays:** Home rows "Upcoming Holiday: Halloween · Oct 31" / "Recent Holiday: …" (random few, "See all"),
   and the same as library filters; 16 holidays computed locally (`holidays.py`), titles matched by words + TMDB movie
@@ -478,8 +478,10 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   → Fix match, Holidays dialog (by-hand tag shown), web add/switch/switch back, theatre add/switch with its row,
   See-all screen and "Back to <name>".
 - **Owner:** tried it in the sandbox: "it works".
-- **Left open:** not released; the Samsung/Fire TV apps need new builds for the holiday rows (not tried on a TV);
-  see "Not built yet" 11.
+- **Released:** server 0.19.0 (`.deb` from the Linux PC, `.exe` by GitHub Actions) and `BAMS-FireTV-0.17.0.apk`
+  (release key; certificate checked against the released 0.16.2 APK).
+- **Left open:** the Samsung 0.17.0 `.wgt` (Windows PC); neither TV app tried on a real TV with these changes; see
+  "Not built yet" 11.
 
 ### 2026-10-19: Theatre player back arrow; the browser's Back stays inside BAMS (release 0.18.5)
 - **What / why:** owner: once a video plays in theatre mode there's no way back, and the browser's Back goes to the

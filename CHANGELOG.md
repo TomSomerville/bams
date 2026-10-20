@@ -3,7 +3,7 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
-## Unreleased
+## 0.19.0 (2026-10-19), TV apps 0.17.0
 
 ### Added
 - **Upcoming and Recent Holiday.** Two Home rows show a few movies and episodes about the next holiday and the one just
@@ -14,6 +14,11 @@ accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating
 - **Unidentified filter** (admins, web): a library's titles BAMS couldn't identify yet; click one to fix its match.
 - **Switch account** (web and theatre mode): the button with your name above Settings. Sign several accounts in and
   switch between them with no password; signing out moves to the next one.
+
+Update the server with the new installer (the database is upgraded by itself; a backup is kept). Fire TV:
+`BAMS-FireTV-0.17.0.apk` installs over 0.16.2 and brings the holiday rows and filters. Samsung: the 0.17.0 `.wgt`
+comes later (it's built on the Windows PC); until then the Samsung app works as before, without the holiday rows.
+The Android app is unchanged.
 
 ## 0.18.5 (2026-10-19)
 
