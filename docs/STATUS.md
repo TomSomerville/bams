@@ -421,7 +421,7 @@ Roughly in priority order:
    the offline video player uses Android's controls, not the web player's look.
 11. **Holiday / account switching leftovers:** holidays are a fixed list (no admin-added ones); episodes match by
    words only (TMDB keywords are fetched for movies); setting a title's holidays by hand is web-only; the TV apps
-   (Samsung, Fire TV) have no account switching; Samsung needs its 0.17.0 build for the holiday rows; the Unidentified filter is
+   (Samsung, Fire TV) have no account switching; the Unidentified filter is
    web-only.
 
 ## 6. Dev environment
@@ -479,9 +479,10 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   See-all screen and "Back to <name>".
 - **Owner:** tried it in the sandbox: "it works".
 - **Released:** server 0.19.0 (`.deb` from the Linux PC, `.exe` by GitHub Actions) and `BAMS-FireTV-0.17.0.apk`
-  (release key; certificate checked against the released 0.16.2 APK).
-- **Left open:** the Samsung 0.17.0 `.wgt` (Windows PC); neither TV app tried on a real TV with these changes; see
-  "Not built yet" 11.
+  (release key; certificate checked against the released 0.16.2 APK). `BAMS-SamsungTV-0.17.0.wgt` added 2026-10-19
+  from the owner's Windows PC (`npm test` 50/50, `tsc`; same author and distributor certificates as 0.16.1;
+  `SHA256SUMS.txt` regenerated, release notes updated). Not installed on the TV (owner's request).
+- **Left open:** neither TV app tried on a real TV with these changes; see "Not built yet" 11.
 
 ### 2026-10-19: Theatre player back arrow; the browser's Back stays inside BAMS (release 0.18.5)
 - **What / why:** owner: once a video plays in theatre mode there's no way back, and the browser's Back goes to the
