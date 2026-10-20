@@ -458,7 +458,8 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   DevTools: Play → `/play/<id>` in landscape (rotation 90, viewport 915×412: no bars), controls end at 1x / Original
   (no full-screen button); Back → same player, same position, portrait with bars; Back → title page; Play again and the
   player's own ← in full screen → title page, portrait, bars. Release APK signed with the BAMS key.
-- **Left open:** not yet tried on the owner's phone.
+- **Owner:** on their phone with 0.18.4 / app 0.2.2: working.
+- **Left open:** none.
 
 ### 2026-10-19: Personal details removed from the repo and its history; privacy check before every commit
 - **What / why:** owner: scrub names, IPs, computer names, unrelated paths and file names, logs and non-BAMS images
