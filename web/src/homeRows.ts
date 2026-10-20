@@ -11,13 +11,15 @@ export const WATCHLIST_NAME = "My Watch List";
 export const listName = (saved?: string | null) => saved?.trim() || WATCHLIST_NAME;
 
 /** Home's rows in their default order: Continue Watching, the watch list (called `list` by the user), Recently
- *  Added, each TV/movie library's newest titles, each music library's new albums, Top Rated, then one row per genre
+ *  Added, the upcoming and the recent holiday, each TV/movie library's newest titles, each music library's new albums, Top Rated, then one row per genre
  *  (most titles first). */
 export function defaultRows(libs: ServerLibrary[], genres: Genre[], list = ""): Omit<HomeRow, "show">[] {
   return [
     { id: "continue", label: "Continue Watching" },
     { id: "watchlist", label: listName(list) },
     { id: "recent", label: "Recently Added" },
+    { id: "holiday_next", label: "Upcoming Holiday" },   // movies/episodes about the next holiday (holidays.py)
+    { id: "holiday_recent", label: "Recent Holiday" },   // ... about the one just past
     ...libs.filter((l) => l.type !== "music").map((l) => ({ id: `lib:${l.id}`, label: `Recently Added ${l.name}` })),
     ...libs.filter((l) => l.type === "music").map((l) => ({ id: `lib:${l.id}`, label: `Recently Added ${l.name}` })),
     { id: "top_rated", label: "Top Rated" },  // a random pick of the well rated, not best first

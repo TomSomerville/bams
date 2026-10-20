@@ -5,7 +5,7 @@
 //
 // Shared with the TV app (like homeRows.ts): keep it free of React, the router and browser-only APIs.
 
-import type { ContinueItem, Genre, HomeRowPref, ItemSummary, ServerLibrary, WatchlistItem } from "./api";
+import type { ContinueItem, Genre, Holiday, Holidays, HomeRowPref, ItemSummary, ServerLibrary, ShownItem, WatchlistItem } from "./api";
 import { homeRows, rowGenre } from "./homeRows";
 
 /** One server to ask: `get` is that server's API (the client adds its token, and makes media links usable). */
@@ -91,8 +91,9 @@ export function mergeGenres(lists: Genre[][]): Genre[] {
 export type HomeRowSpec = {
   id: string;
   title: string;
-  /** continue: wide cards that play; titles: posters; albums: square covers; watchlist: posters (listedLook) */
-  kind: "continue" | "titles" | "albums" | "watchlist";
+  /** continue: wide cards that play; titles: posters; albums: square covers; watchlist and holiday: posters
+   *  (listedLook: an episode under its show) */
+  kind: "continue" | "titles" | "albums" | "watchlist" | "holiday";
   /** asked of every source, or only the first server (its own library rows) */
   path: string;
   everywhere: boolean;
@@ -101,13 +102,41 @@ export type HomeRowSpec = {
   min: number;
   /** the library the row is from ("See all") */
   library?: number;
+  /** a holiday row: which one ("See all": every movie/episode about it) */
+  holiday?: "next" | "recent";
 };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Halloween · Oct 31" (no date for a holiday asked for by name). */
+export function holidayLabel(h: Pick<Holiday, "name" | "date">): string {
+  const m = h.date ? /^\d{4}-(\d\d)-(\d\d)$/.exec(h.date) : null;
+  return m ? `${h.name} · ${MONTHS[Number(m[1]) - 1]} ${Number(m[2])}` : h.name;
+}
+
+/** A holiday row's or page's heading: "Upcoming Holiday: Halloween · Oct 31". */
+export const holidayTitle = (which: "next" | "recent", h: Pick<Holiday, "name" | "date">) =>
+  `${which === "next" ? "Upcoming" : "Recent"} Holiday: ${holidayLabel(h)}`;
+
+/** Where a holiday's movies and episodes come from: at random for a Home row, by title for its page. */
+export const holidayPath = (which: string, opts: { random?: boolean; library?: number } = {}) =>
+  `/api/holidays/${which}/items?sort=${opts.random ? "random" : "title"}${opts.library !== undefined ? `&library=${opts.library}` : ""}` +
+  (opts.random ? `&limit=${ROW_SIZE}` : "");
+
+/** A holiday's movies and episodes from every server, as one list: by title, an episode by its show's. */
+export function holidayOrder(lists: Tagged<ShownItem>[][]): Tagged<ShownItem>[] {
+  const name = (i: ShownItem) => (i.kind === "episode" && i.show ? i.show.title : i.title);
+  return lists.flat().sort((a, b) => name(a).localeCompare(name(b), undefined, { sensitivity: "base" })
+    || (a.season_number ?? 0) - (b.season_number ?? 0) || (a.episode_number ?? 0) - (b.episode_number ?? 0));
+}
+
 /** Home's rows in the user's order (Settings → Home page, saved on their first server), the same on web and TV:
- *  Continue Watching, the watch list, Recently Added, Top Rated and each genre combine every server; each library's
- *  row is that library's. `libs` are the first server's libraries, `genres` every server's (mergeGenres), `list` the
- *  watch list's name (prefs.watchlist_name). */
-export function homeSpecs(saved: HomeRowPref[], libs: ServerLibrary[], genres: Genre[], list = ""): HomeRowSpec[] {
+ *  Continue Watching, the watch list, Recently Added, the holidays, Top Rated and each genre combine every server;
+ *  each library's row is that library's. `libs` are the first server's libraries, `genres` every server's
+ *  (mergeGenres), `list` the watch list's name (prefs.watchlist_name), `holidays` the first server's (null: a server
+ *  from before them, no holiday rows). */
+export function homeSpecs(saved: HomeRowPref[], libs: ServerLibrary[], genres: Genre[], list = "",
+                          holidays: Holidays | null = null): HomeRowSpec[] {
   const out: HomeRowSpec[] = [];
   for (const r of homeRows(saved, libs, genres, list).filter((x) => x.show)) {
     const g = rowGenre(r.id);
@@ -119,6 +148,12 @@ export function homeSpecs(saved: HomeRowPref[], libs: ServerLibrary[], genres: G
     } else if (r.id === "recent") {
       out.push({ id: r.id, title: r.label, kind: "titles", path: `/api/items?kind=show,movie&sort=added&limit=${ROW_SIZE}`,
         everywhere: true, merge: "newest", min: 1 });
+    } else if (r.id === "holiday_next" || r.id === "holiday_recent") {
+      const which = r.id === "holiday_next" ? "next" : "recent";
+      const h = holidays?.[which];
+      if (!h) continue;
+      out.push({ id: r.id, title: holidayTitle(which, h), kind: "holiday", path: holidayPath(which, { random: true }),
+        everywhere: true, merge: "mix", min: 1, holiday: which });
     } else if (r.id === "top_rated") {
       out.push({ id: r.id, title: r.label, kind: "titles", path: `/api/items?sort=random&min_rating=${TOP_RATING}&limit=${ROW_SIZE}`,
         everywhere: true, merge: "mix", min: 4 });
@@ -164,7 +199,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 /** How a watch list entry is shown, the same on web and TV: a season or an episode under its show's name (an episode
  *  with its show's poster), with what it is as `sub`; null `sub` for movies and shows (each app's usual line). */
-export function listedLook(i: WatchlistItem): { poster: string | null; title: string; sub: string | null } {
+export function listedLook(i: ShownItem): { poster: string | null; title: string; sub: string | null } {
   if (i.kind === "episode") {
     const num = i.season_number != null ? `S${pad(i.season_number)}${i.episode_number != null ? `E${pad(i.episode_number)}` : ""}` : "";
     return { poster: i.show?.poster ?? i.poster, title: i.show?.title ?? i.title, sub: [num, i.title].filter(Boolean).join(" · ") };

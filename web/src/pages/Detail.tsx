@@ -5,6 +5,8 @@ import { Backdrop, Poster } from "../components/Art";
 import { ListToggle, PlayBadge, PosterCard, progressOf } from "../components/Cards";
 import { DownloadButton } from "../components/Download";
 import FixMatch from "../components/FixMatch";
+import HolidayTags from "../components/HolidayTags";
+import { useAuth } from "../auth";
 import Icon from "../components/Icon";
 import Row from "../components/Row";
 import { fmtClock, fmtRuntime, fmtSize, seasonsLabel, sxe } from "../format";
@@ -69,8 +71,11 @@ function WatchedButton({ item, watched, done, small }: { item: ItemSummary; watc
 }
 
 /** A season's episodes. `picked`: an episode to point out (opened from the watch list), scrolled to once. */
-function Episodes({ season, picked, onChange }: { season: ItemSummary; picked: number | null; onChange: () => void }) {
+function Episodes({ season, picked, onChange, admin }: { season: ItemSummary; picked: number | null; onChange: () => void;
+  /** this server's admin: an episode's holidays can be set by hand */
+  admin: boolean }) {
   const { to } = useScope();
+  const [tagging, setTagging] = useState<{ id: number; title: string } | null>(null);
   const { data, reload } = useApi<ItemDetail>(`/api/items/${season.id}`);
   const pickedRef = useRef<HTMLLIElement>(null);
   const loaded = !!data;
@@ -106,10 +111,17 @@ function Episodes({ season, picked, onChange }: { season: ItemSummary; picked: n
               <ListToggle small item={e} />
               <WatchedButton small item={e} watched={!!e.progress?.watched} done={reload} />
               <DownloadButton small id={e.id} title={`${sxe(e.season_number!, e.episode_number)} ${e.title}`} />
+              {admin && (
+                <button className="icon-btn small" title="Holidays (Upcoming / Recent Holiday rows)" aria-label={`Holidays of ${e.title}`}
+                  onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setTagging({ id: e.id, title: e.title }); }}>
+                  <Icon name="calendar" size={16} />
+                </button>
+              )}
             </Link>
           </li>
         ))}
       </ol>
+      {tagging && <HolidayTags itemId={tagging.id} title={tagging.title} onClose={() => setTagging(null)} />}
     </>
   );
 }
@@ -123,6 +135,9 @@ export default function Detail() {
   const { data: item, error, reload } = useApi<ItemDetail>(`/api/items/${id}`);
   const [seasonIdx, setSeasonIdx] = useState<number | null>(null);
   const [fixing, setFixing] = useState(false);
+  const [tagging, setTagging] = useState(false);
+  const { user } = useAuth();
+  const admin = remote ? remote.is_admin : user.is_admin;  // that server's admin
   const isMusic = !!item && MUSIC_KINDS.includes(item.kind);
   const genre = isMusic ? undefined : item?.genres[0];
   const { data: similar } = useApi<ItemSummary[]>(genre ? `/api/items?genre=${encodeURIComponent(genre)}&limit=20` : null);
@@ -184,6 +199,9 @@ export default function Detail() {
             {item.kind === "show" && !!item.episodes && <DownloadButton id={item.id} title={item.title} what=" show" />}
             {(!remote || remote.is_admin) && (  // another server's titles: only its admins can fix them
               <button className="btn ghost" onClick={() => setFixing(true)}><Icon name="edit" /> Fix match</button>)}
+            {item.kind === "movie" && admin && (
+              <button className="btn ghost" onClick={() => setTagging(true)} title="Upcoming / Recent Holiday rows">
+                <Icon name="calendar" /> Holidays</button>)}
             {item.kind === "show" && !!item.episodes && <PlayRandomButton path={`/api/items/${item.id}/random`} />}
             {item.ids.imdb && (
               <a className="btn ghost" href={`https://www.imdb.com/title/${item.ids.imdb}/`} target="_blank" rel="noreferrer">IMDb</a>
@@ -202,7 +220,7 @@ export default function Detail() {
               </button>
             ))}
           </div>
-          {season && <Episodes key={season.id} season={season} onChange={reload}
+          {season && <Episodes key={season.id} season={season} onChange={reload} admin={admin}
             picked={season.id === wantSeason ? pickedEpisode : null} />}
         </section>
       )}
@@ -213,6 +231,7 @@ export default function Detail() {
         </div>
       )}
       {fixing && <FixMatch item={item} onClose={() => { setFixing(false); reload(); }} />}
+      {tagging && <HolidayTags itemId={item.id} title={item.title} onClose={() => setTagging(false)} />}
     </div>
   );
 }

@@ -43,6 +43,7 @@ bams/
 │   │   ├── security.py        Sign-in waits/lockout + sign-in log (security.db), IP allow/block policy, Gate middleware (IP check + traffic record)
 │   │   ├── netflow.py         Traffic log: background writer of JSON-lines files under a size cap, backwards reader/search, folder check
 │   │   ├── watch.py           Watch state: record_progress, set_watched, annotate (counts, `watchlist` flags), next_episode, continue_watching, hide_continue (take a title out of it), thresholds (admin settings); the watch list (LISTABLE, add_to_list, remove_from_list, watch_list)
+│   │   ├── holidays.py        Upcoming/Recent Holiday: 16 holidays (US + more) computed locally (fixed dates, nth weekdays, Easter computus, Hanukkah from Hebrew-calendar arithmetic, Lunar New Year table 2020–2050); next_and_recent(today) (today counts as upcoming); titles(con) = holiday → movie/episode ids from words in title/tagline/overview + TMDB keywords, with `holiday_tags` overrides, cached in memory until items or tags change; of_item / set_tag
 │   │   ├── subtitles.py       Subtitle tracks (embedded + sidecars incl. VobSub .idx/.sub, language labels), WebVTT
 │   │   │                      conversion + cache, shift(), burn_source() (what stream paints on)
 │   │   ├── opensubtitles.py   OpenSubtitles.com: Client (the server's API key, USER_AGENT, throttle), the admin's key +
@@ -56,7 +57,7 @@ bams/
 │   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; every name is read through `_read` (guessit, with hyphenated words kept whole: `_protect`); `_show_dir`/`_show_dir_at` pick the folder that names the show (`title_folder` for Fix match); `guess()` = Auto fill's best guess when the rules can't place a file
 │   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
 │   │   ├── identify.py        Files identified by hand (files.manual, {skip} = don't place, kept = off the Unrecognized list): parsed_for() (scanner), from_name() (rules, then Auto fill guess), store(), keep(), replace_unplaced(), TMDB/IMDb link lookup, names for suggestions
-│   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates
+│   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates; movie keywords into `items.extra.keywords` (with the match, else `fill_keywords`: 50 per scan)
 │   │   ├── tmdb.py            TMDB HTTP client (Bearer or api_key), throttle/retry, image cache download
 │   │   ├── probe.py           ffprobe discovery + JSON → compact summary (codecs, resolution, HDR + DV profile, sar +
 │   │   │                      field_order via geometry(), tracks); video_geometry() for older probes
@@ -105,6 +106,8 @@ bams/
 │       ├── styles.css         Whole theme: palette tokens (from the logo), layout, every component
 │       ├── components/
 │       │   ├── Sidebar.tsx    Logo, Home, the watch list (`/watchlist`, the user's name for it), this server's libraries under its name (`/api/hello`, reloaded on `bams:server-name`) in the admin's order (admins drag to reorder), each other server's shown libraries under its name (`RemoteLibraries`: anyone drags; order kept in this browser), Downloads (Android app only), Settings
+│       │   ├── Accounts.tsx   Switch account (sidebar button above Settings → dialog): accounts signed in on this browser (`/api/auth/accounts`), switch with no password, add one (name + password + two-step code), sign one out of this browser; the page reloads at "/" after a switch
+│       │   ├── HolidayTags.tsx  Admins: a movie's/episode's holidays, each Auto / In / Out (`/api/items/{id}/holidays`)
 │       │   ├── useReorder.ts  Drag-to-reorder hook (pointer + arrow keys, drop line): music queue, sidebar libraries, Home rows
 │       │   ├── TopBar.tsx     Search box (live → /search), "Scanning…" pill from /api/status, account menu (Theatre mode → /theatre/, not in the phone app)
 │       │   ├── TheatreSettings.tsx  Settings → This browser → Theatre mode: open it, start this browser in it, start-up lines (Mint/Windows) with this address
@@ -138,7 +141,8 @@ bams/
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
 │           ├── Home.tsx       Hero + rows (Continue Watching, the watch list, Recently Added, libraries, Top Rated, one row per genre from /api/genres) in the user's order (homeRows.ts)
-│           ├── Library.tsx    /library/:id grid, sort, genre chips; admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
+│           ├── HolidayPage.tsx  /holiday/next|recent: a Home holiday row's "See all": every server's movies and episodes about it (useEverywhere + holidayOrder), kind chips
+│           ├── Library.tsx    /library/:id grid, sort, filter chips (Upcoming / Recent holiday, admins' Unidentified = `match_status=pending,unmatched`, clicking one opens Fix match; genres); admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id[?season=<season id>[&episode=<id>]]: show (season tabs → episodes, watched + watch list toggles; `episode` picked out) or movie (Resume, TechInfo); watch list buttons; music → MusicDetail
 │           ├── Watchlist.tsx  /watchlist: every server's watch list as one grid (useEverywhere + listedOrder), sort, kind chips, rename (`watchlist_name` pref), empty state
 │           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs: your playlists + New playlist, then imported), artist page, album page + TrackList (add-to-playlist / download icons; `edit`: drag + take out), Fix match,
@@ -176,7 +180,7 @@ bams/
 │       ├── ListMenu.tsx       Hold-OK menu: on/off the watch list (`setListed` on the item's server), `useListName`
 │       ├── PlaylistMenus.tsx  Your own playlists: HoldMenu, AddToPlaylistMenu, NewPlaylistMenu, EditPlaylistMenu, PlaylistTrackMenu (move up/down, take out)
 │       ├── Rail.tsx · Cards.tsx (Poster: `look` for watch list entries, `onHold`) · Icon.tsx · format.ts · keys.ts · styles.css (1920×1080 10-foot UI)
-│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Music (library tabs incl. your playlists, artist/album/playlist + your playlist (`my-playlist`), hold OK on a song: add to a playlist; NowPlaying bar + quality line), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles; Subtitles menu: Remove beside a downloaded subtitle, for whoever downloaded it or an admin; `begin()` stops when a later start or leaving made it stale (`starts`): the TV has one AVPlay; `fail()` restarts a stream that played 10 s+ the same way once a minute before falling back)
+│       └── screens/           Connect, Link (code + QR / password; also for adding a server), Home (+ ContinueMenu: hold OK on a Continue Watching card) + Search (everywhere.ts), Watchlist (every server's list; hold OK: take off), Library, Detail (watch list button; hold OK on an episode: ListMenu), Holiday (route `holiday`: a holiday row's "See all" card), Accounts (theatre mode only: switch / add / sign out accounts kept on this PC), Music (library tabs incl. your playlists, artist/album/playlist + your playlist (`my-playlist`), hold OK on a song: add to a playlist; NowPlaying bar + quality line), Library (holiday chips beside the genres), Settings (other servers), Player (+ sleep mode: route `sleep`; FindSubs = Check OpenSubtitles; Subtitles menu: Remove beside a downloaded subtitle, for whoever downloaded it or an admin; `begin()` stops when a later start or leaving made it stale (`starts`): the TV has one AVPlay; `fail()` restarts a stream that played 10 s+ the same way once a minute before falling back)
 ├── firetv/                   ── Fire TV app (Fire OS 6+): Android shell around the tv/ page (firetv/README.md) ──
 │   ├── build.mjs              `cd tv && npm run firetv [-- --install --device <ip> --run --release]`: Gradle build, adb install, release APK → dist/BAMS-FireTV-<v>.apk
 │   ├── app/build.gradle.kts   copies tv/dist into assets/www each build; version from tv/package.json; release signing from keystore.properties (git-ignored)
@@ -257,7 +261,7 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v15)
+## 3. Data model (`db.py`, schema v16)
 
 | Table | Holds | Key columns |
 |---|---|---|
@@ -278,12 +282,13 @@ web UI, `/docs`.
 | `subtitle_downloads` | subtitles downloaded for a file (v10) | `file_id`, `provider` ('opensubtitles'), `ext_id` (their file id; unique per file), `language`, `release` (label), `hearing_impaired`, `path` (relative to the data dir: `cache/subtitles/opensubtitles/<ext_id>.srt`, before 0.15.0 `subtitles/opensubtitles/…`; shared by files that picked the same one), `added_by`, `added_at`, `sidecar` (v13: the name "Download locally" saved it under next to the video, NULL = none) |
 | `continue_hidden` | titles a user took out of Continue Watching (v11) | (`user_id`, `item_id` = a movie or a show), `hidden_at`: out while the title's latest activity is not newer |
 | `watchlist` | each user's watch list (v12) | (`user_id`, `item_id` = a movie, show, season or episode), `added_at`; apps merge several servers' lists by it. Cascades with the user/item; `items.merge_titles` moves entries (`_move_watchlist`) |
+| `holiday_tags` | admins' holiday overrides (v16) | (`item_id` = a movie or episode, `holiday` = `holidays.BY_ID` id), `tagged` 1 = always in, 0 = never; no row = automatic (words + TMDB keywords). Cascades with the item |
 | `watch_state` | a user's state of a movie/episode | (`user_id`, `item_id`), `position` (s; 0 = start/finished), `duration`, `watched`, `play_count`, `last_watched_at` |
 
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
 created at v1 and run every step too, so each step is exercised by every test. Before migrating an existing DB,
 `migrate()` copies it to `data/backups/bams-schema-v{N}-{time}.db`. v2 rebuilt `items` (SQLite can't change a
-CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
+CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. v16 adds `holiday_tags`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
 (one file, many tracks) and merged albums (one track, several files);
 albums are found by `(parent_id=artist, title_key)` from the *parsed* title, so renaming an album to its
 MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist'`).
@@ -491,6 +496,18 @@ Home row `watchlist`, `ListToggle` on title pages / episode rows / posters (hove
 `ListedCard` → `listedPage` (episode: its season tab with `&episode=` picked out). TV: rail → `screens/Watchlist.tsx`,
 the Home row, Detail's button, holding OK on an episode or a list entry → `ListMenu`.
 
+### 4.3i Holidays (`holidays.py`)
+`GET /api/holidays` → `{next, recent, all}` (the next one, today included, and the one just past, each with `date` and
+`count`). `GET /api/holidays/{next|recent|<id>}/items?library=&sort=title|random&limit=` → movies and episodes
+(episodes carry `show`, `season_id`, like the watch list). `holidays.titles(con)` reads every movie and episode once
+(title, tagline, overview, `extra.keywords`), matches each holiday's word-boundary patterns, applies `holiday_tags`
+and keeps the result in memory keyed by a fingerprint (item count, last change, tags); nothing is matched again until
+those change, so Home costs one dictionary lookup. Movie keywords come from TMDB (`append_to_response=keywords`,
+`matcher._store_keywords`); matched movies without them are backfilled 50 per scan (`fill_keywords`). Clients: Home
+rows `holiday_next` / `holiday_recent` (`homeRows.defaultRows`, `everywhere.homeSpecs` kind `holiday`, random 30,
+min 1: an empty row is hidden; "See all" → web `/holiday/:which`, TV route `holiday`), library chips (web and TV),
+admins' `HolidayTags` on title pages (web only).
+
 ### 4.3e Watch state (`watch.py`)
 The player PUTs `/api/items/{id}/progress {position, duration}` every 10 s, on pause, on leaving (keepalive) and at
 the end; only after playback really started (`duration` null if unknown). Until something played, the player's position is
@@ -559,6 +576,15 @@ deletes their sessions; `change_own_password` clears it (new ≠ current). `/api
 wrong → `sec.failed` (waits/lockout) + 401 `code_required`; `check_code` accepts ±1 step, only steps after `totp_last`.
 Turned off by the user (`/api/auth/2fa/off`, password), an admin (`DELETE /api/users/{id}/2fa`) or `bams user 2fa-off`.
 
+**Switch account (web):** the other accounts signed in on this browser keep their session tokens in a second HttpOnly
+cookie `bams_others` (space-separated, at most 4; `app.OTHERS`/`MAX_OTHERS`), so the page never sees a token.
+`POST /api/auth/accounts` signs another in with the usual `_sign_in` checks and makes it current (the old token joins
+`bams_others`); `POST /api/auth/switch {user_id}` swaps tokens (no password); `DELETE /api/auth/accounts/{id}` ends
+that session; `GET /api/auth/accounts` drops sessions that ended elsewhere. Logout ends the current session and
+promotes the next one. All of them are cookie POST/DELETEs, so the same-origin check applies. **Theatre mode**
+keeps its own list in `bams.theatre.others` (`tv/src/api.ts` `stashAccount`/`switchAccount`/`nextAccount`/
+`dropAccount`: each waiting account's bearer token, user and its own other-servers list).
+
 ### 4.4e Security (`security.py`, `netflow.py`)
 Outside `bams.db`: `security.db` (data dir) has `login_state` (`key` = `u<id>` or `n:<casefolded name>`,
 `failures`, `last_fail`, `locked_at`, `locked_by` NULL = wrong passwords / admin name) and `auth_log` (`event`
@@ -617,6 +643,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 |---|---|---|
 | `POST /api/auth/2fa/setup` → `{secret, uri}` · `POST /api/auth/2fa {secret, code, password}` · `POST /api/auth/2fa/off {password}` · `DELETE /api/users/{id}/2fa` (admin) | two-step sign-in on/off | AccountSettings |
 | `GET /api/auth/state` · `POST /api/auth/login {name,password,code?}` · `POST /api/auth/logout` · `POST /api/auth/setup` · `PUT /api/auth/password {current,new}` | signing in, first admin (loopback), own password | auth.tsx, AccountSettings |
+| `GET /api/auth/accounts` → `[{id, name, is_admin, current}]` · `POST /api/auth/accounts {name,password,code?}` (sign another in and switch; 409 past 5) · `POST /api/auth/switch {user_id}` (404: not signed in here) · `DELETE /api/auth/accounts/{id}` | Switch account: the accounts signed in on this browser (`bams_others` cookie); logout moves to the next | components/Accounts.tsx, auth.tsx |
 | `GET /api/hello` (public) → `{app, version, name, id}` (`id`: the same at every address; the Android app keys downloads by it) · `POST /api/auth/token {name,password,device}` (public) → `{token, user}` | find a BAMS server (name = `server_name`); sign an app in (bearer token, no cookie) | tv, web servers.tsx, Sidebar (this server's name) |
 | `PUT /api/settings/server-name {name}` (admin; `""` = default) → `{name, default, custom}` (also in `GET /api/settings` → `server_name`) | what the server is called in apps' lists; default "<oldest admin>'s BAM Server" (`app.default_server_name`) | ServerNameSettings |
 | `POST /api/devices/link {name}` (public) → `{code, secret, expires_in}` · `POST /api/devices/link/poll {secret}` (public) → `{status}` or `{status: linked, token, user}` · `POST /api/devices/approve {code}` · `GET /api/devices` · `DELETE /api/devices/{id}` | TV link codes; your linked TVs, sign one out | tv, TvSettings, LinkTv |
@@ -636,7 +663,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | CRUD (listed in the admin's order); PATCH with add/remove paths triggers a scan | Settings, Sidebar, Home |
 | `POST /api/libraries/{id}/scan[?rematch=true]` → `{accepted, running, queued}` | queue a scan | Settings |
 | `GET /api/scans?library_id=` | current + history | — |
-| `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
+| `GET /api/holidays` → `{next, recent, all}` · `GET /api/holidays/{next\|recent\|id}/items?library=&sort=title\|random&limit=` · `GET /api/items/{id}/holidays` · `PUT /api/items/{id}/holidays/{holiday} {tagged: true\|false\|null}` (admin) | Upcoming / Recent Holiday rows, pages and filters; admins' overrides | Home, HolidayPage, Library, HolidayTags; tv Home/Holiday/Library |
+| `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` (comma list: `pending,unmatched` = Unidentified) | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
 | `GET /api/genres` | every show/movie genre `[{name, count}]`, most titles first | Home, HomeSettings (genre rows) |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
 | `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback; a movie's/episode's unprobed files are probed now) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |
@@ -709,6 +737,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
 | `test_devices.py` | /api/hello + server name (default from the first admin, admin-only, reset), link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session; POST/DELETE on a ticket path with the token), traffic log shows the real path |
+| `test_holidays.py` | holiday dates (Easter, Hanukkah, Lunar New Year, nth weekdays against known years), next/recent (today = upcoming), word matching (no false hits), routes (rows, library filter, random), admin overrides (in/out/auto, 403 for viewers), the Unidentified filter, TMDB movie keywords stored and matched |
+| `test_switch.py` | Switch account: add/switch/remove (tokens only in HttpOnly cookies), wrong password and other sites refused, sign-out moves to the next account, sessions ended elsewhere drop off |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
 | `test_security.py` | waits doubling + 429 not counted, lockout + unlock (API, CLI), reset on success, threshold, unknown names alike, admin lock signs out, sign-in log filter/paging, IP rules (v4/v6/mapped) + API + self-block refusal + `allow-all`, traffic log (every/blocked request, user, bytes), size cap + paging + search, folder/size settings. A `clock` fixture patches `security.now` |
 | `test_watchlist.py` | the watch list: add/list/remove (newest first, `show`/`season_id`), video kinds only, `watchlist` flags on lists and pages, per account (+ removed with the account), 401, merges keep entries, deleted items leave, `watchlist_name` pref, v12 migration |
@@ -775,6 +805,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
 | Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
 | The watch list: what can go on it, order, how entries look | `watch.LISTABLE` / `add_to_list` / `watch_list`, route `get_watchlist` in `app.py`; merge + look `everywhere.listedOrder` / `listedLook` (shared with the TV); web `Cards.tsx` `ListToggle` / `ListedCard` / `listedPage`, `pages/Watchlist.tsx`; TV `ListMenu.tsx`, `screens/Watchlist.tsx`; default name `homeRows.WATCHLIST_NAME` |
+| Holidays: which ones, their dates or words | `server/bams/holidays.py` `HOLIDAYS` (id, name, date rule, words; ids are stored in `holiday_tags`, keep them stable) + `test_holidays.py`; labels `everywhere.holidayLabel`/`holidayTitle` |
+| Switch account (how many, what happens on sign-out) | `app.py` `OTHERS`/`MAX_OTHERS`, `auth_*account*` routes, `auth_logout`; web `components/Accounts.tsx`, `auth.tsx` signOut; theatre `tv/src/api.ts` `stashAccount`…, `screens/Accounts.tsx`, `Rail.tsx` (test `tv/test/accounts.test.ts`) |
 | Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + what it asks and how servers merge in `web/src/everywhere.ts` `homeSpecs`/`mergeRow` (web `pages/Home.tsx` and TV `tv/src/screens/Home.tsx` both use them); ids are saved in users' `home_rows`, so keep old ids stable |
 | Other BAMS servers in a client | web `web/src/servers.tsx` (connect, `rewrite` of links, `/r/:rid` scope; pages use `useScope()`), `components/RemoteSettings.tsx`; TV `tv/src/api.ts` (extras, `apiFor`/`mediaFor`), `screens/Settings.tsx`, Connect/Link (`adding`/`target`) |
 | How Home/Search merge servers | `web/src/everywhere.ts` (`newestFirst`, `interleave`, `continueOrder`, `mergeGenres`, `byTitle`) |

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiFor, mediaFor, ridOf, sources, type ContinueItem, type ItemSummary, type User, type WatchlistItem } from "../api";
+import { api, apiFor, mediaFor, ridOf, sources, type ContinueItem, type Holidays, type ItemSummary, type ShownItem, type User, type WatchlistItem } from "../api";
 import type { Genre, HomeRowPref } from "../../../web/src/api";
 import {
   askAll, heroItems, heroPath, homeSpecs, keyOf, listedLook, mergeGenres, mergeRow, type HomeRowSpec, type Tagged,
@@ -59,11 +59,13 @@ export default function Home() {
       api.get<{ user: (User & { prefs?: { home_hero: boolean; home_rows: HomeRowPref[]; watchlist_name?: string } }) | null }>("/api/auth/state"),
       askAll<Genre>(sources(), "/api/genres", (_r, l) => { genreLists.push(l); }),
       askAll<ItemSummary>(sources(), heroPath, (_r, l) => { newestLists.push(l); }),
-    ]).then(([st]) => {
+      // which holiday is next and which just passed: the first server's (an older server has none: no holiday rows)
+      api.get<Holidays>("/api/holidays").catch(() => null),
+    ]).then(([st, , , holidays]) => {
       const prefs = st.user?.prefs ?? { home_hero: true, home_rows: [], watchlist_name: "" };
       setShowHero(prefs.home_hero);
       setNewest(newestLists);
-      setSpecs(homeSpecs(prefs.home_rows, nav.libraries, mergeGenres(genreLists), prefs.watchlist_name));
+      setSpecs(homeSpecs(prefs.home_rows, nav.libraries, mergeGenres(genreLists), prefs.watchlist_name, holidays));
     }).catch((e) => setErr((e as Error).message));
   }, [nav.libraries, nav.servers.length]);
 
@@ -135,7 +137,8 @@ function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) =>
 
   return (
     <>
-      <Shelf title={spec.title}>
+      <Shelf title={spec.title} all={spec.holiday
+        ? { fid: `${spec.id}-all`, onPress: () => nav.push({ name: "holiday", which: spec.holiday! }) } : undefined}>
         {items.map((it) => {
           const rid = ridOf(it.rid);
           const fid = fidOf(it);
@@ -156,6 +159,13 @@ function HomeShelf({ spec, onFocus }: { spec: HomeRowSpec; onFocus: (i: Item) =>
               <Poster key={keyOf(w)} item={w} rid={rid} fid={fid} look={listedLook(w)} onFocus={() => onFocus(w)}
                 onPress={() => nav.push({ name: "detail", id: w.id, rid })}
                 onHold={() => setListMenu({ item: w, fid })} />
+            );
+          }
+          if (spec.kind === "holiday") {
+            const h = it as Tagged<ShownItem>;
+            return (
+              <Poster key={keyOf(h)} item={h} rid={rid} fid={fid} look={listedLook(h)} onFocus={() => onFocus(h)}
+                onPress={() => nav.push({ name: "detail", id: h.id, rid })} />
             );
           }
           if (spec.kind === "albums") {

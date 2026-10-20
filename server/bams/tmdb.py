@@ -116,7 +116,7 @@ class Tmdb:
         return self.get(f"/tv/{tv_id}/season/{number}")
 
     def movie(self, movie_id: int) -> dict:
-        return self.get(f"/movie/{movie_id}", append_to_response="external_ids")
+        return self.get(f"/movie/{movie_id}", append_to_response="external_ids,keywords")  # keywords: holidays.py
 
     def find(self, external_id: str, source: str) -> dict:
         return self.get(f"/find/{external_id}", external_source=source)

@@ -135,6 +135,41 @@ def _apply_title(con: sqlite3.Connection, item_id: int, kind: str, d: dict, stat
         d.get("first_air_date") if kind == "show" else d.get("release_date"),
         d["id"], ext.get("imdb_id") or d.get("imdb_id"), ext.get("tvdb_id"),
         d.get("_poster"), d.get("_backdrop"), status, s, now(), now(), item_id))
+    if kind == "movie":
+        _store_keywords(con, item_id, d)
+
+
+def _store_keywords(con: sqlite3.Connection, item_id: int, d: dict) -> None:
+    """A movie's TMDB keywords (`/movie/{id}?append_to_response=keywords`) into `extra.keywords`: holidays.py
+    reads them (a Christmas film whose description never says "Christmas")."""
+    kw = (d.get("keywords") or {}).get("keywords")
+    if kw is None:
+        return  # an answer without them (shouldn't happen): keep what's there
+    con.execute("UPDATE items SET extra=json_set(COALESCE(extra, '{}'), '$.keywords', json(?)), updated_at=? WHERE id=?",
+                (jdump([k["name"] for k in kw if k.get("name")]), now(), item_id))
+
+
+KEYWORDS_PER_SCAN = 50  # movies identified before keywords were kept get them a few at a time (holidays.py)
+
+
+def fill_keywords(con: sqlite3.Connection, tmdb: Tmdb, lib_id: int) -> int:
+    """Movies identified before BAMS kept TMDB keywords: fetch them, KEYWORDS_PER_SCAN per scan."""
+    todo = con.execute("""SELECT id, tmdb_id FROM items WHERE library_id=? AND kind='movie' AND tmdb_id IS NOT NULL
+                            AND match_status IN ('matched','manual') AND json_extract(extra, '$.keywords') IS NULL
+                            ORDER BY id LIMIT ?""", (lib_id, KEYWORDS_PER_SCAN)).fetchall()
+    done = 0
+    for r in todo:
+        try:
+            d = tmdb.get(f"/movie/{r['tmdb_id']}/keywords")
+        except InvalidKey:
+            raise
+        except TmdbError as e:
+            log.info("no TMDB keywords for movie %s: %s", r["tmdb_id"], e)
+            continue
+        with Tx(con):
+            _store_keywords(con, r["id"], {"keywords": d})
+        done += 1
+    return done
 
 
 def _apply_seasons(con: sqlite3.Connection, tmdb: Tmdb, images: Path, show_id: int, tv_id: int,
@@ -258,4 +293,10 @@ def match_library(con: sqlite3.Connection, tmdb: Tmdb, images: Path, lib_id: int
         except TmdbError as e:
             stats.errors += 1
             log.warning("TMDB refresh error on item %s: %s", show["id"], e)
+    try:
+        fill_keywords(con, tmdb, lib_id)
+    except InvalidKey:
+        raise
+    except TmdbError as e:
+        log.warning("TMDB keywords: %s", e)
     return stats

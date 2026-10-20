@@ -22,6 +22,8 @@ Open it from BAMS in any browser (account menu → **Theatre mode**), or set a P
 - The first time, sign in with name and password on the remote's keyboard (if the browser is already signed in to
   BAMS's web pages, it also offers that account). A household viewer account is enough. The PC stays signed in, and
   shows under Settings → Your TVs and theatre PCs on the web, where you can sign it out.
+- **Several people on one PC:** the menu entry with your name (above Settings) switches between accounts signed in on
+  this PC with no password. **Add an account** there signs another one in; signing out (Settings) moves to the next.
 
 **What plays as it is** depends on the browser. Chrome on Windows usually decodes HEVC; Edge decodes Dolby
 Digital/Plus; Chrome and Firefox on Linux decode neither. Everything else the server converts, as for the web player:

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { ContinueItem, ItemSummary, PlayMethod, WatchlistItem } from "../api";
+import type { ContinueItem, ItemSummary, PlayMethod, ShownItem, WatchlistItem } from "../api";
 import { useAuth } from "../auth";
 import { listedLook } from "../everywhere";
 import { fmtRuntime, PLAY_LABEL, plural, subLabel, sxe } from "../format";
@@ -97,7 +97,7 @@ export function ListToggle({ item, big, small, what = "", onChange }: {
 
 /** Where a watch list entry opens: a movie's/show's page, a season's tab on its show's page, an episode picked out
  *  on its season's tab. */
-export function listedPage(i: WatchlistItem): string {
+export function listedPage(i: ShownItem): string {
   if (i.kind === "episode" && i.show && i.season_id) return `/title/${i.show.id}?season=${i.season_id}&episode=${i.id}`;
   if (i.kind === "season" && i.show) return `/title/${i.show.id}?season=${i.id}`;
   return `/title/${i.id}`;
@@ -105,7 +105,7 @@ export function listedPage(i: WatchlistItem): string {
 
 /** An entry of the watch list: a poster (an episode or a season under its show's name, everywhere.ts listedLook).
  *  On hover, movies and episodes can be played straight away, and the bookmark takes it off (`onRemoved`). */
-export function ListedCard({ item, onRemoved }: { item: WatchlistItem; onRemoved?: () => void }) {
+export function ListedCard({ item, onRemoved }: { item: ShownItem; onRemoved?: () => void }) {
   const { to } = useItemServer(item);
   const navigate = useNavigate();
   const look = listedLook(item);

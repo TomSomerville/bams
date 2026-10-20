@@ -11,6 +11,7 @@ import { PlaylistPage, UserPlaylistPage } from "./pages/Music";
 import Player from "./pages/Player";
 import Search from "./pages/Search";
 import Watchlist from "./pages/Watchlist";
+import HolidayPage from "./pages/HolidayPage";
 import Settings from "./pages/Settings";
 import LinkTv from "./pages/LinkTv";
 import { useEffect } from "react";
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           {/* the watch list: every server's part of it on one page, so no /r/:rid version */}
           <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/holiday/:which" element={<HolidayPage />} />
           <Route path="/library/:id" element={<Library />} />
           <Route path="/title/:id" element={<Detail />} />
           <Route path="/playlist/:id" element={<PlaylistPage />} />

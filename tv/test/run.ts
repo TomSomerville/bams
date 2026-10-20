@@ -6,6 +6,7 @@ import "./hold.test";
 import "./pckeys.test";
 import "./avplay.test";
 import "./subtitles.test";
+import "./accounts.test";
 import { runAll } from "./harness";
 
 void runAll();

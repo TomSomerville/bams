@@ -3,7 +3,7 @@
 // (/api/t/<ticket>/...) that the server hands out (GET /api/media-ticket). Server side: server/bams/devices.py.
 
 export type { ItemSummary, ItemDetail, ContinueItem, WatchlistItem, FileInfo, AudioTrack, SubtitleTrack, Probe, User, QueueTrack,
-  Playlist, PlaylistSummary, ServerLibrary, SubtitleSearch, SubtitleResult, UserPlaylist, UserPlaylistSummary }
+  Playlist, PlaylistSummary, ServerLibrary, ShownItem, Holidays, SubtitleSearch, SubtitleResult, UserPlaylist, UserPlaylistSummary }
   from "../../web/src/api";
 import type { User } from "../../web/src/api";
 import type { Source } from "../../web/src/everywhere";
@@ -229,6 +229,74 @@ export function removeExtra(id: number) {
   if (e?.token) void fetchAt(e, "POST", "/api/auth/logout").catch(() => undefined);
   extraTickets.delete(id);
   saveExtras(extras().filter((x) => x.id !== id));
+}
+
+// ---- theatre mode: several accounts signed in on this PC, to switch between with no password (owner, 2026-10-19).
+// The others wait here with their own token and their own other servers; the current one is the usual token/user.
+
+type Waiting = { token: string; user: User; servers: string | null };
+const OTHERS = "bams.others";
+export const MAX_ACCOUNTS = 5;
+
+function waiting(): Waiting[] {
+  try {
+    const v = JSON.parse(read(OTHERS) || "[]");
+    return Array.isArray(v) ? v.filter((w) => w && typeof w.token === "string" && w.user) : [];
+  } catch {
+    return [];
+  }
+}
+
+const saveWaiting = (list: Waiting[]) => write(OTHERS, list.length ? JSON.stringify(list) : null);
+
+/** The other accounts signed in on this PC (not the current one). */
+export const otherAccounts = (): User[] => waiting().map((w) => w.user);
+
+function take(w: Waiting) {
+  setSession(w.token, w.user);
+  write(EXTRAS, w.servers);
+  extraTickets.clear();
+}
+
+/** Put the current account aside (it stays signed in), to sign another in or switch to one. */
+export function stashAccount() {
+  const me = savedUser();
+  const list = waiting().filter((w) => w.user.id !== me?.id);
+  if (token && me) list.unshift({ token, user: me, servers: read(EXTRAS) });
+  saveWaiting(list.slice(0, MAX_ACCOUNTS - 1));
+  setSession(null);
+  write(EXTRAS, null);
+  extraTickets.clear();
+}
+
+/** Switch to another account signed in here. False: it isn't (any more). */
+export function switchAccount(userId: number): boolean {
+  const w = waiting().find((x) => x.user.id === userId);
+  if (!w) return false;
+  stashAccount();
+  saveWaiting(waiting().filter((x) => x.user.id !== userId));
+  take(w);
+  return true;
+}
+
+/** The current account signed out or its session ended: the next account waiting here (if any) takes over. */
+export function nextAccount(): boolean {
+  const [w, ...rest] = waiting();
+  if (!w) return false;
+  saveWaiting(rest);
+  take(w);
+  return true;
+}
+
+/** Sign one of the waiting accounts out of this PC (its session ends on the server). */
+export function dropAccount(userId: number) {
+  const w = waiting().find((x) => x.user.id === userId);
+  if (!w) return;
+  saveWaiting(waiting().filter((x) => x.user.id !== userId));
+  if (server) {
+    void fetch(`${server}/api/auth/logout`, { method: "POST", headers: { authorization: `Bearer ${w.token}` },
+      credentials: "omit" }).catch(() => undefined);
+  }
 }
 
 /** A request to another server with its token. Its 401 marks it signed out here; it never signs the TV out of its

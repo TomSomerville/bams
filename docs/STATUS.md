@@ -182,6 +182,9 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-17 | **Copy-HLS keyframes come from the file's index** (MKV Cues, MP4/MOV sample tables; `keyindex.py`), checked against ffprobe in three short stretches; a full packet read only without a usable index (AVI, fragmented MP4, no Cues) | Owner: "a very long pause … every time I start a video" on the TV. The full read took 7–80 s per first play over the NAS (gigabit-bound, can't be made faster); the index takes under a second. On 69 of the owner's files the index matched the full read except two mkvmerge files, which list fewer keyframes than FFmpeg cuts at (next row) |
 | 10-17 | **A copy run's pieces are published by time** (`hls._publish`): FFmpeg writes each run into its own folder, every piece is timed from the run's start + FFmpeg's EXTINF durations, and a piece that starts on no listed keyframe joins the segment before | FFmpeg can cut at more keyframes than the container lists (its H.264 parser flags I-frames mkvmerge doesn't; mkvmerge leaves bursts of keyframes out of the Cues), and no container-level check can predict that. Numbering by FFmpeg's count misnumbered every later segment; timing by EXTINF was exact (0.00 ms on FFmpeg 6.1 and 9). Also makes a full keyframe list unnecessary for correctness |
 | 10-17 | **Idle HLS sessions sleep instead of closing** (FFmpeg stopped, segments deleted, off the limit) and wake on the next request; closed after 24 h unused | A paused player asks for nothing: after 90 s the session was closed, so the TV got 404s on Play, fell back to a full conversion, and a second long pause ended in "Can't play this" (owner's traffic log, 10-15) |
+| 10-19 | **Upcoming / Recent Holiday**: 16 holidays (US list + Lunar New Year, Day of the Dead, Hanukkah, Kwanzaa), dates **computed on the server** (no calendar service); a title belongs to one when its **title, tagline or overview** mentions it or (movies) its **TMDB keywords** do, and **admins override by hand** (Auto / In / Out, `holiday_tags`); matching runs once and is cached in memory | Owner: "I dont want these features to slow down the UI or playback" and chose "Words + TMDB". TMDB keywords come with the match request (no extra call); older movies are backfilled 50 per scan. Today counts as upcoming |
+| 10-19 | **Unidentified filter is web only** (admins; reuses `match_status` + Fix match) | The TV apps have no Fix match screen; it's for fast identification at a computer |
+| 10-19 | **Quick account switching with no PIN/password** between accounts already signed in on that browser (web) or PC (theatre mode); at most 5; web keeps the others' tokens in an **HttpOnly cookie** (`bams_others`), never in page storage; signing out moves to the next account. Not on the Samsung/Fire TV apps | Owner chose "Nothing" for switching; the cookie keeps tokens out of reach of page scripts. Theatre mode already keeps its own bearer token in `bams.theatre.*` storage, so its other accounts live there too |
 | 10-19 | **No personal or machine-specific content in git** ([SECURITY-PRACTICES.md](SECURITY-PRACTICES.md)): the owner's machine details live in git-ignored `CLAUDE.local.md`; skills and `launch.json` are local only; `tools/privacy_check.py` runs as the pre-commit hook; commits use the GitHub no-reply email; history rewritten once to remove what had been committed | Owner's request, so the repo can be public |
 
 ## 4. Built so far
@@ -306,6 +309,11 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - Watch list (0.13.0): "My Watch List" under Home in the sidebar (`/watchlist`: every server's entries, sort, kind
   chips, rename), a Home row, a "+ My Watch List" button on title pages (show, movie, season), a bookmark on episode
   rows and on posters (hover), episode entries open their season with the episode picked out.
+- Upcoming / Recent Holiday (2026-10-19): Home rows with "See all" (`/holiday/next|recent`), library chips under Movie
+  and TV libraries, admins' Holidays button on movies and a calendar icon per episode (Auto / In / Out). Admins also get
+  an **Unidentified** library chip (pending/unmatched titles; clicking one opens Fix match).
+- Switch account (2026-10-19): sidebar button above Settings with the current name; add accounts, switch with no
+  password, sign one out of this browser; signing out moves to the next.
 - TMDB-missing banner (admins) on every page → `/settings#tmdb`. "Can't reach server" banner.
 - Brand: logo files in `branding/logo/` + `web/public/brand/`; palette as CSS tokens in `web/src/styles.css`.
 
@@ -352,6 +360,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   and uses the mouse (`pointer.ts`), asks the browser what it decodes (`plan.ts`) and follows the web player's order
   (fMP4 copy-HLS, Dolby kept only where decoded, AAC remux before a full conversion). Sign-in with name and password
   (or the web UI's account in that browser); a server that isn't up yet is retried every 5 s.
+- Switch account (2026-10-19): a rail entry above Settings with the current name (`screens/Accounts.tsx`), Settings →
+  Account → Switch account / Sign out; adding one uses the name + password screen ("Back to <name>" returns).
+- Everywhere (TVs too): the Upcoming / Recent Holiday Home rows with a "See all" card (`screens/Holiday.tsx`) and the
+  holiday chips in libraries (2026-10-19; Samsung/Fire TV get them with their next app builds).
 - Everywhere (TVs too): media tickets are renewed when a picture or the player fails or the page comes back from a
   sleep (tickets die with a server restart).
 
@@ -407,6 +419,10 @@ Roughly in priority order:
    a downloaded show aren't fetched by themselves; a downloaded playlist is a snapshot (Download again to update);
    Android 15+ allows background downloads 6 h a day (the rest goes on when the app is opened); no Play Store build;
    the offline video player uses Android's controls, not the web player's look.
+11. **Holiday / account switching leftovers:** holidays are a fixed list (no admin-added ones); episodes match by
+   words only (TMDB keywords are fetched for movies); setting a title's holidays by hand is web-only; the TV apps
+   (Samsung, Fire TV) have no account switching and need new builds for the holiday rows; the Unidentified filter is
+   web-only.
 
 ## 6. Dev environment
 
@@ -442,6 +458,28 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-19: Upcoming / Recent Holiday, Unidentified filter, quick account switching (unreleased)
+- **What / why:** owner asked for three things, "secure lightweight" and without slowing the UI or playback.
+  (1) **Holidays:** Home rows "Upcoming Holiday: Halloween · Oct 31" / "Recent Holiday: …" (random few, "See all"),
+  and the same as library filters; 16 holidays computed locally (`holidays.py`), titles matched by words + TMDB movie
+  keywords, admins' overrides (`holiday_tags`, schema v16), cached in memory. On web, theatre and the TV page.
+  (2) **Unidentified** library chip for admins (web): pending/unmatched titles, a click opens Fix match.
+  (3) **Switch account** next to the settings gear, web and theatre mode: several accounts signed in, swap with no
+  password (owner's choice); web tokens in the HttpOnly `bams_others` cookie, theatre's in its own storage.
+- **Files:** server `holidays.py` (new), `db.py` (v16), `tmdb.py`, `matcher.py` (keywords), `app.py` (holiday and
+  account routes, `match_status` list, logout); web `pages/HolidayPage.tsx`, `components/{HolidayTags,Accounts}.tsx`
+  (new), `everywhere.ts`, `homeRows.ts`, `api.ts`, `auth.tsx`, `pages/{Home,Library,Detail}.tsx`, `Sidebar.tsx`,
+  `Cards.tsx`, `Icon.tsx`, `styles.css`; tv `screens/{Holiday,Accounts}.tsx` (new), `api.ts`, `App.tsx`, `Rail.tsx`,
+  `Cards.tsx` (Shelf "See all"), `screens/{Home,Library,Link,Settings}.tsx`; tests `test_holidays.py`,
+  `test_switch.py`, `tv/test/accounts.test.ts`.
+- **Verified:** server suite 378 passed (Linux; `test_encoder_choice_api` deselected, known); TV tests 50 passed;
+  `tsc` web + tv. A scratch copy of the sandbox with two test accounts: Home row + See all, library chips, Unidentified
+  → Fix match, Holidays dialog (by-hand tag shown), web add/switch/switch back, theatre add/switch with its row,
+  See-all screen and "Back to <name>".
+- **Owner:** tried it in the sandbox: "it works".
+- **Left open:** not released; the Samsung/Fire TV apps need new builds for the holiday rows (not tried on a TV);
+  see "Not built yet" 11.
 
 ### 2026-10-19: Theatre player back arrow; the browser's Back stays inside BAMS (release 0.18.5)
 - **What / why:** owner: once a video plays in theatre mode there's no way back, and the browser's Back goes to the

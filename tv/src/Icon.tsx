@@ -24,6 +24,7 @@ const PATHS = {
   down: "M6 9l6 6 6-6",
   close: "M6 6l12 12M18 6 6 18",
   plus: "M12 5v14M5 12h14",
+  users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1M16 3.1a4 4 0 0 1 0 7.8M22 21v-1a6 6 0 0 0-4-5.6",
   // add to a playlist: lines with a plus (the web's Icon has the same)
   listPlus: "M3 6h12M3 12h12M3 18h7M17 14v8M13 18h8",
   edit: "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",

@@ -173,12 +173,24 @@ export type ContinueItem = ItemSummary & {
 };
 
 /** GET /api/watchlist: an item on the user's watch list. Seasons and episodes carry their show; episodes their season. */
-export type WatchlistItem = ItemSummary & {
-  /** when it was added (several servers' lists are merged by it) */
-  listed_at: number;
+/** A movie, show, season or episode shown on its own (watch list, holidays): seasons and episodes carry their
+ *  show's title and art (`show`), episodes their season (`season_id`). */
+export type ShownItem = ItemSummary & {
   show?: { id: number; title: string; poster: string | null; backdrop: string | null };
   season_id?: number;
 };
+
+export type WatchlistItem = ShownItem & {
+  /** when it was added (several servers' lists are merged by it) */
+  listed_at: number;
+};
+
+/** GET /api/holidays: the next holiday (today counts) and the last one before today, with how many movies/episodes
+ *  are about each (`date`: ISO); `all`: every holiday the server knows (admins tag titles by hand). */
+export type Holiday = { id: string; name: string; date: string | null; count: number };
+export type Holidays = { next: Holiday; recent: Holiday; all: { id: string; name: string }[] };
+/** GET /api/items/:id/holidays (admins): each holiday, whether this title is in it, and whether by hand. */
+export type HolidayTag = { id: string; name: string; on: boolean; tagged: boolean | null };
 
 export type AudioTrack = { index: number; label: string; language: string | null; codec: string | null;
   channels: number | null; default: boolean };

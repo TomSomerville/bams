@@ -837,3 +837,26 @@ button.nav-item { background: none; border: 0; font: inherit; text-align: left; 
 #theatre h4 { margin: 14px 0 6px; font-size: 13px; }
 .code-block { background: var(--surface-2, #1d222b); border: 1px solid var(--border, #272d38); border-radius: 8px;
   padding: 10px 12px; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; user-select: text; }
+
+/* ---------- holidays, Unidentified, switch account ---------- */
+.chip.holiday:not(.on) { border-color: rgba(139, 92, 246, 0.45); }
+.fix-card { cursor: pointer; }
+.holiday-tags { list-style: none; margin: 0; padding: 4px 18px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.holiday-tags li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.holiday-tags li.on .holiday-name { color: var(--text); font-weight: 600; }
+.holiday-name { flex: 1; min-width: 0; color: #c4c9d3; }
+.holiday-state { font-size: 12px; }
+.segmented.small button { padding: 4px 10px; font-size: 12px; }
+.modal > .muted { padding: 0 18px 10px; }
+.modal.accounts { width: min(420px, 100%); }
+.account-list { list-style: none; margin: 0; padding: 4px 10px; display: flex; flex-direction: column; gap: 2px; }
+.account-list li { display: flex; align-items: center; gap: 4px; }
+.account-pick { flex: 1; display: flex; align-items: center; gap: 10px; background: none; border: 0; border-radius: 8px; padding: 9px 10px; color: var(--text); font: inherit; font-size: 15px; cursor: pointer; text-align: left; }
+.account-pick:hover:not(:disabled) { background: var(--surface-2); }
+.account-pick:disabled { cursor: default; }
+.account-list li.on .account-pick { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--violet); }
+.account-avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--violet); color: #fff; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.account-name { font-weight: 600; }
+.accounts-note { font-size: 12px; padding: 6px 18px 0; margin: 0; }
+.accounts-form { padding: 0 18px 18px; }
+.accounts-actions { display: flex; gap: 8px; justify-content: flex-end; }

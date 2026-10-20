@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiFor, type ItemSummary } from "../api";
+import { apiFor, type Holidays, type ItemSummary, type ShownItem } from "../api";
+import { holidayLabel, holidayPath, listedLook } from "../../../web/src/everywhere";
 import { useFocusOnReady, useNav } from "../App";
 import { Poster } from "../Cards";
 import { PlayRandomButton } from "../random";
@@ -32,6 +33,17 @@ function VideoLibrary({ id, rid, name }: { id: number; rid?: number; name?: stri
   const [shown, setShown] = useState(PAGE);
   const [err, setErr] = useState<string | null>(null);
   const [genre, setGenre] = useState<string | null>(() => session.get(`bams.genre.${key}`));
+  // the web's holiday filters: this library's movies (or episodes) about the upcoming / recent holiday
+  const [holidays, setHolidays] = useState<Holidays | null>(null);
+  const [hol, setHol] = useState<"next" | "recent" | null>(null);
+  const [holItems, setHolItems] = useState<ShownItem[] | null>(null);
+  useEffect(() => {
+    apiFor(rid).get<Holidays>("/api/holidays").then(setHolidays).catch(() => setHolidays(null));
+  }, [rid]);
+  useEffect(() => {
+    setHolItems(null);
+    if (hol) apiFor(rid).get<ShownItem[]>(holidayPath(hol, { library: id })).then(setHolItems).catch((e) => setErr((e as Error).message));
+  }, [hol, id, rid]);
 
   useEffect(() => {
     setItems(null);
@@ -47,6 +59,7 @@ function VideoLibrary({ id, rid, name }: { id: number; rid?: number; name?: stri
   const pickGenre = (g: string | null) => {
     if (g) session.set(`bams.genre.${key}`, g); else session.remove(`bams.genre.${key}`);
     setShown(PAGE);
+    setHol(null);
     setGenre(g);
   };
 
@@ -71,22 +84,35 @@ function VideoLibrary({ id, rid, name }: { id: number; rid?: number; name?: stri
       </div>
       {err && <p className="error big">{err}</p>}
       {items === null && !err && <div className="spinner" />}
-      {genres.length > 1 && (
+      {(genres.length > 1 || holidays) && (
         <div className="chips genres" data-row>
-          <button className={`chip ${!genre ? "on" : ""}`} data-fid="genre-all" onClick={() => pickGenre(null)}>All</button>
+          <button className={`chip ${!genre && !hol ? "on" : ""}`} data-fid="genre-all" onClick={() => pickGenre(null)}>All</button>
+          {holidays && (["next", "recent"] as const).map((w) => (
+            <button key={w} className={`chip ${hol === w ? "on" : ""}`} data-fid={`holiday-${w}`} onClick={() => setHol(w)}>
+              {w === "next" ? "Upcoming" : "Recent"}: {holidayLabel(holidays[w])}</button>
+          ))}
           {genres.map((g) => (
-            <button key={g} className={`chip ${genre === g ? "on" : ""}`} data-fid={`genre-${g}`} onClick={() => pickGenre(g)}>{g}</button>
+            <button key={g} className={`chip ${genre === g && !hol ? "on" : ""}`} data-fid={`genre-${g}`} onClick={() => pickGenre(g)}>{g}</button>
           ))}
         </div>
       )}
       {items && !items.length && <p className="muted big">This library is empty.</p>}
-      <div className="grid">
+      {hol && holItems === null && <div className="spinner" />}
+      {hol && holItems && !holItems.length && holidays && (
+        <p className="muted big">Nothing in this library is about {holidays[hol].name}.</p>
+      )}
+      {hol ? <div className="grid">
+        {(holItems ?? []).map((it) => (
+          <Poster key={it.id} item={it} rid={rid} fid={`hol-${it.id}`} look={listedLook(it)}
+            onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
+        ))}
+      </div> : <div className="grid">
         {list.slice(0, shown).map((it, i) => (
           <Poster key={it.id} item={it} rid={rid} fid={`item-${it.id}`} autoFocus={i === 0}
             onFocus={() => { if (i > shown - 30 && shown < list.length) setShown((n) => n + PAGE); }}
             onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

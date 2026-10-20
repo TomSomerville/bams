@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
-import { api, ApiError, getServer, linkWithWebUser, publicPostTo, setSession, webUser, type User } from "../api";
+import { api, ApiError, getServer, linkWithWebUser, otherAccounts, publicPostTo, setSession, webUser, type User } from "../api";
 import { deviceWord, theatre } from "../platform";
 import { focusFirst } from "../nav";
 import { deviceName } from "../tizen";
@@ -11,8 +11,10 @@ type Poll = { status: "waiting" | "expired" | "linked"; token?: string; user?: U
 /** Sign this TV in: show a code to enter on a phone or computer (with a QR code that opens the page), or type a
  *  name and password with the remote. Server side: devices.py, /api/devices/link. `target`: another server being
  *  added to this TV (its token is handed back; the TV's first server and session stay as they are). */
-export default function Link({ onLinked, onChangeServer, target }: {
+export default function Link({ onLinked, onChangeServer, target, back }: {
   onLinked: () => void; onChangeServer: () => void;
+  /** theatre mode: another account still signed in on this PC, to go back to */
+  back?: { name: string; go: () => void };
   target?: { url: string; name: string; onDone: (token: string, user: User | null) => void };
 }) {
   const [code, setCode] = useState<Start | null>(null);
@@ -132,13 +134,14 @@ export default function Link({ onLinked, onChangeServer, target }: {
             {busy ? "Signing in…" : "Sign in"}</button>
         </form>
         {err && <p className="error">{err}</p>}
-        {web && (
+        {web && !otherAccounts().some((u) => u.id === web.id) && (  // not one already signed in here
           <button className="btn" disabled={busy} onClick={() => void linkWebAccount()}>
             Use {web.name}'s account (signed in on this browser)
           </button>
         )}
         {codes && <button className="btn ghost" onClick={() => { setErr(null); setWithPassword(false); }}>Use a code instead</button>}
         {!codes && target && <button className="btn ghost" onClick={onChangeServer}>Pick another server</button>}
+        {back && <button className="btn ghost" onClick={back.go}>Back to {back.name}</button>}
       </div>
     );
   }

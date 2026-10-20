@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { addExtra, api, checkExtras, extras, getServer, getToken, hello, refreshTicket, renewTickets, savedUser, setSession, SIGNED_OUT, withFreshTicket, type Extra, type User } from "./api";
+import { addExtra, api, checkExtras, extras, getServer, getToken, hello, nextAccount, otherAccounts, stashAccount, switchAccount, refreshTicket, renewTickets, savedUser, setSession, SIGNED_OUT, withFreshTicket, type Extra, type User } from "./api";
 import type { ServerLibrary } from "../../web/src/api";
 import { okDown, okUp } from "./hold";
 import { keyHandler } from "./keys";
@@ -16,6 +16,8 @@ import Player from "./screens/Player";
 import Search from "./screens/Search";
 import Settings from "./screens/Settings";
 import Watchlist from "./screens/Watchlist";
+import Accounts from "./screens/Accounts";
+import HolidayScreen from "./screens/Holiday";
 import Rail from "./Rail";
 import { useMusic } from "./music";
 import { NowPlaying, PlaylistScreen, UserPlaylistScreen } from "./screens/Music";
@@ -23,6 +25,8 @@ import { NowPlaying, PlaylistScreen, UserPlaylistScreen } from "./screens/Music"
 export type Route =
   | { name: "home" }
   | { name: "watchlist" }
+  // every movie and episode about the upcoming / recent holiday (a Home holiday row's "See all")
+  | { name: "holiday"; which: "next" | "recent" }
   | { name: "library"; id: number; rid?: number }
   | { name: "detail"; id: number; rid?: number }
   // sleep: sleep mode's count of episodes still to play after this one (Player.tsx), carried to the next episode
@@ -30,7 +34,9 @@ export type Route =
   | { name: "playlist"; id: number; rid?: number }
   | { name: "my-playlist"; id: number; rid?: number }
   | { name: "search" }
-  | { name: "settings" };
+  | { name: "settings" }
+  // theatre mode: the accounts signed in on this PC (Switch account)
+  | { name: "accounts" };
 
 type Entry = { route: Route; fid: string | null; key: number };
 
@@ -53,6 +59,9 @@ type Nav = {
   addServer: (again?: { url: string; name: string }) => void;
   signOut: () => void;
   changeServer: () => void;
+  /** theatre mode: sign another account in on this PC (the current one stays signed in), or switch to one */
+  addAccount: () => void;
+  switchAccount: (userId: number) => void;
 };
 
 const NavCtx = createContext<Nav | null>(null);
@@ -203,12 +212,21 @@ export default function App() {
       signOut: () => {
         void api.post("/api/auth/logout").catch(() => undefined);
         setSession(null);
+        // theatre mode: another account signed in on this PC takes over
+        if (theatre() && nextAccount()) void start();
+        else setPhase("link");
+      },
+      addAccount: () => {
+        stashAccount();
         setPhase("link");
+      },
+      switchAccount: (id) => {
+        if (switchAccount(id)) void start();
       },
       changeServer: () => setPhase("connect"),
       addServer: (again) => setAdding(again ?? "find"),
     };
-  }, [stack, user, libraries, servers, reloadServers]);
+  }, [stack, user, libraries, servers, reloadServers, start]);
 
   // PC keys (pckeys.ts): Home, and Search (the Search key, or typing a letter outside a text box). On the Search
   // screen itself, Search.tsx takes the letters.
@@ -304,7 +322,12 @@ export default function App() {
   }
   if (phase === "start") return <div className="center-screen"><div className="spinner" /></div>;
   if (phase === "connect") return <Connect onConnected={() => void start()} />;
-  if (phase === "link") return <Link onLinked={() => void start()} onChangeServer={() => setPhase("connect")} />;
+  if (phase === "link") {
+    // theatre mode, adding an account (or this one's session ended): back to one still signed in on this PC
+    const back = theatre() ? otherAccounts()[0] : undefined;
+    return <Link onLinked={() => void start()} onChangeServer={() => setPhase("connect")}
+      back={back && { name: back.name, go: () => { if (nextAccount()) void start(); } }} />;
+  }
   // adding another server (Settings): find it, then link this TV to an account there; Back cancels
   if (adding === "find") {
     return <Connect adding={{ onPick: (url, name) => setAdding({ url, name }), onCancel: () => setAdding(null) }} />;
@@ -330,12 +353,14 @@ export default function App() {
             <main className="content" data-scroll>
               {r.name === "home" && <Home />}
               {r.name === "watchlist" && <Watchlist />}
+              {r.name === "holiday" && <HolidayScreen key={r.which} which={r.which} />}
               {r.name === "library" && <Library key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} />}
               {r.name === "detail" && <Detail id={r.id} rid={r.rid} />}
               {r.name === "search" && <Search />}
               {r.name === "playlist" && <PlaylistScreen id={r.id} rid={r.rid} />}
               {r.name === "my-playlist" && <UserPlaylistScreen key={r.id} id={r.id} rid={r.rid} />}
               {r.name === "settings" && <Settings />}
+              {r.name === "accounts" && <Accounts />}
             </main>
             <NowPlaying />
           </div>

@@ -52,7 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await api.post("/api/auth/logout").catch(() => {});
-    setState((s) => s && { ...s, user: null });
+    // another account signed in on this browser (Switch account) becomes the current one: start the app as them
+    const next = await api.get<AuthState>("/api/auth/state").catch(() => null);
+    if (next?.user) window.location.assign("/");
+    else setState((s) => s && { ...s, user: null });
   }, []);
 
   if (!state) {

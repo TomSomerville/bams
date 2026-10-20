@@ -83,7 +83,7 @@ Be security-conscious by default: when in doubt, leave it out and ask the owner.
 ```bash
 # server (Windows paths shown; Linux: .venv/bin/python)
 cd server && uv venv --python 3.11 .venv && uv pip install --python .venv -e ".[dev]"
-server\.venv\Scripts\python -m pytest -q                      # 359 tests, all must pass
+server\.venv\Scripts\python -m pytest -q                      # ~380 tests, all must pass
 server\.venv\Scripts\python -m bams --data-dir data serve   # http://127.0.0.1:8484, API docs /docs (data/ is gitignored)
 # web (served by the server from web/dist — rebuild after UI changes)
 cd web && npm install && npx tsc -p . && npm run build
@@ -399,4 +399,13 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **`python -m bams` loads a `bams/` from the current folder first:** started from another checkout's `server/` (e.g. a
   worktree), it runs that code and serves that checkout's builds. Start servers from a neutral folder (the sandbox's
   `bams.sh` `cd`s to its own).
+- **Holiday matches are cached in memory** (`holidays.titles`, keyed by item count, last change and `holiday_tags`):
+  code that changes titles' text or tags outside the usual columns must still bump one of those, or the rows go stale
+  until a restart. Holiday ids are stored in `holiday_tags`: never rename one. Word lists must stay word-bounded and
+  specific ("Tết"/"seollal" were dropped for false hits); add a no-false-hit case to `test_holidays.py`.
+- **Switch account (web) keeps other sessions in the HttpOnly `bams_others` cookie**: never return those tokens to the
+  page or put them in localStorage. Its routes are cookie POST/DELETEs, so they need the same-origin check like
+  sign-in. Logout promotes the next account (`auth_logout`): a test that signs out expecting "nobody" must not have
+  added accounts first. Theatre mode keeps its own list in `bams.theatre.others` (`tv/src/api.ts`, each with its own
+  other servers): Samsung/Fire TV paths don't use it.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

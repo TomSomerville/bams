@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -376,8 +376,18 @@ def _v15(con: sqlite3.Connection) -> None:
     con.execute("CREATE INDEX user_playlist_items_item ON user_playlist_items(item_id)")
 
 
+def _v16(con: sqlite3.Connection) -> None:
+    """v16: holidays (holidays.py, owner 2026-10-19). Titles are matched to holidays by their words and TMDB
+    keywords; this keeps what an admin set by hand: a movie/episode put in a holiday (1) or kept out of it (0)."""
+    con.execute("""CREATE TABLE holiday_tags (
+        item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        holiday     TEXT NOT NULL,                 -- holidays.HOLIDAYS id ('christmas')
+        tagged      INTEGER NOT NULL,              -- 1 = in it, 0 = not, whatever its words say
+        PRIMARY KEY (item_id, holiday))""")
+
+
 MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11,
-              12: _v12, 13: _v13, 14: _v14, 15: _v15}  # target version -> step
+              12: _v12, 13: _v13, 14: _v14, 15: _v15, 16: _v16}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
-from . import devices, netflow, opensubtitles, security, updates, user_playlists
+from . import devices, holidays, netflow, opensubtitles, security, updates, user_playlists
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
@@ -297,6 +297,14 @@ class LoginIn(BaseModel):
     name: str = Field(max_length=100)
     password: str = Field(max_length=1024)
     code: str | None = Field(None, max_length=20)  # the authenticator app's code, for accounts with two-step sign-in
+
+
+class HolidayTagIn(BaseModel):
+    tagged: bool | None  # True: in the holiday, False: not, None: whatever its words say (holidays.py)
+
+
+class SwitchIn(BaseModel):
+    user_id: int  # an account signed in on this browser (quick switching)
 
 
 class TokenLoginIn(LoginIn):
@@ -785,11 +793,95 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         sec.log("sign-in", "ok", name=name, user_id=u["id"], ip=ip, user_agent=ua)
         return u
 
+    # -- quick account switching (web, owner 2026-10-19): the other accounts signed in on this browser keep their
+    # sessions in a second HttpOnly cookie, so the page never sees a token; switching swaps which one is current.
+    OTHERS = "bams_others"
+    MAX_OTHERS = 4
+
+    def _others(request: Request) -> list[str]:
+        return [t for t in (request.cookies.get(OTHERS) or "").split() if 0 < len(t) <= 100][:MAX_OTHERS]
+
+    def _set_others(resp: Response, request: Request, tokens: list[str]) -> None:
+        if tokens:
+            resp.set_cookie(OTHERS, " ".join(tokens[:MAX_OTHERS]), max_age=auth.SESSION_DAYS * 86400, httponly=True,
+                            samesite="lax", secure=request.url.scheme == "https", path="/")
+        else:
+            resp.delete_cookie(OTHERS, path="/")
+
+    def _account_list(request: Request) -> tuple[list[dict], list[tuple[str, dict]]]:
+        """This browser's accounts (the current one first) and the other sessions still valid, with their user."""
+        valid = [(t, u) for t in _others(request) if (u := lookup(t))]
+        me = request.state.user
+        accounts = [{"id": me["id"], "name": me["name"], "is_admin": bool(me["is_admin"]), "current": True}]
+        accounts += [{"id": u["id"], "name": u["name"], "is_admin": bool(u["is_admin"]), "current": False}
+                     for _, u in valid if u["id"] != me["id"]]
+        return accounts, valid
+
+    @app.get("/api/auth/accounts")
+    def auth_accounts(request: Request, response: Response):
+        """The accounts signed in on this browser (Switch account), the current one first. Sessions that ended
+        elsewhere (signed out, password changed, locked) drop off the list."""
+        accounts, valid = _account_list(request)
+        if len(valid) != len(_others(request)):
+            _set_others(response, request, [t for t, _ in valid])
+        return accounts
+
+    @app.post("/api/auth/accounts")
+    def auth_add_account(body: LoginIn, request: Request, response: Response, con=Depends(db)):
+        """Sign another account in on this browser and switch to it (the one signed in now stays on the list).
+        The same checks as signing in (waits, lockout, two-step code)."""
+        if not same_origin(request):
+            raise HTTPException(403, "Refused: the request came from another site.")
+        u = _sign_in(body, request, con)
+        current = request_token(request)
+        keep = [t for t in _others(request) if (x := lookup(t)) and x["id"] != u["id"]]
+        if request.state.user["id"] != u["id"] and current:
+            keep = [current] + keep
+        if len(keep) > MAX_OTHERS:
+            raise HTTPException(409, f"This browser has {MAX_OTHERS + 1} accounts signed in already: sign one out first.")
+        _set_cookie(response, request, auth.new_session(con, u["id"], request.headers.get("user-agent")))
+        _set_others(response, request, keep)
+        return auth.public(u)
+
+    @app.post("/api/auth/switch")
+    def auth_switch(body: SwitchIn, request: Request, response: Response):
+        """Switch to another account signed in on this browser: no password (it signed in here before)."""
+        current = request_token(request)
+        others = _others(request)
+        pick = next((t for t in others if (u := lookup(t)) and u["id"] == body.user_id), None)
+        if pick is None:
+            raise HTTPException(404, "That account isn't signed in on this browser (any more): sign it in again.")
+        _set_cookie(response, request, pick)
+        _set_others(response, request, [current] + [t for t in others if t != pick] if current else
+                    [t for t in others if t != pick])
+        return {"switched": True}
+
+    @app.delete("/api/auth/accounts/{user_id}", status_code=204)
+    def auth_remove_account(user_id: int, request: Request, response: Response, con=Depends(db)):
+        """Sign one of this browser's other accounts out (its session ends)."""
+        keep = []
+        for t in _others(request):
+            u = lookup(t)
+            if u and u["id"] == user_id:
+                auth.end_session(con, t)
+            elif u:
+                keep.append(t)
+        forget_sessions()
+        _set_others(response, request, keep)
+
     @app.post("/api/auth/logout", status_code=204)
     def auth_logout(request: Request, response: Response, con=Depends(db)):
+        """Sign out. If other accounts are signed in on this browser, the first of them becomes the current one."""
         auth.end_session(con, request_token(request))
         forget_sessions()
-        response.delete_cookie(auth.COOKIE, path="/")
+        rest = [t for t in _others(request) if lookup(t)]
+        if request.cookies.get(auth.COOKIE) and rest:
+            _set_cookie(response, request, rest[0])
+            _set_others(response, request, rest[1:])
+        else:
+            response.delete_cookie(auth.COOKIE, path="/")
+            if request.cookies.get(OTHERS):
+                _set_others(response, request, rest)
 
     # -- apps on other devices (devices.py): finding the server, linking with a code, media tickets
     @app.get("/api/hello")
@@ -1369,9 +1461,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if kind is not None and kind not in allowed:
             raise HTTPException(400, f"a {lib['type']} library has no {kind!r} items")
         where, args = ["library_id=?", "kind=?"], [lib_id, kind or allowed[0]]
-        if match_status:
-            where.append("match_status=?")
-            args.append(match_status)
+        if match_status:  # one, or several ("pending,unmatched": the Unidentified filter)
+            statuses = [x for x in match_status.split(",") if x]
+            where.append(f"match_status IN ({','.join('?' * len(statuses))})")
+            args += statuses
         if q:
             where.append("title LIKE ?")
             args.append(f"%{q}%")
@@ -1399,6 +1492,83 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {_SORTS.get(sort, _SORTS['added'])} LIMIT ?",
                            (*args, limit)).fetchall()
         return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
+
+    # -- holidays (holidays.py): the next and the last holiday, and the movies/episodes about each
+
+    def _holiday_pick(which: str) -> tuple[holidays.Holiday, str | None]:
+        if which in ("next", "recent"):
+            (nh, nd), (rh, rd) = holidays.next_and_recent(holidays.today())
+            return (nh, nd.isoformat()) if which == "next" else (rh, rd.isoformat())
+        if which in holidays.BY_ID:
+            return holidays.BY_ID[which], None
+        raise HTTPException(404, "no such holiday")
+
+    @app.get("/api/holidays")
+    def get_holidays(con=Depends(db)):
+        """The next holiday (today counts) and the last one before today, each with how many movies/episodes are
+        about it; and every holiday BAMS knows (`all`)."""
+        t = holidays.titles(con)
+        out = {}
+        for which in ("next", "recent"):
+            h, date = _holiday_pick(which)
+            out[which] = {"id": h.id, "name": h.name, "date": date, "count": len(t[h.id])}
+        out["all"] = [{"id": h.id, "name": h.name} for h in holidays.HOLIDAYS]
+        return out
+
+    def _with_show(con: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
+        """Item summaries; episodes carry their show's title and art (`show`) and their season (`season_id`), as
+        watch list entries do (apps show them the same way)."""
+        shows: dict[int, dict] = {}
+        out = []
+        for r in rows:
+            d = item_summary(r)
+            if r["kind"] == "episode":
+                show_id = con.execute("SELECT parent_id FROM items WHERE id=?", (r["parent_id"],)).fetchone()[0]
+                if show_id not in shows:
+                    s = con.execute("SELECT id, title, poster, backdrop FROM items WHERE id=?", (show_id,)).fetchone()
+                    shows[show_id] = {"id": s["id"], "title": s["title"], "poster": _img(s["poster"]),
+                                      "backdrop": _img(s["backdrop"])}
+                d["show"] = shows[show_id]
+                d["season_id"] = r["parent_id"]
+            out.append(d)
+        return out
+
+    @app.get("/api/holidays/{which}/items")
+    def holiday_items(which: str, library: int | None = None, sort: str = Query("title", pattern="^(title|random)$"),
+                      limit: int = Query(500, ge=1, le=5000), con=Depends(db), me=Depends(current_user)):
+        """The movies and episodes about a holiday (`which`: next, recent or a holiday id), every library or one;
+        by title (episodes under their show, in order) or at random (Home)."""
+        h, _ = _holiday_pick(which)
+        ids = holidays.titles(con)[h.id]
+        if not ids:
+            return []
+        where, args = ["id IN (SELECT value FROM json_each(?))"], [jdump(sorted(ids))]
+        if library is not None:
+            where.append("library_id=?")
+            args.append(library)
+        order = "RANDOM()" if sort == "random" else (
+            "COALESCE((SELECT sh.title FROM items se JOIN items sh ON sh.id=se.parent_id WHERE se.id=items.parent_id), "
+            "title) COLLATE NOCASE, season_number, episode_number, title COLLATE NOCASE")
+        rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?", (*args, limit)).fetchall()
+        return watch.annotate(con, me["id"], _with_show(con, rows))
+
+    @app.get("/api/items/{item_id}/holidays", dependencies=ADMIN)
+    def item_holidays(item_id: int, con=Depends(db)):
+        """Admins: every holiday, whether this movie/episode is in it, and whether that was set by hand."""
+        if not con.execute("SELECT 1 FROM items WHERE id=? AND kind IN ('movie','episode')", (item_id,)).fetchone():
+            raise HTTPException(404, "Only movies and episodes belong to holidays.")
+        return holidays.of_item(con, item_id)
+
+    @app.put("/api/items/{item_id}/holidays/{holiday}", dependencies=ADMIN)
+    def tag_holiday(item_id: int, holiday: str, body: HolidayTagIn, con=Depends(db)):
+        """Admins: put a movie/episode in a holiday, keep it out, or go back to automatic."""
+        if holiday not in holidays.BY_ID:
+            raise HTTPException(404, "no such holiday")
+        if not con.execute("SELECT 1 FROM items WHERE id=? AND kind IN ('movie','episode')", (item_id,)).fetchone():
+            raise HTTPException(404, "Only movies and episodes belong to holidays.")
+        with Tx(con):
+            holidays.set_tag(con, item_id, holiday, body.tagged)
+        return holidays.of_item(con, item_id)
 
     @app.get("/api/genres")
     def all_genres(con=Depends(db)):

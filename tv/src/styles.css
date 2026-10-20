@@ -331,3 +331,6 @@ html.pointer .osd.on button { pointer-events: auto; }
 .np-quality { font-size: 17px; font-weight: 600; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .playlist-desc { font-size: 26px; color: var(--muted); margin-top: 10px; }
 .list-head { font-size: 32px; margin: 26px 0 18px; }
+/* a holiday row's "See all": a poster-sized card at the row's end */
+.card.see-all { display: grid; place-items: center; background: var(--surface-2); font-size: 28px; font-weight: 700; }
+.account-row { display: flex; gap: 16px; margin-bottom: 16px; }

@@ -3,6 +3,18 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## Unreleased
+
+### Added
+- **Upcoming and Recent Holiday.** Two Home rows show a few movies and episodes about the next holiday and the one just
+  past (16 holidays: New Year's to Kwanzaa, Lunar New Year, Day of the Dead, Hanukkah…), with **See all**. Movie and
+  TV libraries get the same as filters. A title counts when its title or description mentions the holiday, or TMDB's
+  keywords for the movie do; admins can put a title in or out by hand (Holidays button on a movie, calendar icon on an
+  episode). On the web, in theatre mode and on the TV apps (with their next builds).
+- **Unidentified filter** (admins, web): a library's titles BAMS couldn't identify yet; click one to fix its match.
+- **Switch account** (web and theatre mode): the button with your name above Settings. Sign several accounts in and
+  switch between them with no password; signing out moves to the next one.
+
 ## 0.18.5 (2026-10-19)
 
 ### Added

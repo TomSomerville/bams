@@ -7,6 +7,7 @@ import { useApi } from "../useApi";
 import { LIB_TYPES } from "../format";
 import { listName } from "../homeRows";
 import Icon from "./Icon";
+import { AccountsButton } from "./Accounts";
 import { useReorder } from "./useReorder";
 import { appApi, inApp } from "../android";
 
@@ -83,6 +84,7 @@ export default function Sidebar() {
             <Icon name="download" /> <span>Downloads</span>
           </button>
         )}
+        <AccountsButton />
         <NavLink to="/settings" className="nav-item">
           <Icon name="settings" /> <span>Settings</span>
         </NavLink>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ContinueItem, Genre, ItemSummary, ServerLibrary, WatchlistItem } from "../api";
+import type { ContinueItem, Genre, Holidays, ItemSummary, ServerLibrary, ShownItem, WatchlistItem } from "../api";
 import { Backdrop } from "../components/Art";
 import { AlbumCard, ContinueCard, ListedCard, PosterCard } from "../components/Cards";
 import Icon from "../components/Icon";
@@ -87,6 +87,13 @@ function HomeRow({ spec }: { spec: HomeRowSpec }) {
       </Row>
     );
   }
+  if (spec.kind === "holiday") {
+    return (
+      <Row title={spec.title} to={`/holiday/${spec.holiday}`}>
+        {items.map((i) => <ListedCard key={keyOf(i)} item={i as Tagged<ShownItem>} />)}
+      </Row>
+    );
+  }
   if (spec.kind === "albums") return <Row title={spec.title} to={to}>{items.map((a) => <AlbumCard key={keyOf(a)} item={a} />)}</Row>;
   return <Row title={spec.title} to={to}>{items.map((i) => <PosterCard key={keyOf(i)} item={i} />)}</Row>;
 }
@@ -97,11 +104,14 @@ export default function Home() {
   const { lists: genreLists, done: genresDone } = useEverywhere<Genre>(sources, "/api/genres");
   const { lists: newest, done: newestDone } = useEverywhere<ItemSummary>(sources, heroPath);
   const { prefs } = useAuth();
+  // the holidays' names and dates come from this server (an older one has none: no holiday rows)
+  const { data: holidays, error: noHolidays } = useApi<Holidays>("/api/holidays");
 
   const genres = useMemo(() => mergeGenres(genreLists), [genreLists]);
   const hero = useMemo(() => (prefs.home_hero ? heroItems(newest) : []), [newest, prefs.home_hero]);
-  const specs = useMemo(() => (libs ? homeSpecs(prefs.home_rows, libs, genres, prefs.watchlist_name) : null),
-    [libs, prefs.home_rows, genres, prefs.watchlist_name]);
+  const specs = useMemo(() => (libs && (holidays || noHolidays)
+    ? homeSpecs(prefs.home_rows, libs, genres, prefs.watchlist_name, holidays ?? null) : null),
+  [libs, prefs.home_rows, genres, prefs.watchlist_name, holidays, noHolidays]);
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   if (libs && !libs.length && sources.length === 1) {

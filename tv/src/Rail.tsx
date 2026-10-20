@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { useNav } from "./App";
 import Icon, { type IconName } from "./Icon";
 import { useListName } from "./ListMenu";
+import { theatre } from "./platform";
 
 type Item = { id: string; label: string; icon: IconName; active: boolean; go: () => void };
 
@@ -27,6 +28,9 @@ export default function Rail() {
   })).filter((g) => g.items.length);
   const bottom: Item[] = [
     { id: "search", label: "Search", icon: "search", active: r.name === "search", go: () => nav.reset({ name: "search" }) },
+    // theatre mode: who's signed in, and switching to another account signed in on this PC
+    ...(theatre() ? [{ id: "accounts", label: nav.user?.name ?? "Account", icon: "users" as IconName,
+      active: r.name === "accounts", go: () => nav.reset({ name: "accounts" }) }] : []),
     { id: "settings", label: "Settings", icon: "gear", active: r.name === "settings", go: () => nav.reset({ name: "settings" }) },
   ];
   const button = (it: Item) => (

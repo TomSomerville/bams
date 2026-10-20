@@ -69,7 +69,12 @@ export default function Settings() {
         <p>What you've watched, where you stopped, Continue Watching and your Home rows belong to this account and are
           kept on the server: the same here as on the web, and this {w} and a computer can play at the same time. To use
           another account's, switch: then sign this {w} in again as that person.</p>
-        <button className="btn" data-fid="signout" onClick={nav.signOut}>Switch account (sign out of this {w})</button>
+        {theatre()
+          ? <div className="button-row">
+              <button className="btn" data-fid="accounts" onClick={() => nav.reset({ name: "accounts" })}>Switch account</button>
+              <button className="btn" data-fid="signout" onClick={nav.signOut}>Sign out</button>
+            </div>
+          : <button className="btn" data-fid="signout" onClick={nav.signOut}>Switch account (sign out of this {w})</button>}
       </section>
 
       <section className="panel">
