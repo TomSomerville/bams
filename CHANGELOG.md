@@ -3,6 +3,14 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.19.2 (2026-10-21)
+
+### Changed
+- **The player shows the time left**, not the length: above the timeline on the right, counting down, with the time
+  it ends by this device's clock ("-24:39 (5:24 PM)").
+
+Update the server with the new installer. The TV and Android apps are unchanged.
+
 ## 0.19.1 (2026-10-21)
 
 ### Added

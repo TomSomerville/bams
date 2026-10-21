@@ -765,7 +765,8 @@ function Player({ id }: { id: string }) {
       <div className="player-bottom">
         <div className="timeline-times">
           <span className="time">{fmt(scrub ?? pos)}</span>
-          <span className="time" title="Length (when it will be done)">{fmt(total)}{endsAt && <span className="ends-at"> ({endsAt})</span>}</span>
+          <span className="time" title="Time left (when it will be done)">
+            {total > 0 ? `-${fmt(Math.max(0, total - (scrub ?? pos)))}` : fmt(total)}{endsAt && <span className="ends-at"> ({endsAt})</span>}</span>
         </div>
         <input
           className="timeline"

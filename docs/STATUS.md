@@ -459,6 +459,13 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-21: The player shows the time left (release 0.19.2)
+- **What / why:** owner, after trying 0.19.1: the right-hand time above the timeline should be the time left, counting
+  down ("-24:39 (5:24 PM)"), not the length. Unknown length still shows "0:00" with no end time.
+- **Files:** `web/src/pages/Player.tsx`.
+- **Verified:** `tsc`, sandbox player: "0:04" left, "-0:40 (10:06 AM)" right.
+- **Left open:** none.
+
 ### 2026-10-21: Holiday Shuffle, player end time, readable phone episode rows (release 0.19.1)
 - **What / why:** owner: (1) on a phone in portrait the episode rows crammed title, year/length and S00E00 together:
   smaller picture (84 px), title on its own lines, "S01E01 · 2005 · 24m" under it (`.ep-meta`, phones only; the
@@ -473,7 +480,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** server suite 379 passed (encoder test deselected, known); `tsc`; at 375 px in the sandbox (long titles
   injected: no overlap) and its scratch copy (four episodes tagged Halloween: Shuffle → random queue of four, Up
   next follows it; times above the timeline with the end time).
-- **Owner:** to test on the live app after the release.
+- **Owner:** tried it on the live app: "It all works" (then asked for the time left, 0.19.2).
 - **Left open:** Shuffle isn't on the TV/theatre holiday screen (it has no kind chips) and leaves other servers'
   episodes out; the offline phone pages pick up the row style with the next APK build.
 
