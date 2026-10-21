@@ -1552,6 +1552,17 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?", (*args, limit)).fetchall()
         return watch.annotate(con, me["id"], _with_show(con, rows))
 
+    @app.get("/api/holidays/{which}/random")
+    def holiday_random(which: str, kind: str = Query("episode", pattern="^(episode|movie)$"),
+                       limit: int = Query(1000, ge=1, le=1000), con=Depends(db)):
+        """Shuffle (a holiday's "See all", Episodes): every episode (or movie) about it, in random order, as a video
+        queue. Specials count here: holiday episodes are often there."""
+        h, _ = _holiday_pick(which)
+        ids = holidays.titles(con)[h.id]
+        items = _random_videos(con, "v.id IN (SELECT value FROM json_each(?)) AND v.kind=?",
+                               (jdump(sorted(ids)), kind), limit, specials=True) if ids else []
+        return {"type": "video", "items": items}
+
     @app.get("/api/items/{item_id}/holidays", dependencies=ADMIN)
     def item_holidays(item_id: int, con=Depends(db)):
         """Admins: every holiday, whether this movie/episode is in it, and whether that was set by hand."""
@@ -1757,14 +1768,15 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
     _HAS_FILE = """EXISTS (SELECT 1 FROM file_items fi JOIN files f ON f.id=fi.file_id
                            WHERE fi.item_id=v.id AND f.available)"""
 
-    def _random_videos(con, where: str, args: tuple, limit: int) -> list[dict]:
-        """Movies/episodes with a file to play, in random order (Specials left out), as a video play queue."""
+    def _random_videos(con, where: str, args: tuple, limit: int, specials: bool = False) -> list[dict]:
+        """Movies/episodes with a file to play, in random order (Specials left out unless `specials`), as a video
+        play queue."""
         rows = con.execute(f"""
             SELECT v.id, v.kind, v.title, v.season_number, v.episode_number, v.runtime, v.year,
                    COALESCE(v.still, v.poster, sh.poster) AS art, sh.title AS show_title
             FROM items v LEFT JOIN items se ON se.id=v.parent_id AND v.kind='episode'
                          LEFT JOIN items sh ON sh.id=se.parent_id
-            WHERE {where} AND {_HAS_FILE} AND (v.kind='movie' OR COALESCE(v.season_number, 1) > 0)
+            WHERE {where} AND {_HAS_FILE} AND ({int(specials)} OR v.kind='movie' OR COALESCE(v.season_number, 1) > 0)
             ORDER BY RANDOM() LIMIT ?""", (*args, limit)).fetchall()
         return [{"id": r["id"], "kind": r["kind"], "title": r["title"], "show": r["show_title"],
                  "season_number": r["season_number"], "episode_number": r["episode_number"],

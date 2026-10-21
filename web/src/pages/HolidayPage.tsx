@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { Holidays, ShownItem } from "../api";
 import { ListedCard } from "../components/Cards";
+import Icon from "../components/Icon";
+import { useVideoQueue } from "../random";
 import { holidayOrder, holidayPath, holidayTitle, keyOf } from "../everywhere";
 import { useEverywhere, useSources } from "../servers";
 import { useApi } from "../useApi";
@@ -22,6 +24,17 @@ export default function HolidayPage() {
   const kinds = (Object.keys(KINDS) as Kind[]).filter((k) => k === "all" || all.some((i) => i.kind === k));
   const shown = all.filter((i) => kind === "all" || i.kind === kind);
   const h = holidays?.[which];
+  // Shuffle (Episodes): every episode about the holiday, in random order, as the video queue (random.tsx), so they
+  // play one after another. The queue is one server's: this one's.
+  const { playRandom } = useVideoQueue();
+  const [shuffling, setShuffling] = useState(false);
+  const [shuffleFailed, setShuffleFailed] = useState(false);
+  const shuffle = () => {
+    setShuffling(true);
+    setShuffleFailed(false);
+    playRandom(`/api/holidays/${which}/random?kind=episode`, null).catch(() => setShuffleFailed(true))
+      .finally(() => setShuffling(false));
+  };
 
   if (error) return <div className="page"><p className="key-msg bad">{error}</p></div>;
   return (
@@ -30,11 +43,16 @@ export default function HolidayPage() {
         <h1>{h ? holidayTitle(which, h) : ""}</h1>
         {done && <span className="count">{shown.length} {shown.length === 1 ? "title" : "titles"}</span>}
       </div>
-      {kinds.length > 2 && (
+      {(kinds.length > 2 || kinds.includes("episode")) && (
         <div className="chips">
           {kinds.map((k) => (
             <button key={k} className={`chip ${kind === k ? "on" : ""}`} onClick={() => setKind(k)}>{KINDS[k]}</button>
           ))}
+          {kind === "episode" && all.some((i) => i.kind === "episode" && i.rid === null) && (
+            <button className="chip shuffle-chip" onClick={shuffle} disabled={shuffling}
+              title={shuffleFailed ? "Couldn't load the episodes" : "Play every episode about this holiday, in random order"}>
+              <Icon name="shuffle" size={14} /> {shuffleFailed ? "Try again" : "Shuffle"}</button>
+          )}
         </div>
       )}
       {done && !all.length && h && (

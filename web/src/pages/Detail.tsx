@@ -104,7 +104,10 @@ function Episodes({ season, picked, onChange, admin }: { season: ItemSummary; pi
                 {progressOf(e) !== null && <div className="progress"><div style={{ width: `${progressOf(e)! * 100}%` }} /></div>}
               </div>
               <div className="ep-text">
-                <div className="ep-title">{e.title} <span className="muted">· {sxe(e.season_number!, e.episode_number)}</span></div>
+                <div className="ep-title">{e.title} <span className="muted ep-sxe">· {sxe(e.season_number!, e.episode_number)}</span></div>
+                {/* phones: number, year and length on a line of their own under the title */}
+                <div className="ep-meta">{[sxe(e.season_number!, e.episode_number), e.air_date?.slice(0, 4),
+                  e.runtime ? `${e.runtime}m` : null].filter(Boolean).join(" · ")}</div>
                 {e.overview && <p>{e.overview}</p>}
               </div>
               <span className="ep-time">{[e.air_date?.slice(0, 4), e.runtime ? `${e.runtime}m` : null].filter(Boolean).join(" · ")}</span>

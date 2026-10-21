@@ -3,6 +3,22 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.19.1 (2026-10-21)
+
+### Added
+- **Shuffle a holiday's episodes.** On a holiday's **See all** page, pick **Episodes** and a **Shuffle** button
+  appears: it plays every episode about that holiday in random order, one after another (Specials included). The
+  order shows under Up next in the player, like Play Random.
+- **The player shows when it will be done.** The position is now above the timeline on the left; the length and the
+  time it ends by this device's clock are on the right ("24:36 (5:24 PM)"). They fade with the other controls.
+
+### Changed
+- **Episode lists on phones** are easier to read: a smaller picture, the title on its own lines, and
+  "S01E01 · 2005 · 24m" under it.
+
+Update the server with the new installer. The TV and Android apps are unchanged (the Android app shows the
+server's own pages, so it gets these with the server).
+
 ## 0.19.0 (2026-10-19), TV apps 0.17.0
 
 ### Added

@@ -181,6 +181,12 @@ function Player({ id }: { id: string }) {
   const [passFailed, setPassFailed] = useState(false); // the device said it decodes Dolby, then didn't
   const [menu, setMenu] = useState<"quality" | "audio" | "subs" | "speed" | null>(null);
   const [rate, setRate] = useState(1);      // playback speed; each video starts at normal speed
+  // the "ends at" clock moves on while paused too
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClockTick((n) => n + 1), 20_000);
+    return () => clearInterval(t);
+  }, []);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [idle, setIdle] = useState(false);
@@ -631,6 +637,9 @@ function Player({ id }: { id: string }) {
   const title = show ? show.title : item.title;
   const subtitle = item.kind === "episode" ? `${sxe(item.season_number!, item.episode_number)} · ${item.title}` : item.year ?? "";
   const fmt = (sec: number) => fmtClock(sec) || "0:00";
+  // when it will be done by this device's clock, at the current speed
+  const endsAt = total > 0 ? new Date(Date.now() + (Math.max(0, total - (scrub ?? pos)) / (rate || 1)) * 1000)
+    .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
   const vcodec = pb?.video_codec ?? "Video";
   const acodec = audioTracks[audio]?.codec ?? pb?.audio_codec;
   const note = passthrough
@@ -754,6 +763,10 @@ function Player({ id }: { id: string }) {
       </div>
 
       <div className="player-bottom">
+        <div className="timeline-times">
+          <span className="time">{fmt(scrub ?? pos)}</span>
+          <span className="time" title="Length (when it will be done)">{fmt(total)}{endsAt && <span className="ends-at"> ({endsAt})</span>}</span>
+        </div>
         <input
           className="timeline"
           type="range" min={0} max={total || 0} step={1} value={scrub ?? pos}
@@ -797,7 +810,6 @@ function Player({ id }: { id: string }) {
               <Icon name="sleep" size={24} />{sleep ? <span>+{sleep}</span> : null}
             </button>
           )}
-          <span className="time">{fmt(scrub ?? pos)} / {fmt(total)}</span>
           {note && <span className="muted audio-note" title={note.why}>{note.text}</span>}
           <span className="spacer" />
           {qAt >= 0 && (

@@ -146,3 +146,19 @@ def test_movie_keywords(lib):
     assert matcher.fill_keywords(con, tmdb, libs["movie"]) == 0  # once
     con.close()
     assert sorted(i["title"] for i in c.get("/api/holidays/christmas/items").json()) == ["Elf", "Heat"]
+
+
+def test_shuffle(lib):
+    app, c, paths, libs, ids, eps = lib
+    # the second episode is made a Special and tagged by hand: Shuffle keeps Specials (holiday episodes often are)
+    con = connect(paths.db)
+    with Tx(con):
+        con.execute("UPDATE items SET season_number=0 WHERE id=?", (eps[1],))
+    con.close()
+    c.put(f"/api/items/{eps[1]}/holidays/halloween", json={"tagged": True})
+    r = c.get("/api/holidays/next/random").json()
+    assert r["type"] == "video" and sorted(i["id"] for i in r["items"]) == sorted(eps)
+    assert all(i["kind"] == "episode" and i["show"] == "Show" for i in r["items"])
+    assert [i["title"] for i in c.get("/api/holidays/christmas/random?kind=movie").json()["items"]] == ["Elf"]
+    assert c.get("/api/holidays/easter/random").json() == {"type": "video", "items": []}
+    assert c.get("/api/holidays/nope/random").status_code == 404

@@ -459,6 +459,24 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-21: Holiday Shuffle, player end time, readable phone episode rows (release 0.19.1)
+- **What / why:** owner: (1) on a phone in portrait the episode rows crammed title, year/length and S00E00 together:
+  smaller picture (84 px), title on its own lines, "S01E01 · 2005 · 24m" under it (`.ep-meta`, phones only; the
+  title's own S00E00 and the right-hand year/length hidden there). (2) Player: position above the timeline on the
+  left, length + end time by the device's clock on the right ("24:36 (5:24 PM)", at the current speed, refreshed
+  while paused), fading with the controls (`.timeline-times`; web player everywhere, not the TV page's). (3) A holiday's
+  See all → Episodes → **Shuffle**: every episode about it in random order as the video queue
+  (`GET /api/holidays/{which}/random`, Specials included because holiday specials usually are; this server's only:
+  the queue is one server's). The chips now show whenever there are episodes (an episodes-only holiday had none).
+- **Files:** `server/bams/app.py` (`holiday_random`, `_random_videos(specials=)`), `web/src/pages/{Detail,Player,HolidayPage}.tsx`,
+  `web/src/styles.css`, `server/tests/test_holidays.py` (`test_shuffle`).
+- **Verified:** server suite 379 passed (encoder test deselected, known); `tsc`; at 375 px in the sandbox (long titles
+  injected: no overlap) and its scratch copy (four episodes tagged Halloween: Shuffle → random queue of four, Up
+  next follows it; times above the timeline with the end time).
+- **Owner:** to test on the live app after the release.
+- **Left open:** Shuffle isn't on the TV/theatre holiday screen (it has no kind chips) and leaves other servers'
+  episodes out; the offline phone pages pick up the row style with the next APK build.
+
 ### 2026-10-19: Upcoming / Recent Holiday, Unidentified filter, quick account switching (release 0.19.0, TV apps 0.17.0)
 - **What / why:** owner asked for three things, "secure lightweight" and without slowing the UI or playback.
   (1) **Holidays:** Home rows "Upcoming Holiday: Halloween · Oct 31" / "Recent Holiday: …" (random few, "See all"),

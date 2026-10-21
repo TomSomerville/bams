@@ -141,7 +141,7 @@ bams/
 │       │   └── Icon.tsx       Inline SVG icon set
 │       └── pages/
 │           ├── Home.tsx       Hero + rows (Continue Watching, the watch list, Recently Added, libraries, Top Rated, one row per genre from /api/genres) in the user's order (homeRows.ts)
-│           ├── HolidayPage.tsx  /holiday/next|recent: a Home holiday row's "See all": every server's movies and episodes about it (useEverywhere + holidayOrder), kind chips
+│           ├── HolidayPage.tsx  /holiday/next|recent: a Home holiday row's "See all": every server's movies and episodes about it (useEverywhere + holidayOrder), kind chips; under Episodes a Shuffle chip (this server's episodes about it → the video queue)
 │           ├── Library.tsx    /library/:id grid, sort, filter chips (Upcoming / Recent holiday, admins' Unidentified = `match_status=pending,unmatched`, clicking one opens Fix match; genres); admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id[?season=<season id>[&episode=<id>]]: show (season tabs → episodes, watched + watch list toggles; `episode` picked out) or movie (Resume, TechInfo); watch list buttons; music → MusicDetail
 │           ├── Watchlist.tsx  /watchlist: every server's watch list as one grid (useEverywhere + listedOrder), sort, kind chips, rename (`watchlist_name` pref), empty state
@@ -663,7 +663,7 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET/POST /api/libraries` · `GET/PATCH/DELETE /api/libraries/{id}` | CRUD (listed in the admin's order); PATCH with add/remove paths triggers a scan | Settings, Sidebar, Home |
 | `POST /api/libraries/{id}/scan[?rematch=true]` → `{accepted, running, queued}` | queue a scan | Settings |
 | `GET /api/scans?library_id=` | current + history | — |
-| `GET /api/holidays` → `{next, recent, all}` · `GET /api/holidays/{next\|recent\|id}/items?library=&sort=title\|random&limit=` · `GET /api/items/{id}/holidays` · `PUT /api/items/{id}/holidays/{holiday} {tagged: true\|false\|null}` (admin) | Upcoming / Recent Holiday rows, pages and filters; admins' overrides | Home, HolidayPage, Library, HolidayTags; tv Home/Holiday/Library |
+| `GET /api/holidays` → `{next, recent, all}` · `GET /api/holidays/{which}/random?kind=episode\|movie` → `{type: "video", items}` (every one, random order, Specials included: Shuffle) · `GET /api/holidays/{next\|recent\|id}/items?library=&sort=title\|random&limit=` · `GET /api/items/{id}/holidays` · `PUT /api/items/{id}/holidays/{holiday} {tagged: true\|false\|null}` (admin) | Upcoming / Recent Holiday rows, pages and filters; admins' overrides | Home, HolidayPage (+ Shuffle → random.tsx `playRandom`), Library, HolidayTags; tv Home/Holiday/Library |
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` (comma list: `pending,unmatched` = Unidentified) | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
 | `GET /api/genres` | every show/movie genre `[{name, count}]`, most titles first | Home, HomeSettings (genre rows) |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
