@@ -16,14 +16,21 @@ def _insert_item(con: sqlite3.Connection, lib_id: int, kind: str, title: str, **
     return con.execute(f"INSERT INTO items ({keys}) VALUES ({marks})", tuple(fields.values())).lastrowid
 
 
-def get_or_create_title(con: sqlite3.Connection, lib_id: int, kind: str, title: str, year: int | None) -> int:
+def edition_name(title: str, edition: str | None) -> str:
+    """How an edition's title is shown: "M*A*S*H (No Laugh Track)"."""
+    return f"{title} ({edition})" if edition else title
+
+
+def get_or_create_title(con: sqlite3.Connection, lib_id: int, kind: str, title: str, year: int | None,
+                        edition: str | None = None) -> int:
     """Find the show/movie these files belong to, by normalised title + year, or create it.
 
     A file without a year joins an existing title with the same name. A file with a year
     adopts a yearless title of the same name, but stays apart from one with a different year
-    (remakes and reboots: "Doctor Who (1963)" vs "Doctor Who (2005)").
+    (remakes and reboots: "Doctor Who (1963)" vs "Doctor Who (2005)"). An edition ("No Laugh Track") is a title of
+    its own: its key carries the edition.
     """
-    key = title_key(title)
+    key = title_key(title) + (f"~{title_key(edition)}" if edition and title_key(edition) else "")
     y = year or 0
     rows = con.execute("SELECT item_id, year FROM item_keys WHERE library_id=? AND kind=? AND title_key=?",
                        (lib_id, kind, key)).fetchall()
@@ -37,7 +44,8 @@ def get_or_create_title(con: sqlite3.Connection, lib_id: int, kind: str, title: 
         item_id = yearless[0]
         con.execute("UPDATE items SET year = COALESCE(year, ?) WHERE id = ?", (year, item_id))
     else:
-        item_id = _insert_item(con, lib_id, kind, title, parsed_title=title, title_key=key, year=year)
+        item_id = _insert_item(con, lib_id, kind, edition_name(title, edition), parsed_title=title, title_key=key,
+                               year=year, edition=edition)
     con.execute("INSERT OR IGNORE INTO item_keys (library_id, kind, title_key, year, item_id) VALUES (?,?,?,?,?)",
                 (lib_id, kind, key, y, item_id))
     return item_id
@@ -81,9 +89,9 @@ def link_file(con: sqlite3.Connection, lib_id: int, file_id: int, p: Parsed) -> 
     if not p.recognized:
         return []
     if p.kind == "movie":
-        targets = [get_or_create_title(con, lib_id, "movie", p.title, p.year)]
+        targets = [get_or_create_title(con, lib_id, "movie", p.title, p.year, p.edition)]
     else:
-        show = get_or_create_title(con, lib_id, "show", p.title, p.year)
+        show = get_or_create_title(con, lib_id, "show", p.title, p.year, p.edition)
         season = get_or_create_season(con, lib_id, show, p.season)
         targets = [get_or_create_episode(con, lib_id, season, p.season, e, p.episode_title if len(p.episodes) == 1 else None)
                    for e in p.episodes] if p.episodes else [get_or_create_episode(con, lib_id, season, p.season, None, p.episode_title)]

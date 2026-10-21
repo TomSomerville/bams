@@ -54,8 +54,8 @@ bams/
 │   │   ├── readonly.py        Read-only media access + the audit-hook guard + walker (+ side files) + quick_hash + read_text
 │   │   ├── library.py         Library CRUD, folder validation, guard refresh, describe() for the API, order (ORDER, listed, reorder)
 │   │   ├── scanner.py         scan_library(): walk → diff → parse → link → probe (music: probe before parse/link)
-│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; every name is read through `_read` (guessit, with hyphenated words kept whole: `_protect`); `_show_dir`/`_show_dir_at` pick the folder that names the show (`title_folder` for Fix match); `guess()` = Auto fill's best guess when the rules can't place a file
-│   │   ├── items.py           Item graph: get-or-create show/season/episode/movie, link files, merge, cleanup
+│   │   ├── parse.py           Filename/folder → Parsed (show/season/episode or movie). Pure functions; every name is read through `_read` (guessit, with hyphenated words kept whole: `_protect`); `_show_dir`/`_show_dir_at` pick the folder that names the show (`title_folder` for Fix match); `guess()` = Auto fill's best guess when the rules can't place a file; `edition_of` reads an edition ("No Laugh Track", "Director's Cut", Plex's `{edition-…}`) from a show folder or a movie's name, only when set apart from the name
+│   │   ├── items.py           Item graph: get-or-create show/season/episode/movie (an edition is its own title: key `<title>~<edition>`, name `edition_name` "M*A*S*H (No Laugh Track)"), link files, merge, cleanup
 │   │   ├── identify.py        Files identified by hand (files.manual, {skip} = don't place, kept = off the Unrecognized list): parsed_for() (scanner), from_name() (rules, then Auto fill guess), store(), keep(), replace_unplaced(), TMDB/IMDb link lookup, names for suggestions
 │   │   ├── matcher.py         TMDB matching + metadata/artwork fill + refresh + merge duplicates; movie keywords into `items.extra.keywords` (with the match, else `fill_keywords`: 50 per scan)
 │   │   ├── tmdb.py            TMDB HTTP client (Bearer or api_key), throttle/retry, image cache download
@@ -261,7 +261,7 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v16)
+## 3. Data model (`db.py`, schema v17)
 
 | Table | Holds | Key columns |
 |---|---|---|
@@ -288,7 +288,7 @@ web UI, `/docs`.
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
 created at v1 and run every step too, so each step is exercised by every test. Before migrating an existing DB,
 `migrate()` copies it to `data/backups/bams-schema-v{N}-{time}.db`. v2 rebuilt `items` (SQLite can't change a
-CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. v16 adds `holiday_tags`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
+CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. v16 adds `holiday_tags`. v17 adds `items.edition`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
 (one file, many tracks) and merged albums (one track, several files);
 albums are found by `(parent_id=artist, title_key)` from the *parsed* title, so renaming an album to its
 MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist'`).
@@ -334,7 +334,7 @@ changed since the last look; same for `artist.jpg`, which drops a Commons credit
    without the year → `best_match` (title similarity + year ±, threshold `ACCEPT=0.80`).
 2. Below threshold → `match_status='unmatched'`, stop.
 3. Details (+external_ids) → images downloaded **before** the DB transaction → `_apply_title`.
-4. `_merge_duplicate`: if another item already has this TMDB id, `items.merge_titles` folds this one in.
+4. `_merge_duplicate`: if another item with the same edition (or none) already has this TMDB id, `items.merge_titles` folds this one in. Another edition keeps its own title with the same TMDB information (episodes, pictures); `_apply_title` puts the edition after the TMDB name.
 5. Shows: `_apply_seasons` (season + episode titles, overviews, stills; missing episodes → 'unmatched').
 6. Later scans refresh only what's pending or older than `REFRESH_AFTER` (150 days, under TMDB's 6-month limit).
 
@@ -737,6 +737,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | `conftest.py` | `env` fixture (data dir + media dir + connection; resets guard roots), `unguarded` (temporarily lift the guard to mutate a media tree), `make_tree()`, `signed_in(app, name, admin)` (a TestClient with an account, signed in: every API test needs it) |
 | `test_devices.py` | /api/hello + server name (default from the first admin, admin-only, reset), link codes (approve, used/wrong codes, throttle, expiry), token sign-in, bearer requests, cookie cross-site still refused, CORS without credentials, media tickets (media-only, GET-only, forged/expired, end with the session; POST/DELETE on a ticket path with the token), traffic log shows the real path |
+| `test_editions.py` | edition names (and names that only look like one: "Uncut Gems", "The Final Cut"), editions kept apart from the plain title but matched to the same TMDB show, an older merge split by the next scan, movie editions |
 | `test_holidays.py` | holiday dates (Easter, Hanukkah, Lunar New Year, nth weekdays against known years), next/recent (today = upcoming), word matching (no false hits), routes (rows, library filter, random), admin overrides (in/out/auto, 403 for viewers), the Unidentified filter, TMDB movie keywords stored and matched |
 | `test_switch.py` | Switch account: add/switch/remove (tokens only in HttpOnly cookies), wrong password and other sites refused, sign-out moves to the next account, sessions ended elsewhere drop off |
 | `test_auth.py` | hashing, 401 everywhere, first admin only from loopback, sign in/out, throttle, viewer 403s, users CRUD + last-admin rules, own password, cross-site refusal, v4 migration |
@@ -805,6 +806,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | What a hand identification can say / how links are read | `identify.py` (`manual_parsed`, `lookup`, `_TMDB_URL`), `IdentifyIn` in `app.py`, `Identify.tsx` |
 | Add a per-user preference | `auth.PREFS` (+ `auth._valid` if it isn't a bool) + `PrefsIn` in `app.py` + `Prefs` in `web/src/api.ts` / `DEFAULT_PREFS` in `auth.tsx` |
 | The watch list: what can go on it, order, how entries look | `watch.LISTABLE` / `add_to_list` / `watch_list`, route `get_watchlist` in `app.py`; merge + look `everywhere.listedOrder` / `listedLook` (shared with the TV); web `Cards.tsx` `ListToggle` / `ListedCard` / `listedPage`, `pages/Watchlist.tsx`; TV `ListMenu.tsx`, `screens/Watchlist.tsx`; default name `homeRows.WATCHLIST_NAME` |
+| Editions: which words make one, how it's named | `parse._EDITION_RE` / `edition_of` (+ `test_editions.py`; bump `parse.PARSER_VERSION`), `items.edition_name`, `matcher._merge_duplicate` |
 | Holidays: which ones, their dates or words | `server/bams/holidays.py` `HOLIDAYS` (id, name, date rule, words; ids are stored in `holiday_tags`, keep them stable) + `test_holidays.py`; labels `everywhere.holidayLabel`/`holidayTitle` |
 | Switch account (how many, what happens on sign-out) | `app.py` `OTHERS`/`MAX_OTHERS`, `auth_*account*` routes, `auth_logout`; web `components/Accounts.tsx`, `auth.tsx` signOut; theatre `tv/src/api.ts` `stashAccount`…, `screens/Accounts.tsx`, `Rail.tsx` (test `tv/test/accounts.test.ts`) |
 | Add or change a Home row | `web/src/homeRows.ts` `defaultRows` (id, label, default place) + what it asks and how servers merge in `web/src/everywhere.ts` `homeSpecs`/`mergeRow` (web `pages/Home.tsx` and TV `tv/src/screens/Home.tsx` both use them); ids are saved in users' `home_rows`, so keep old ids stable |

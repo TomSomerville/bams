@@ -408,4 +408,8 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   sign-in. Logout promotes the next account (`auth_logout`): a test that signs out expecting "nobody" must not have
   added accounts first. Theatre mode keeps its own list in `bams.theatre.others` (`tv/src/api.ts`, each with its own
   other servers): Samsung/Fire TV paths don't use it.
+- **Editions are titles of their own** (`items.edition`, item key `<title>~<edition>`): the matcher merges two titles
+  with one TMDB id only when their editions match (`_merge_duplicate`), and `_apply_title` puts the edition after the
+  TMDB name. `parsed_title` stays the plain name (it's the TMDB search). Cut words count only set apart from the name
+  (`parse.edition_of`): "Uncut Gems" and "The Final Cut" are films, not editions; add such names to `test_editions.py`.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

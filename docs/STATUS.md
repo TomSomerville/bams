@@ -182,6 +182,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-17 | **Copy-HLS keyframes come from the file's index** (MKV Cues, MP4/MOV sample tables; `keyindex.py`), checked against ffprobe in three short stretches; a full packet read only without a usable index (AVI, fragmented MP4, no Cues) | Owner: "a very long pause … every time I start a video" on the TV. The full read took 7–80 s per first play over the NAS (gigabit-bound, can't be made faster); the index takes under a second. On 69 of the owner's files the index matched the full read except two mkvmerge files, which list fewer keyframes than FFmpeg cuts at (next row) |
 | 10-17 | **A copy run's pieces are published by time** (`hls._publish`): FFmpeg writes each run into its own folder, every piece is timed from the run's start + FFmpeg's EXTINF durations, and a piece that starts on no listed keyframe joins the segment before | FFmpeg can cut at more keyframes than the container lists (its H.264 parser flags I-frames mkvmerge doesn't; mkvmerge leaves bursts of keyframes out of the Cues), and no container-level check can predict that. Numbering by FFmpeg's count misnumbered every later segment; timing by EXTINF was exact (0.00 ms on FFmpeg 6.1 and 9). Also makes a full keyframe list unnecessary for correctness |
 | 10-17 | **Idle HLS sessions sleep instead of closing** (FFmpeg stopped, segments deleted, off the limit) and wake on the next request; closed after 24 h unused | A paused player asks for nothing: after 90 s the session was closed, so the TV got 404s on Play, fell back to a full conversion, and a second long pause ended in "Can't play this" (owner's traffic log, 10-15) |
+| 10-21 | **Editions are titles of their own** ("MASH" and "MASH (No Laugh Track)", "Aliens (Director's Cut)"), never merged by TMDB id, but matched to the same TMDB title for episode names and pictures; the plain one stays the main title | Owner: "Keep editions like No Laugh Track as separate titles instead of merging them… but allow people to pull metadata for the show as if it was the same show". Plex shows both as one title; BAMS played only the first file, hiding the other version |
 | 10-19 | **Upcoming / Recent Holiday**: 16 holidays (US list + Lunar New Year, Day of the Dead, Hanukkah, Kwanzaa), dates **computed on the server** (no calendar service); a title belongs to one when its **title, tagline or overview** mentions it or (movies) its **TMDB keywords** do, and **admins override by hand** (Auto / In / Out, `holiday_tags`); matching runs once and is cached in memory | Owner: "I dont want these features to slow down the UI or playback" and chose "Words + TMDB". TMDB keywords come with the match request (no extra call); older movies are backfilled 50 per scan. Today counts as upcoming |
 | 10-19 | **Unidentified filter is web only** (admins; reuses `match_status` + Fix match) | The TV apps have no Fix match screen; it's for fast identification at a computer |
 | 10-19 | **Quick account switching with no PIN/password** between accounts already signed in on that browser (web) or PC (theatre mode); at most 5; web keeps the others' tokens in an **HttpOnly cookie** (`bams_others`), never in page storage; signing out moves to the next account. Not on the Samsung/Fire TV apps | Owner chose "Nothing" for switching; the cookie keeps tokens out of reach of page scripts. Theatre mode already keeps its own bearer token in `bams.theatre.*` storage, so its other accounts live there too |
@@ -458,6 +459,24 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-21: Editions kept as separate titles (release 0.20.0)
+- **What / why:** owner: two versions of a show ("MASH" and "MASH (no canned laughter)") showed as one, like in Plex;
+  BAMS folded them together (same name once "(…)" was dropped, and the same TMDB id) and always played the first file.
+  Now an edition read from the **show folder** or a **movie's name** (`parse.edition_of`: laugh-track words anywhere;
+  cuts such as Director's Cut, Extended, Unrated, Uncut, Final Cut, IMAX only when set apart by brackets, " - " or
+  after the year; Plex's `{edition-…}`) makes a title of its own (`items.edition`, schema v17; key
+  `<title>~<edition>`), named "<TMDB name> (<edition>)", searched on TMDB by the plain name and never merged with
+  another edition. Release words (Remastered, Criterion…) aren't editions. Parser 10: the next scan re-reads every
+  file, so shows merged before split by themselves.
+- **Files:** `server/bams/{parse,items,matcher,db}.py`, `server/tests/test_editions.py` (new), `test_auth.py`.
+- **Verified:** server suite 396 passed (encoder test deselected, known); a dry run over the sandbox's files (no
+  editions there: nothing changes) and over typical names ("Uncut Gems", "No Laughing Matter", "The Office (US)" stay
+  plain).
+- **Owner:** to try on the live server.
+- **Left open:** not dry-run over the owner's real library (no access from the Linux PC): look at the libraries after
+  the first scan. Progress watched on a merged show stays with the plain one (the edition's episodes start unwatched);
+  hand-identified files have no edition (Fix match/Identify for shows has no edition field).
 
 ### 2026-10-21: The player shows the time left (release 0.19.2)
 - **What / why:** owner, after trying 0.19.1: the right-hand time above the timeline should be the time left, counting

@@ -3,6 +3,20 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.20.0 (2026-10-21)
+
+### Changed
+- **Editions are separate titles.** Another version of a show or film, such as "MASH (No Laugh Track)" next to
+  "MASH", or "Aliens (Director's Cut)" next to "Aliens", now shows as its own title instead of being folded into the
+  plain one (where only one of the files ever played). It still gets the same information from TMDB: episode names,
+  descriptions and pictures. BAMS reads the edition from the show's folder name or the movie's name: laugh-track words
+  ("No Laugh Track", "No Canned Laughter", "Laugh Track Removed"), cuts in brackets, after " - " or after the year
+  ("Director's Cut", "Extended", "Unrated", "Final Cut", "IMAX"), or Plex's `{edition-Name}`.
+
+Update the server with the new installer. The first scan after it re-reads every file name (a few minutes on a big
+library) and splits editions that were merged before; what you watched of a merged show stays with the plain one.
+The TV and Android apps are unchanged.
+
 ## 0.19.2 (2026-10-21)
 
 ### Changed

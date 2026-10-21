@@ -15,7 +15,7 @@ from pathlib import PurePosixPath
 from guessit import guessit
 
 # Bump when parsing rules change: the next scan re-parses files parsed by an older version.
-PARSER_VERSION = 9
+PARSER_VERSION = 10
 
 # {tmdb-603} [tmdbid=603] {imdb-tt0133093} [imdbid-tt0133093] {tvdb-81189}
 _ID_RE = re.compile(r"[\[{](tmdb|imdb|tvdb)(?:id)?[-=]((?:tt)?\d+)[\]}]", re.I)
@@ -77,6 +77,50 @@ def title_key(title: str | None) -> str:
     t = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
     t = t.casefold().replace("&", " and ")
     return re.sub(r"[^a-z0-9]+", "", t)
+
+
+# Editions (owner 2026-10-21): another version of a show or film, kept as a title of its own beside the plain one
+# ("MASH" and "MASH (No Laugh Track)"); both match the same TMDB title for their information. Only cuts and versions
+# that change what you watch count, not release words (Remastered, Criterion, Limited...). Plex's
+# "{edition-Name}" tag names one too.
+_EDITION_RE = re.compile(
+    r"(?<![a-z0-9])(?:"
+    r"no[ ._-]*(?:canned[ ._-]*)?laugh(?:ter|s)?(?:[ ._-]*track)?|"
+    r"laugh(?:ter)?[ ._-]*track[ ._-]*(?:removed|free)|"
+    r"without[ ._-]+(?:the[ ._-]+)?(?:canned[ ._-]+)?laugh(?:ter|s)?(?:[ ._-]*track)?|laughless|"
+    r"director'?s[ ._-]*cut|extended(?:[ ._-]+(?:cut|edition))?|unrated|uncut|theatrical(?:[ ._-]+cut)?|"
+    r"final[ ._-]+cut|alternat(?:e|ive)[ ._-]+cut|ultimate[ ._-]+(?:cut|edition)|imax|colou?ri[sz]ed"
+    r")(?![a-z0-9])", re.I)
+_PLEX_EDITION_RE = re.compile(r"\{edition-([^}]+)\}", re.I)
+
+
+def edition_of(name: str | None) -> str | None:
+    """The edition a folder or file name says ("MASH (no canned laughter)" -> "No Canned Laughter"), else None."""
+    if not name:
+        return None
+    if m := _PLEX_EDITION_RE.search(name):
+        return " ".join(m.group(1).split()) or None
+    for m in _EDITION_RE.finditer(name):
+        before = name[:m.start()].rstrip(" ._")
+        # a cut's words count only set apart from the name ("Aliens (1986) Director's Cut", "[Final Cut]",
+        # "Film - Extended"), never as part of it ("Uncut Gems", "The Final Cut"); laugh-track words always do
+        if not ("laugh" in m.group(0).lower() or before.endswith(("(", "[", "{", "-"))
+                or re.search(r"(?:19|20)\d\d\)?$", before)):
+            continue
+        words = re.split(r"[ ._-]+", m.group(0).strip(" ._-"))
+        label = " ".join(w[:1].upper() + w[1:].lower() for w in words if w)
+        return {"Directors Cut": "Director's Cut", "Imax": "IMAX"}.get(label, label)
+    return None
+
+
+def _without_edition(title: str | None) -> str | None:
+    """The name without its edition words ("Blade Runner - Final Cut" -> "Blade Runner")."""
+    if not title:
+        return title
+    t = _PLEX_EDITION_RE.sub(" ", title)
+    t = _EDITION_RE.sub(lambda m: " " if edition_of(t[:m.end()].strip()) else m.group(0), t)
+    t = re.sub(r"\s{2,}", " ", re.sub(r"[\s(\[{-]+$|\(\s*\)|\[\s*\]", " ", t)).strip(" -–:")
+    return t or title
 
 
 def _unquote(s: str) -> str:
@@ -313,6 +357,11 @@ def parse_episode(rel: str) -> Parsed:
         gd = _read(_clean_dir(show_dir), "episode", folder=True)
         p.title = _title(gd)
         p.year = _folder_year(_clean_dir(show_dir), _int(gd.get("year")))
+        # "MASH (No Laugh Track)/Season 1/...": another version of the show, kept apart (the show folder only:
+        # a word in one file's name mustn't split a show)
+        p.edition = edition_of(show_dir)
+        if p.edition:
+            p.title = _without_edition(p.title)
     if not p.title:
         p.title = _title(g)
     if p.year is None:
@@ -358,7 +407,7 @@ def parse_movie(rel: str) -> Parsed:
     p.title = _title(g)
     p.year = _int(g.get("year"))
     p.part = _int(g.get("part")) or _int(g.get("cd"))
-    p.edition = _str(g.get("edition"))
+    p.edition = edition_of(name) or (edition_of(dirs[-1]) if dirs else None)
 
     if dirs:  # "Movie (Year)/whatever.mkv": the folder is often the better name
         gd = _read(_clean_dir(dirs[-1]), "movie", folder=True)
@@ -373,6 +422,8 @@ def parse_movie(rel: str) -> Parsed:
             p.title = ft
         elif p.year is None:
             p.year = fy
+    if p.edition:
+        p.title = _without_edition(p.title)
     return p
 
 

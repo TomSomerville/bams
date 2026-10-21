@@ -123,10 +123,11 @@ def _fetch_title_images(tmdb: Tmdb, images: Path, d: dict) -> dict:
 
 def _apply_title(con: sqlite3.Connection, item_id: int, kind: str, d: dict, status: str, s: float | None) -> None:
     ext = d.get("external_ids") or {}
+    edition = (con.execute("SELECT edition FROM items WHERE id=?", (item_id,)).fetchone() or [None])[0]
     con.execute("""UPDATE items SET title=?, year=?, overview=?, tagline=?, genres=?, rating=?, runtime=?, air_date=?,
                    tmdb_id=?, imdb_id=?, tvdb_id=?, poster=?, backdrop=?, match_status=?, match_score=?,
                    metadata_at=?, updated_at=? WHERE id=?""", (
-        d.get("name") if kind == "show" else d.get("title"),
+        items.edition_name(d.get("name") if kind == "show" else d.get("title"), edition),  # "M*A*S*H (No Laugh Track)"
         _year(d.get("first_air_date") if kind == "show" else d.get("release_date")),
         d.get("overview") or None, d.get("tagline") or None,
         jdump([g["name"] for g in d.get("genres", [])]),
@@ -211,9 +212,12 @@ def _apply_seasons(con: sqlite3.Connection, tmdb: Tmdb, images: Path, show_id: i
 
 
 def _merge_duplicate(con: sqlite3.Connection, lib_id: int, kind: str, item_id: int, tmdb_id: int) -> int:
-    """If another title in the library already has this TMDB id, fold this one into it."""
-    other = con.execute("SELECT id FROM items WHERE library_id=? AND kind=? AND tmdb_id=? AND id<>? ORDER BY id LIMIT 1",
-                        (lib_id, kind, tmdb_id, item_id)).fetchone()
+    """If another title in the library already has this TMDB id, fold this one into it: the same show or film under
+    two folder names. Not another edition of it ("No Laugh Track"): that one keeps its own title, with the same
+    TMDB information (episode names, pictures)."""
+    other = con.execute("""SELECT id FROM items WHERE library_id=? AND kind=? AND tmdb_id=? AND id<>?
+                           AND COALESCE(edition, '') = COALESCE((SELECT edition FROM items WHERE id=?), '')
+                           ORDER BY id LIMIT 1""", (lib_id, kind, tmdb_id, item_id, item_id)).fetchone()
     if not other:
         return item_id
     items.merge_titles(con, other["id"], item_id)
