@@ -3,7 +3,7 @@
 import type { FileInfo } from "../src/api";
 import { ExoEngine } from "../src/engine";
 import type { FireInfo, FirePlayerEvent } from "../src/firetv";
-import { convertHeight, plan } from "../src/plan";
+import { convertHeight, plan, soundToAac } from "../src/plan";
 import { isBack } from "../src/tizen";
 import { eq, mount, ok, test } from "./harness";
 
@@ -128,6 +128,51 @@ test("Fire TV: an error before 'ready' fails the load (the player then falls bac
   await p.catch((err: Error) => { msg = err.message; });
   eq(msg, "ERROR_CODE_IO_BAD_HTTP_STATUS: 404", "rejection");
   e.destroy();
+}));
+
+test("Fire TV: a stall from the player reaches the player screen, its own load's only", () => withBridge(async () => {
+  let stalls = 0;
+  const e = new ExoEngine({ onTime: () => undefined, onEnd: () => undefined, onError: () => undefined,
+    onBuffering: () => undefined, onStall: () => void stalls++ });
+  const p = e.load("http://s/a", 0, false);
+  player({ id: 1, type: "ready" });
+  await p;
+  player({ id: 0, type: "stalled", t: 3 });
+  eq(stalls, 0, "an older load's stall");
+  player({ id: 1, type: "stalled", t: 41.5 });
+  eq(stalls, 1, "this load's stall");
+  eq(e.time(), 41.5, "where it stuck (the retry starts there)");
+  e.destroy();
+}));
+
+test("Fire TV: the player paused by the app (the background) shows as paused, and back", () => withBridge(async () => {
+  const seen: boolean[] = [];
+  const e = new ExoEngine({ onTime: () => undefined, onEnd: () => undefined, onError: () => undefined,
+    onBuffering: () => undefined, onPaused: (p) => void seen.push(p) });
+  const p = e.load("http://s/a", 0, false);
+  player({ id: 1, type: "ready" });
+  await p;
+  player({ id: 1, type: "time", t: 5, d: 100, paused: false });
+  player({ id: 1, type: "time", t: 115.2, d: 1300, paused: true });  // Video.park
+  ok(e.paused(), "paused");
+  player({ id: 1, type: "time", t: 115.2, d: 1300, paused: true });
+  e.play();
+  player({ id: 1, type: "time", t: 115.5, d: 1300, paused: false });
+  eq(JSON.stringify(seen), JSON.stringify([true]), "told once, and not for the page's own Play");
+  e.destroy();
+}));
+
+test("Fire TV: a stall with Dolby sound as-is retries once with AAC; others fall back as errors do", () => withBridge(() => {
+  const hls = (f: FileInfo) => ({ ...f, playback: { hls_url: "/api/files/1/hls" } }) as unknown as FileInfo;
+  const ac3 = hls(file("MKV", "H.264", 1920, 1080, "AC3"));
+  ok(soundToAac(ac3, 0, "direct", false, false), "AC3 played as-is");
+  ok(soundToAac(hls(file("MKV", "HEVC", 1920, 1080, "EAC3")), 0, "direct", false, false), "E-AC3 played as-is");
+  ok(!soundToAac(ac3, 0, "direct", false, true), "the AAC retry was made already");
+  ok(!soundToAac(hls(file("MP4", "H.264", 1920, 1080, "AAC")), 0, "direct", false, false), "AAC: not the sound");
+  ok(soundToAac(ac3, 0, "remux", true, false), "copy-HLS with the Dolby sound copied");
+  ok(!soundToAac(ac3, 0, "remux", false, false), "copy-HLS with the sound converted already");
+  ok(!soundToAac(ac3, 0, "convert", false, false), "a conversion");
+  ok(!soundToAac(file("MKV", "H.264", 1920, 1080, "AC3"), 0, "direct", false, false), "a server without FFmpeg");
 }));
 
 /** A file as plan() sees it. */

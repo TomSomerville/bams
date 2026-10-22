@@ -140,3 +140,16 @@ export function pickAudio(file: FileInfo): number {
   const byLang = lang ? tracks.find((t) => t.language === lang) : undefined;
   return (byLang ?? tracks.find((t) => t.default) ?? tracks[0]).index;
 }
+
+// sound a Fire TV may hand to the TV/receiver as-is (Caps.kt's passthrough encodings)
+const PASSED_AS_IS = new Set(["AC3", "EAC3", "DTS", "TrueHD"]);
+
+/** A Fire TV's player stalled (playing, the position stuck: Video.kt) or couldn't open its sound output. True: try
+ *  once more with the server converting only the sound to AAC, because Dolby/DTS sound went to the device as-is and
+ *  its one Dolby output can get stuck (refused, or the picture came and the sound never started). False: fall back as
+ *  for an error. `passed`: an HLS session's sound was copied; `noPass`: the AAC retry was made already. */
+export function soundToAac(file: FileInfo, audio: number, mode: Mode, passed: boolean, noPass: boolean): boolean {
+  if (noPass || !file.playback?.hls_url) return false;
+  const codec = file.probe?.audio[audio]?.codec;
+  return mode === "direct" ? !!codec && PASSED_AS_IS.has(codec) : mode === "remux" && passed;
+}

@@ -149,9 +149,10 @@ class MainActivity : Activity() {
         }
     }
 
-    // Home or another app in front: pause the video and the page; a pop-up over the app (Alexa) doesn't stop it
+    // Home, another app in front or the TV asleep: release the player (paused at its place) and pause the page; a
+    // pop-up over the app (Alexa) doesn't stop it. Back in front, the player is made again, still paused.
     override fun onStop() {
-        video.pause()
+        video.park()
         web.onPause()
         super.onStop()
     }
@@ -159,6 +160,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         web.onResume()
+        video.unpark()
     }
 
     override fun onDestroy() {

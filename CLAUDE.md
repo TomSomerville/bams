@@ -335,6 +335,10 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   released 0.15.0 APK): an APK signed with any other key won't install over a released one.
   Never commit either; a lost key means every Fire TV reinstalls and signs in again. Debug and release builds don't
   install over each other (`adb uninstall media.bams.firetv` first).
+- **The Fire TV app must not keep a player in the background** (`MainActivity.onStop` → `Video.park`): a paused
+  ExoPlayer held the device's one AC3 output through a day of standby, it jammed, and every later Dolby video hung or
+  was refused until a restart (2026-10-22). On the device: `dumpsys media.audio_flinger` (OFFLOAD thread "Blocked in
+  write: yes"). A stall or `ERROR_CODE_AUDIO_TRACK_*` with Dolby as-is retries as AAC (`plan.soundToAac`).
 - **A saved position of 0 doesn't mean playback was stuck:** `watch.record_progress` stores positions under
   `resume_after` as 0. To see whether a browser really played, read the traffic log (`netflow/*.jsonl`: how long each
   `/stream` request stayed open, and whether a second one followed), not `watch_state`.

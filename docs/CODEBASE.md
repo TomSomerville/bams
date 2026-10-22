@@ -159,7 +159,7 @@ bams/
 │   ├── vite.config.ts         Build as ONE classic deferred script (IIFE, ES2019): Tizen loads it from file://
 │   ├── scripts/wgt.mjs        Stage dist + manifest, sign with Tizen Studio profile (TIZEN_PROFILE, "BAMS"), --install/--run/--release
 │   ├── scripts/test.mjs       `npm test`: builds tv/test into one page, runs it in headless Chrome/Edge (CHROME_PATH) at 1920×1080, prints results
-│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), subtitles.test.ts (WebVTT parsing, the cue on screen at a time, Timing), avplay.test.ts (an overtaken AVPlay load leaves the player alone; fake webapis.avplay), firetv.test.ts (Fire TV bridge, ExoEngine, device caps; fake bridge), pckeys.test.ts (PC/remote keys, type-to-search), harness.ts (test/eq/mount), run.ts, index.html
+│   ├── test/                  nav.test.ts (spatial navigation on fixture pages with the app's CSS), hold.test.ts (holding OK), subtitles.test.ts (WebVTT parsing, the cue on screen at a time, Timing), avplay.test.ts (an overtaken AVPlay load leaves the player alone; fake webapis.avplay), firetv.test.ts (Fire TV bridge, ExoEngine incl. stalls and app-side pauses, soundToAac, device caps; fake bridge), pckeys.test.ts (PC/remote keys, type-to-search), harness.ts (test/eq/mount), run.ts, index.html
 │   └── src/
 │       ├── App.tsx            Phases (connect → link → main; adding another server), screen stack (routes carry `rid`; `root` lights the rail) + focus restore (`useFocusOnReady` → `settleFocus`), the one keydown handler (music media keys)
 │       ├── music.tsx          The TV's music player (one <audio>, queue, CUE stretches, conversion fallback; jump/move/remove for Up next); MusicProvider in main.tsx
@@ -172,9 +172,9 @@ bams/
 │       ├── nav.ts             Spatial navigation (reveal() works in unzoomed pixels: layoutRect; arrows → nearest focusable; rows remember focus; [data-group]/[data-entry]/[data-trap]; rail [data-side]: only Left enters, Right returns to the last page element; music bar [data-cover]; settleFocus: focus a screen once its content arrives)
 │       ├── hold.ts            Holding OK: on a [data-hold] element a long press sends "contextmenu" instead of a click (key-up before HOLD_MS = press; repeats = hold, for remotes without key-ups); App.tsx calls okDown/okUp
 │       ├── tizen.ts           Key codes, registerKeys, exit, device name, the TV's IP (webapis, else tizen.systeminfo; on a Fire TV the bridge's); a theatre PC's name from the user agent
-│       ├── firetv.ts          Fire TV bridge: window.BamsAndroid (device info + FireCaps, exit, player calls) and window.bamsHost (keys, player events); no-op elsewhere
-│       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface (AvplayEngine.load hands the player over once overtaken: `loads`)
-│       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, a PC's browser asked like the web's canDecode) → direct / remux / convert; convertHeight, pickFile, pickAudio
+│       ├── firetv.ts          Fire TV bridge: window.BamsAndroid (device info + FireCaps, exit, player calls) and window.bamsHost (keys, player events incl. `stalled`); no-op elsewhere
+│       ├── engine.ts          AvplayEngine (webapis.avplay) / ExoEngine (Fire TV, ExoPlayer via the bridge) / VideoEngine (<video> + hls.js) behind one interface (AvplayEngine.load hands the player over once overtaken: `loads`; ExoEngine also reports `onStall` and `onPaused`)
+│       ├── plan.ts            What the TV decodes (TV caps, Fire TV device caps incl. sizes, a PC's browser asked like the web's canDecode) → direct / remux / convert; convertHeight, pickFile, pickAudio; soundToAac (a Fire TV's stuck Dolby sound → retry as AAC)
 │       ├── vtt.ts             Text subtitles: parseVtt (the server's WebVTT → cues), cueAt (the cue at a player time, with the Timing control)
 │       ├── prefs.ts           Per-TV settings (always convert, DTS, languages, subtitle delay)
 │       ├── ListMenu.tsx       Hold-OK menu: on/off the watch list (`setListed` on the item's server), `useListName`
@@ -185,9 +185,9 @@ bams/
 │   ├── build.mjs              `cd tv && npm run firetv [-- --install --device <ip> --run --release]`: Gradle build, adb install, release APK → dist/BAMS-FireTV-<v>.apk
 │   ├── app/build.gradle.kts   copies tv/dist into assets/www each build; version from tv/package.json; release signing from keystore.properties (git-ignored)
 │   ├── app/src/main/java/media/bams/firetv/
-│   │   ├── MainActivity.kt    full-screen WebView over ExoPlayer's view; see-through page while playing; Back/OK/media keys → page (Samsung key codes); OK on a text box = simulated tap (keyboard)
+│   │   ├── MainActivity.kt    full-screen WebView over ExoPlayer's view; see-through page while playing; Back/OK/media keys → page (Samsung key codes); OK on a text box = simulated tap (keyboard); onStop/onStart park/unpark the player
 │   │   ├── Bridge.kt          window.BamsAndroid: device name/model/IP/version + caps, exit, player load/play/pause/seek/stop
-│   │   ├── Video.kt           ExoPlayer (one per load) under the page; events back to the page (firetv.ts FirePlayerEvent); its own text tracks off (the page draws subtitles)
+│   │   ├── Video.kt           ExoPlayer (one per load) under the page; events back to the page (firetv.ts FirePlayerEvent); its own text tracks off (the page draws subtitles); `park`/`unpark` release it in the background and remake it paused; `watch` sends `stalled` after 8 s stuck while playing
 │   │   └── Caps.kt            what this device decodes (Android codec list + audio output) in BAMS probe names, with sizes
 │   └── art.py                 launcher icons + TV banner from the logo (Pillow)
 ├── android/                  ── Android phone app (Android 8+): the server's web UI + downloads, offline pages (android/README.md) ──
@@ -794,7 +794,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | TV remote navigation | `tv/src/nav.ts` (`move`, `reveal`, `settleFocus`), key handling in `tv/src/App.tsx`, player keys + controls fade (`wake`, `OSD_HIDE`) in `Player.tsx`; tests `tv/test/nav.test.ts` (`cd tv && npm test`) |
 | Build / sign / install the TV app | `tv/README.md`, `tv/scripts/wgt.mjs`, `tv/tizen/config.xml` |
 | Build / sign / install the Fire TV app | `firetv/README.md`, `firetv/build.mjs`, `firetv/app/build.gradle.kts` (release key: `firetv/keystore.properties`, git-ignored) |
-| What a Fire TV plays as-is / how | `firetv/.../Caps.kt` (device caps) → `tv/src/plan.ts` `fireCaps`/`convertHeight`; player `Video.kt` ↔ `ExoEngine` (`tv/src/engine.ts`); keys `MainActivity.kt` |
+| What a Fire TV plays as-is / how | `firetv/.../Caps.kt` (device caps) → `tv/src/plan.ts` `fireCaps`/`convertHeight`; player `Video.kt` ↔ `ExoEngine` (`tv/src/engine.ts`); keys `MainActivity.kt`; stalls / refused Dolby sound → `Player.tsx` `stall`/`fail` + `plan.soundToAac` |
 | Web player quality menu sizes | `QUALITIES`, `qualityName`, `srcSize`/`maxSize`/`fullSize` in `web/src/pages/Player.tsx` (server side `stream._box`, `QUALITIES`) |
 | Who may call a route | `dependencies=ADMIN` / `me=Depends(current_user)` in `app.py`; public routes in `PUBLIC_API` |
 | Password / session rules | `auth.py` (`MIN_PASSWORD`, `SESSION_DAYS`, `_SCRYPT`, `Throttle`) |

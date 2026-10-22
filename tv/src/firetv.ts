@@ -21,7 +21,9 @@ export type FirePlayerEvent = { id: number } & (
   | { type: "time"; t: number; d: number | null; paused: boolean }
   | { type: "buffering"; on: boolean }
   | { type: "ended" }
-  | { type: "error"; message: string });
+  | { type: "error"; message: string }
+  // playing, but the position hasn't moved for a few seconds (the sound never started): once per load
+  | { type: "stalled"; t: number });
 
 type HostEvent = { type: "key"; code: number } | { type: "player"; event: FirePlayerEvent };
 

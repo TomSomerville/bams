@@ -15,6 +15,10 @@ export type EngineEvents = {
   onEnd: () => void;
   onError: (msg: string) => void;
   onBuffering: (b: boolean) => void;
+  /** Playing but stuck at one place (ExoPlayer only, Video.kt's stall watch): the player screen falls back. */
+  onStall?: () => void;
+  /** The player paused or went on by itself (ExoPlayer only: the Fire TV app parks it in the background). */
+  onPaused?: (paused: boolean) => void;
 };
 
 export interface Engine {
@@ -192,6 +196,7 @@ export class ExoEngine implements Engine {
       case "time":
         this.t = e.t;
         this.d = e.d;
+        if (e.paused !== this.isPaused) this.ev.onPaused?.(e.paused);
         this.isPaused = e.paused;
         this.ev.onTime(e.t);
         break;
@@ -210,6 +215,10 @@ export class ExoEngine implements Engine {
         } else {
           this.ev.onError(e.message);
         }
+        break;
+      case "stalled":
+        this.t = e.t;
+        this.ev.onStall?.();
         break;
     }
   }

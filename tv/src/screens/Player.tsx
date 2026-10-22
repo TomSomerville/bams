@@ -6,7 +6,7 @@ import { clock, sxe } from "../format";
 import Icon from "../Icon";
 import { setKeyHandler } from "../keys";
 import { focus, focusFirst } from "../nav";
-import { caps, convertHeight, pickAudio, pickFile, plan, type Mode } from "../plan";
+import { caps, convertHeight, pickAudio, pickFile, plan, soundToAac, type Mode } from "../plan";
 import { prefs, setPref } from "../prefs";
 import { QueuePanel } from "../Queue";
 import { entrySub, moveVideo, queueIndex, queueNext, removeVideo, useVideoQueue } from "../random";
@@ -122,7 +122,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
         // a Fire TV and a PC's browser take fMP4 (which keeps Dolby Vision; hls.js refuses E-AC-3 in MPEG-TS);
         // Dolby sound is copied when the device plays it (on a PC, until that failed once)
         const track = f.probe?.audio[s.audio];
-        s.passed = hasAvplay() || ((hasExo() || (pc() && !s.noPass)) && !!track && caps().audio.has(track.codec));
+        s.passed = hasAvplay() || ((hasExo() || pc()) && !s.noPass && !!track && caps().audio.has(track.codec));
         const r = await api.post<{ id: string; playlist: string }>(f.playback.hls_url, {
           remux: how.mode !== "convert", ts: !hasExo() && !pc(), audio: s.audio, channels: 6, start: at,
           passthrough: s.passed,
@@ -153,6 +153,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     const now = engine.current?.time() || s.startAt;
     const at = now > 0 ? now : s.startAt;
     const retry = (mode: Mode) => void renewTickets().then(() => begin(at, mode));
+    // a Fire TV whose Dolby output can't be opened (stuck since the last video: `stall`): the sound converted to AAC by
+    // the server, the video still copied, before converting everything
+    if (hasExo() && /^ERROR_CODE_AUDIO_TRACK_/.test(msg) && aacNext()) return retry("remux");
     // the stream played fine for a while, so it was lost (the server restarted), not unplayable: the same way again
     // first, rather than the server converting a video this device plays (once a minute, so a dead server ends here)
     if (s.mode && now > s.startAt + 10 && Date.now() - s.lostAt > 60000) {
@@ -175,6 +178,25 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     setError(msg || "This video couldn't be played.");
   };
 
+  /** Dolby sound went to the device as-is: the next try has the server convert it to AAC (once). */
+  const aacNext = () => {
+    const s = st.current;
+    if (!s.file || !s.mode || !soundToAac(s.file, s.audio, s.mode, s.passed, s.noPass)) return false;
+    s.noPass = true;
+    return true;
+  };
+
+  /** The Fire TV's player is playing but stuck at one place (Video.kt): with Dolby sound as-is, its one Dolby output
+   *  is likely stuck (the picture came, the sound never started), so the sound is converted to AAC; anything else
+   *  falls back as an error would. */
+  const stall = () => {
+    if (aacNext()) {
+      const at = engine.current?.time() || st.current.startAt;
+      return void renewTickets().then(() => begin(at, "remux"));
+    }
+    fail("The video stopped and didn't go on.");
+  };
+
   // load the title, make the engine, go
   useEffect(() => {
     document.documentElement.classList.add("playing");
@@ -195,6 +217,8 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
       },
       onError: (m: string) => fail(m),
       onBuffering: (b: boolean) => setBuffering(b),
+      onStall: () => stall(),
+      onPaused: (p: boolean) => setPaused(p),
     };
     engine.current = hasAvplay() ? new AvplayEngine(ev) : hasExo() ? new ExoEngine(ev) : new VideoEngine(videoRef.current!, ev);
     api.get<ItemDetail>(`/api/items/${id}`).then((d) => {

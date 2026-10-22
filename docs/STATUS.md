@@ -186,6 +186,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-19 | **Upcoming / Recent Holiday**: 16 holidays (US list + Lunar New Year, Day of the Dead, Hanukkah, Kwanzaa), dates **computed on the server** (no calendar service); a title belongs to one when its **title, tagline or overview** mentions it or (movies) its **TMDB keywords** do, and **admins override by hand** (Auto / In / Out, `holiday_tags`); matching runs once and is cached in memory | Owner: "I dont want these features to slow down the UI or playback" and chose "Words + TMDB". TMDB keywords come with the match request (no extra call); older movies are backfilled 50 per scan. Today counts as upcoming |
 | 10-19 | **Unidentified filter is web only** (admins; reuses `match_status` + Fix match) | The TV apps have no Fix match screen; it's for fast identification at a computer |
 | 10-19 | **Quick account switching with no PIN/password** between accounts already signed in on that browser (web) or PC (theatre mode); at most 5; web keeps the others' tokens in an **HttpOnly cookie** (`bams_others`), never in page storage; signing out moves to the next account. Not on the Samsung/Fire TV apps | Owner chose "Nothing" for switching; the cookie keeps tokens out of reach of page scripts. Theatre mode already keeps its own bearer token in `bams.theatre.*` storage, so its other accounts live there too |
+| 10-22 | **The Fire TV app releases its player whenever it isn't in front** (rebuilt paused at the same place on return), and Dolby sound that won't start is retried **as AAC from the server before a full conversion** | A player only paused in the background held the TV's one Dolby output through a day of standby; it stayed stuck and every later Dolby video hung (sound never started) or was refused. Converting only the sound keeps the picture as-is and costs the server little |
 | 10-19 | **No personal or machine-specific content in git** ([SECURITY-PRACTICES.md](SECURITY-PRACTICES.md)): the owner's machine details live in git-ignored `CLAUDE.local.md`; skills and `launch.json` are local only; `tools/privacy_check.py` runs as the pre-commit hook; commits use the GitHub no-reply email; history rewritten once to remove what had been committed | Owner's request, so the repo can be public |
 
 ## 4. Built so far
@@ -347,6 +348,10 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   on with the Samsung key codes; OK on a text box simulates a tap so the Fire TV keyboard opens. Files it decodes
   play from `/stream` (ExoPlayer seeks in them), others through copy-HLS in fMP4 or a conversion. Subtitles are the
   page's, as on Samsung: ExoPlayer's own text tracks are turned off and its subtitle view hidden (0.16.2).
+- In the background (Home, another app, the TV asleep) the player is **released** and made again paused at the same
+  place on return (`Video.park`/`unpark`), so it never holds the device's Dolby output. A player stuck at one place for
+  8 s (`stalled` event) or one whose sound output can't be opened (`ERROR_CODE_AUDIO_TRACK_*`) with Dolby/DTS sound
+  as-is retries once with the sound converted to AAC (copy-HLS, `plan.soundToAac`), then falls back as usual.
 - Build: `cd tv && npm run build && npm run firetv` (Gradle 8.11.1, JDK 17, Android SDK 35); `--install --device <ip>`
   over adb; `--release` signs with the release key and copies `dist/BAMS-FireTV-<v>.apk`. Tests in
   `tv/test/firetv.test.ts` (fake bridge).
@@ -411,8 +416,9 @@ Roughly in priority order:
    libraries is web-only (the TV only hides them); Samsung TVs other than the owner's 2022 Frame untested (codec table in
    `tv/src/plan.ts` from Samsung's specs); the released `.wgt` is signed for the owner's TV only (others re-sign it,
    README); no store build; Settings → Your TVs shows TVs of your own account only (admins can't see others').
-   Fire TV: video playback not yet tried on a real device (sign-in, Home, navigation, search and the keyboard were,
-   on a Fire TV in the owner's home); no Amazon Appstore build; Vega OS sticks (2025+) would need a separate app.
+   Fire TV: tried only on the owner's Fire TV (video plays there since 0.16.x); the stall watch (`Video.watch`) has
+   been seen only in tests, not on a real stall; no Amazon Appstore build; Vega OS sticks (2025+) would need a
+   separate app.
 8. **Watch list leftovers:** no music on it; renamed on the web only (the TV's rail picks a new name up at its next
    start, its Home at once); posters' bookmark needs a mouse (touch screens use the title page's button).
 9. **UI redesign** from the owner's mockups.
@@ -459,6 +465,32 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-10-22: Fire TV: player released in the background; stuck Dolby sound falls back to AAC (not released)
+- **What / why:** owner: "last night the fire tv app wouldnt load any videos", while web and Samsung played. The
+  server served every request normally. On the Fire TV (Fire OS 7, a Fire TV smart TV playing through its own
+  speakers), the app had only *paused* its player when the TV went to standby, keeping the device's single AC3 output
+  open for ~23 h; that output stayed jammed (`dumpsys media.audio_flinger`: OFFLOAD thread "Blocked in write: yes",
+  its track owned by the long-gone app process). Next evening every Dolby file showed a picture but never started
+  (no sound = no clock); the next day the TV refused the AC3 track outright (`createTrack returned error -38` →
+  `AudioTrack init failed`), which the page answered with a full conversion. Now: (1) `MainActivity.onStop` →
+  `Video.park()` releases the ExoPlayer (position, stream and chosen audio track kept), `onStart` → `unpark()` makes
+  it again **paused** there; the page hears "paused" (new `onPaused`, so the Play button is right too). (2) `Video.watch`
+  sends `stalled` once per load when playing and the position hasn't moved for 8 s. (3) The player screen
+  (`stall`, and `fail` for `ERROR_CODE_AUDIO_TRACK_*`) retries once with the server converting only the sound to AAC
+  when Dolby/DTS went to the device as-is (`plan.soundToAac`; Fire TV now honours `noPass` in `begin`), then falls back
+  to converting as before.
+- **Files:** `firetv/app/src/main/java/media/bams/firetv/{Video,MainActivity}.kt`, `tv/src/{engine,firetv,plan}.ts`,
+  `tv/src/screens/Player.tsx`, `tv/test/firetv.test.ts`.
+- **Verified:** TV tests 53/53 (3 new: stall reaches the screen for its own load only; `soundToAac` cases; paused
+  by the app shows as paused, once). Release build installed on the owner's Fire TV **with its AC3 output still
+  jammed**: a Dolby episode was refused, retried as "Video as-is, sound converted" and played (a 6-channel PCM track
+  from the app moving in `audio_flinger`); Home released the player (ExoPlayer "Release", no audio track, no decoders);
+  back in the app it stood paused at the same second with the Play button showing, and OK went on.
+- **Left open:** not released (the APK still says 0.17.0; bump `tv/package.json` with the next release). The `stalled`
+  path was only unit-tested (the jam gave an error that day, not a stall). While the output is jammed, each Dolby
+  video makes one failed try first (refused at once, or hangs 8 s) until the Fire TV restarts; nothing remembers it
+  between videos. The owner's Fire TV still needed a restart to clear the jam.
 
 ### 2026-10-21: Editions kept as separate titles (release 0.20.0)
 - **What / why:** owner: two versions of a show ("MASH" and "MASH (no canned laughter)") showed as one, like in Plex;
