@@ -3,6 +3,22 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## Fire TV app 0.17.1 (2026-10-25)
+
+### Added
+- **Holiday See all and Shuffle**, as in theatre mode: "See all" beside a holiday row's title; the holiday page has
+  All / Movies / Episodes, and Shuffle under Episodes (untracked: no progress, not in Continue Watching).
+- **The player shows when it ends**: the position above the bar on the left, the time left and the time it ends on
+  the right.
+
+### Fixed
+- **Videos wouldn't start after the Fire TV had been in standby with a video paused.** The app now lets go of the
+  player when it goes to the background and picks up paused at the same place when you come back. If Dolby or DTS
+  sound gets stuck on the device, the video is tried again with the sound converted instead of failing.
+
+`BAMS-FireTV-0.17.1.apk` is on the 0.20.1 release and installs over 0.16.2 or 0.17.0. The holiday page needs a
+server on 0.19.1 or newer (Shuffle: 0.19.1). The Samsung app stays on 0.17.0 until it's built on the Windows PC.
+
 ## 0.20.1 (2026-10-25)
 
 ### Added

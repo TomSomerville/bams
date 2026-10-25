@@ -482,7 +482,16 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** Samsung/Fire TV get (1) and (2) only with new app builds (not made); no server-side "don't track"
   setting (the client simply doesn't report).
 
-### 2026-10-22: Fire TV: player released in the background; stuck Dolby sound falls back to AAC (not released)
+### 2026-10-25: Fire TV app 0.17.1 released
+- **What / why:** owner: "do all updates and changes for the fire tv app". `tv/package.json` 0.17.1 (version code
+  1701): the 10-22 Fire TV fixes below plus 0.20.1's TV-page changes (holiday See all/chips/Shuffle, untracked Shuffle,
+  end time above the bar). Attached to the v0.20.1 release with `SHA256SUMS.txt` updated.
+- **Verified:** TV tests 54 passed, `tsc`; release APK signed with the Fire TV release key (certificate SHA-256 checked
+  equal to the released 0.16.2's), `aapt` shows 0.17.1 / 1701.
+- **Left open:** not installed on the owner's Fire TV by me (no adb to it from the Linux PC: other network); Samsung
+  0.17.1 `.wgt` needs the Windows PC.
+
+### 2026-10-22: Fire TV: player released in the background; stuck Dolby sound falls back to AAC (released in Fire TV 0.17.1)
 - **What / why:** owner: "last night the fire tv app wouldnt load any videos", while web and Samsung played. The
   server served every request normally. On the Fire TV (Fire OS 7, a Fire TV smart TV playing through its own
   speakers), the app had only *paused* its player when the TV went to standby, keeping the device's single AC3 output
@@ -503,7 +512,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
   jammed**: a Dolby episode was refused, retried as "Video as-is, sound converted" and played (a 6-channel PCM track
   from the app moving in `audio_flinger`); Home released the player (ExoPlayer "Release", no audio track, no decoders);
   back in the app it stood paused at the same second with the Play button showing, and OK went on.
-- **Left open:** not released (the APK still says 0.17.0; bump `tv/package.json` with the next release). The `stalled`
+- **Left open:** released in Fire TV 0.17.1 (2026-10-25). The `stalled`
   path was only unit-tested (the jam gave an error that day, not a stall). While the output is jammed, each Dolby
   video makes one failed try first (refused at once, or hangs 8 s) until the Fire TV restarts; nothing remembers it
   between videos. The owner's Fire TV still needed a restart to clear the jam.
