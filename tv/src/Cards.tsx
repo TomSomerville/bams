@@ -44,14 +44,18 @@ export function Wide({ img, title, sub, progress, fid, onPress, onFocus, onHold,
   );
 }
 
-/** A labelled horizontal shelf. */
-/** A row of cards. `all`: a "See all" card at its end (the holiday rows). */
+/** A row of cards. `all`: "See all" beside its title and as a card at its end (the holiday rows). */
 export function Shelf({ title, children, all }: {
   title: string; children: React.ReactNode; all?: { fid: string; onPress: () => void };
 }) {
   return (
     <section className="shelf">
-      <h2>{title}</h2>
+      {all ? (
+        <div className="shelf-head">
+          <h2>{title}</h2>
+          <button className="chip" data-fid={`${all.fid}-head`} onClick={all.onPress}>See all</button>
+        </div>
+      ) : <h2>{title}</h2>}
       <div className="shelf-row" data-row>
         {children}
         {all && <button className="card poster see-all" data-fid={all.fid} onClick={all.onPress}><span>See all</span></button>}

@@ -133,6 +133,9 @@ p { margin: 0; }
 
 .shelf { margin: 0 0 30px; }
 .shelf h2 { font-size: 32px; margin: 0 var(--gutter) 12px; }
+.shelf-head { display: flex; align-items: center; gap: 28px; margin: 0 var(--gutter) 12px; }
+.shelf-head h2 { margin: 0; }
+.shelf-head .chip { padding: 6px 22px; font-size: 24px; }
 .shelf-row { display: flex; gap: 26px; overflow: hidden; padding: 22px var(--gutter); }
 .grid { display: grid; grid-template-columns: repeat(7, 220px); gap: 44px 34px; padding: 10px 6px; }
 
@@ -207,6 +210,9 @@ html.pointer .osd.on button { pointer-events: auto; }
 .osd-sub { font-size: 30px; color: #d6dae2; }
 .osd-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 140px 80px 50px; background: linear-gradient(transparent, rgba(0, 0, 0, 0.88)); }
 .scrub { display: flex; align-items: center; gap: 30px; font-size: 28px; font-variant-numeric: tabular-nums; }
+/* above the bar: the position (left), the time left and when it ends (right), as on the web player */
+.scrub-times { display: flex; justify-content: space-between; gap: 30px; margin-bottom: 12px; font-size: 28px; font-variant-numeric: tabular-nums; }
+.scrub-times .ends-at { color: var(--muted); }
 .scrub-bar { flex: 1; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
 .scrub-fill { height: 100%; background: var(--brand-gradient); }
 .osd-buttons { display: flex; align-items: center; gap: 22px; margin-top: 30px; }

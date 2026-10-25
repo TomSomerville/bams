@@ -3,6 +3,21 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.20.1 (2026-10-25)
+
+### Added
+- **Theatre mode: when it ends.** The player shows the position above the timeline on the left and the time left
+  with the time it ends on the right ("-24:39 (5:24 PM)"), like the web player.
+- **Theatre mode: See all for the holiday rows**, beside the row's title. The holiday page has All / Movies /
+  Episodes, and under Episodes a **Shuffle** button, as on the web.
+
+### Changed
+- **Holiday Shuffle isn't tracked.** Episodes played through a holiday's Shuffle (web and theatre) keep no progress
+  and don't show up in Continue Watching. The same episode played from its own page is tracked as usual.
+
+Update the server with the new installer. The Samsung and Fire TV apps get the holiday page and player changes with
+their next builds.
+
 ## 0.20.0 (2026-10-21)
 
 ### Changed

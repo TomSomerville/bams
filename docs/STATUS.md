@@ -466,6 +466,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-10-25: Theatre player end time, theatre holiday See all + Shuffle, Shuffle kept out of Continue Watching (release 0.20.1)
+- **What / why:** owner: (1) theatre mode's player had no end time: the TV page's player now shows the position left
+  and "-time left (ends at)" right above the bar, like the web (Samsung/Fire TV too, with their next builds).
+  (2) Theatre had no visible "See all" for holiday rows (the card at the row's end was off screen): a "See all" button
+  beside the row's title; the holiday screen gets All / Movies / Episodes chips and Shuffle under Episodes.
+  (3) Shuffle must not land in Continue Watching: a holiday Shuffle queue is `untracked` (web `random.tsx`, TV
+  `random.tsx`) and the players send no progress and don't resume for videos reached through it (web navigation state
+  `shuffle`, TV player route `shuffle`): the same episode opened from its page later is tracked as usual.
+- **Files:** `tv/src/{App,Cards,random}.tsx`, `tv/src/screens/{Holiday,Player}.tsx`, `tv/src/styles.css`,
+  `tv/test/random.test.ts` (new); `web/src/random.tsx`, `web/src/pages/{HolidayPage,Player}.tsx`.
+- **Verified:** TV tests 54 passed, `tsc` web + tv. Theatre on a sandbox copy: See all beside the title, Episodes →
+  Right → Shuffle with the keys, times "-0:40 (10:11 AM)"; no `/progress` request during the shuffle and Continue
+  Watching empty; the same episode played from its page sent progress. Web Shuffle: no `/progress` either.
+- **Left open:** Samsung/Fire TV get (1) and (2) only with new app builds (not made); no server-side "don't track"
+  setting (the client simply doesn't report).
+
 ### 2026-10-22: Fire TV: player released in the background; stuck Dolby sound falls back to AAC (not released)
 - **What / why:** owner: "last night the fire tv app wouldnt load any videos", while web and Samsung played. The
   server served every request normally. On the Fire TV (Fire OS 7, a Fire TV smart TV playing through its own

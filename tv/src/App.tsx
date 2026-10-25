@@ -30,7 +30,8 @@ export type Route =
   | { name: "library"; id: number; rid?: number }
   | { name: "detail"; id: number; rid?: number }
   // sleep: sleep mode's count of episodes still to play after this one (Player.tsx), carried to the next episode
-  | { name: "player"; id: number; resume: boolean; rid?: number; sleep?: number }
+  // shuffle: reached through a holiday's Shuffle (random.tsx `untracked`: kept nowhere)
+  | { name: "player"; id: number; resume: boolean; rid?: number; sleep?: number; shuffle?: boolean }
   | { name: "playlist"; id: number; rid?: number }
   | { name: "my-playlist"; id: number; rid?: number }
   | { name: "search" }
@@ -346,7 +347,7 @@ export default function App() {
     <NavCtx.Provider value={nav}>
       <ScreenCtx.Provider value={{ fid: top.fid }} key={top.key}>
         {r.name === "player" ? (
-          <Player key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} resume={r.resume} sleep={r.sleep} />
+          <Player key={`${r.rid ?? ""}-${r.id}`} id={r.id} rid={r.rid} resume={r.resume} sleep={r.sleep} shuffle={r.shuffle} />
         ) : (
           <div className={`shell ${music.current ? "has-np" : ""}`}>
             <Rail />

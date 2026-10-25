@@ -224,6 +224,9 @@ function Player({ id }: { id: string }) {
   // Play Random (random.tsx): while this video is in the random queue, "next" is the queue's next, not the next episode
   const vq = useVideoQueue();
   const qAt = item ? vq.indexOf(item.id, rid) : -1;
+  // a holiday's Shuffle (random.tsx `untracked`): no progress sent, so it stays out of Continue Watching. Only when
+  // reached through the shuffle (navigation state `shuffle`): the same episode opened from its page later is tracked.
+  const untracked = vq.untracked && qAt >= 0 && !!(location.state as { shuffle?: unknown } | null)?.shuffle;
   const nextId = qAt >= 0 ? vq.items[qAt + 1]?.id ?? null : item?.next_id ?? null;
   const [showQueue, setShowQueue] = useState(false);
   const pb = file?.playback;
@@ -283,7 +286,7 @@ function Player({ id }: { id: string }) {
     const s = sl ? subTracks.find((x) => x.language === sl && !x.image && !x.forced) : undefined;
     setSub(s ? s.id : null);
     const p = item.progress;
-    const at = search.get("start") === "0" || !p || p.watched || p.position < 30 ? 0 : p.position;
+    const at = untracked || search.get("start") === "0" || !p || p.watched || p.position < 30 ? 0 : p.position;
     startAt.current = at;
     setOffset(at);
     setReqT(Number(at.toFixed(2)));
@@ -420,7 +423,7 @@ function Player({ id }: { id: string }) {
   posRef.current = pos;
   totalRef.current = total;
   const report = (position: number, keepalive = false) => {
-    if (!watchable || !played.current) return;
+    if (!watchable || untracked || !played.current) return;
     // no duration yet (a file the scan hasn't probed): the position is still worth keeping
     call.send("PUT", `/api/items/${id}/progress`,
       { position: Math.max(0, position), duration: totalRef.current || null }, keepalive).catch(() => {});
@@ -583,7 +586,8 @@ function Player({ id }: { id: string }) {
     if (!nextId) return;
     finished.current = done;  // the report on leaving says where this one ended
     // sleep mode counts down; going on by hand after it stopped means someone's awake: off
-    nav(to(`/play/${nextId}`), { replace: true, state: sleep ? { sleep: sleep - 1 } : undefined });
+    const state = { ...(sleep ? { sleep: sleep - 1 } : {}), ...(untracked ? { shuffle: true } : {}) };
+    nav(to(`/play/${nextId}`), { replace: true, state: Object.keys(state).length ? state : undefined });
   };
   const fullscreen = () => {
     if (appVideoFullscreen) return;  // the app is full screen already (below)
@@ -784,7 +788,7 @@ function Player({ id }: { id: string }) {
               <h3>Up next</h3>
               <button className="icon-btn subtle" onClick={() => setShowQueue(false)} aria-label="Close queue"><Icon name="close" size={18} /></button>
             </div>
-            <VideoQueueList at={qAt} jump={(qid) => { if (qid !== item.id) nav(to(`/play/${qid}`), { replace: true }); }} />
+            <VideoQueueList at={qAt} jump={(qid) => { if (qid !== item.id) nav(to(`/play/${qid}`), { replace: true, state: untracked ? { shuffle: true } : undefined }); }} />
           </div>
         )}
         <div className="player-controls">

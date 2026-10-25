@@ -21,6 +21,8 @@ type VideoQueue = {
   /** the queue's server (null: this one) */
   rid: number | null;
   items: VideoEntry[];
+  /** a holiday's Shuffle: what's watched from it is kept nowhere (no progress, not in Continue Watching) */
+  untracked: boolean;
   /** where `id` is in the queue (-1: not in it, so the player plays on as usual) */
   indexOf: (id: number, rid: number | null) => number;
   move: (from: number, to: number) => void;
@@ -28,7 +30,7 @@ type VideoQueue = {
   remove: (i: number) => void;
   clear: () => void;
   /** Play a random selection: `path` is "/api/libraries/3/random" or "/api/items/7/random". */
-  playRandom: (path: string, rid: number | null) => Promise<void>;
+  playRandom: (path: string, rid: number | null, opts?: { untracked?: boolean }) => Promise<void>;
 };
 
 const Ctx = createContext<VideoQueue | null>(null);
@@ -40,7 +42,7 @@ export function useVideoQueue(): VideoQueue {
 }
 
 const KEY = "bams.videoQueue";
-type Stored = { rid: number | null; items: VideoEntry[] };
+type Stored = { rid: number | null; items: VideoEntry[]; untracked?: boolean };
 
 function load(): Stored {
   try {
@@ -82,18 +84,18 @@ export function VideoQueueProvider({ children }: { children: ReactNode }) {
   const clear = useCallback(() => set({ rid: null, items: [] }), []);
 
   const { playTracks } = music;
-  const playRandom = useCallback(async (path: string, rid: number | null) => {
+  const playRandom = useCallback(async (path: string, rid: number | null, opts: { untracked?: boolean } = {}) => {
     const r = await callFor(rid).get<Random>(path);
     if (r.type === "music") {
       playTracks(r.tracks);  // already in random order
       return;
     }
     if (!r.items.length) return;
-    set({ rid, items: r.items });
-    nav(scopeLink(rid, `/play/${r.items[0].id}`));
+    set({ rid, items: r.items, untracked: !!opts.untracked });
+    nav(scopeLink(rid, `/play/${r.items[0].id}`), { state: opts.untracked ? { shuffle: true } : undefined });
   }, [playTracks, nav]);
 
-  const value = useMemo(() => ({ rid: q.rid, items: q.items, indexOf, move, remove, clear, playRandom }),
+  const value = useMemo(() => ({ rid: q.rid, items: q.items, untracked: !!q.untracked, indexOf, move, remove, clear, playRandom }),
     [q, indexOf, move, remove, clear, playRandom]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -416,4 +416,7 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   with one TMDB id only when their editions match (`_merge_duplicate`), and `_apply_title` puts the edition after the
   TMDB name. `parsed_title` stays the plain name (it's the TMDB search). Cut words count only set apart from the name
   (`parse.edition_of`): "Uncut Gems" and "The Final Cut" are films, not editions; add such names to `test_editions.py`.
+- **A holiday Shuffle is untracked** (`random.tsx` web + TV `untracked`): the players skip progress and resume only when
+  the video was reached through the shuffle (web navigation state `shuffle`, TV player route `shuffle`), never just
+  because its id is in the session's queue, or opening that episode normally later would go untracked too.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

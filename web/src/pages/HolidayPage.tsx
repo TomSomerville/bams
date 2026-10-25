@@ -32,7 +32,8 @@ export default function HolidayPage() {
   const shuffle = () => {
     setShuffling(true);
     setShuffleFailed(false);
-    playRandom(`/api/holidays/${which}/random?kind=episode`, null).catch(() => setShuffleFailed(true))
+    // untracked: random holiday viewing stays out of Continue Watching and keeps no progress
+    playRandom(`/api/holidays/${which}/random?kind=episode`, null, { untracked: true }).catch(() => setShuffleFailed(true))
       .finally(() => setShuffling(false));
   };
 

@@ -16,7 +16,8 @@ export type VideoEntry = {
   art: string | null;
 };
 type Random = { type: "music"; tracks: QueueTrack[] } | { type: "video"; items: VideoEntry[] };
-type Stored = { rid: number | null; items: VideoEntry[] };
+// untracked: a holiday's Shuffle: what's watched from it is kept nowhere (no progress, not in Continue Watching)
+type Stored = { rid: number | null; items: VideoEntry[]; untracked?: boolean };
 
 const KEY = "bams.videoQueue";
 const EMPTY: Stored = { rid: null, items: [] };
@@ -60,6 +61,16 @@ export function queueNext(id: number, rid: number | undefined): number | null | 
   return i < 0 ? undefined : state.items[i + 1]?.id ?? null;
 }
 
+/** Is video `id` of server `rid` playing from an untracked queue (a holiday's Shuffle)? */
+export function untracked(id: number, rid: number | undefined): boolean {
+  return !!state.untracked && queueIndex(id, rid) >= 0;
+}
+
+/** Make `items` (already in their order) the video queue. */
+export function startQueue(items: VideoEntry[], rid: number | undefined, opts: { untracked?: boolean } = {}) {
+  set({ rid: rid ?? null, items, untracked: !!opts.untracked });
+}
+
 export function moveVideo(from: number, to: number) {
   const list = [...state.items];
   if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return;
@@ -96,7 +107,7 @@ export function PlayRandomButton({ path, rid, fid = "random", chip = false }: {
       const r = await apiFor(rid).get<Random>(path);
       if (r.type === "music") music.playTracks(r.tracks, rid);  // already in random order
       else if (r.items.length) {
-        set({ rid: rid ?? null, items: r.items });
+        startQueue(r.items, rid);
         nav.push({ name: "player", id: r.items[0].id, rid, resume: false });
       }
     } catch {

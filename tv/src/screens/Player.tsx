@@ -9,7 +9,7 @@ import { focus, focusFirst } from "../nav";
 import { caps, convertHeight, pickAudio, pickFile, plan, soundToAac, type Mode } from "../plan";
 import { prefs, setPref } from "../prefs";
 import { QueuePanel } from "../Queue";
-import { entrySub, moveVideo, queueIndex, queueNext, removeVideo, useVideoQueue } from "../random";
+import { entrySub, moveVideo, queueIndex, queueNext, removeVideo, untracked, useVideoQueue } from "../random";
 import { isBack, KEY } from "../tizen";
 import { pc } from "../platform";
 import { cueAt, parseVtt, type Cue } from "../vtt";
@@ -23,9 +23,12 @@ const SLEEP_MORE = 2;    // sleep mode on an episode: this one, then this many m
 /** The player: the file as-is when the TV can (AVPlay decodes MKV/HEVC/AC3..., a Fire TV what its decoders take),
  *  else an HLS session from the server (sound converted, or everything converted). Saves the position like the web player does.
  *  `rid`: the item is on another of this TV's servers (api.ts); everything then goes to that one. */
-export default function Player({ id, resume, rid, sleep: sleeping }: { id: number; resume: boolean; rid?: number;
+export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { id: number; resume: boolean; rid?: number;
   /** sleep mode: episodes still to play after this one (0 = stop after it), carried over from the last episode */
-  sleep?: number }) {
+  sleep?: number;
+  /** reached through a holiday's Shuffle: while in its queue, nothing is kept (no progress, no Continue Watching) */
+  shuffle?: boolean }) {
+  const quiet = () => !!shuffle && untracked(id, rid);
   const api = apiFor(rid);      // this item's server
   const media = mediaFor(rid);
   const nav = useNav();
@@ -39,6 +42,11 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
   const [mode, setMode] = useState<Mode | null>(null);
   const [time, setTime] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [, setClockTick] = useState(0);  // the "ends at" time moves on while paused too
+  useEffect(() => {
+    const t = setInterval(() => setClockTick((n) => n + 1), 20_000);
+    return () => clearInterval(t);
+  }, []);
   const [buffering, setBuffering] = useState(true);
   const [osd, setOsd] = useState(true);
   // "find": Check OpenSubtitles, "findLang": its language list
@@ -78,10 +86,10 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
 
   const report = useCallback((keepalive = false, position?: number) => {
     const e = engine.current;
-    if (!e || !st.current.started) return;
+    if (!e || !st.current.started || quiet()) return;  // a holiday's Shuffle: kept nowhere
     const pos = position ?? e.time();
     void api.put(`/api/items/${id}/progress`, { position: pos, duration: duration() }, keepalive).catch(() => undefined);
-  }, [id]);
+  }, [id, rid, shuffle]);
 
   const closeSession = () => {
     const sid = st.current.session;
@@ -231,7 +239,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
       setFile(f);
       setAudio(a);
       setSub(s);
-      const at = resume ? d.progress?.position ?? 0 : 0;
+      const at = resume && !quiet() ? d.progress?.position ?? 0 : 0;
       void begin(at);
     }).catch((e) => {
       setBuffering(false);
@@ -320,7 +328,8 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
     const next = nextOf();
     // sleep mode counts down; going on by hand after it stopped means someone's awake: off
     const left = st.current.sleep;
-    if (next) nav.replace({ name: "player", id: next, rid, resume: true, sleep: left ? left - 1 : undefined });
+    if (next) nav.replace({ name: "player", id: next, rid, resume: true, sleep: left ? left - 1 : undefined,
+      shuffle: quiet() || undefined });
   };
 
   // the up-next countdown
@@ -445,6 +454,9 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
 
   const now = seekTo ?? time;
   const dur = duration();
+  // the web player's times (web/src/pages/Player.tsx): what's left, and when it will be done by this device's clock
+  const left = dur ? Math.max(0, dur - now) : null;
+  const endsAt = left !== null ? new Date(Date.now() + left * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
   const cue = cueAt(cues, now, subDelay);  // shown later by the timing set in the menu
   const show = item?.ancestors.find((a) => a.kind === "show");
   const title = show ? show.title : item?.title ?? "";
@@ -498,12 +510,14 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
           </>)}
         </div>
         <div className="osd-bottom">
-          <div className="scrub">
+          <div className="scrub-times">
             <span>{clock(now)}</span>
+            <span>{left !== null ? `-${clock(left)}` : clock(dur)}{endsAt && <span className="ends-at"> ({endsAt})</span>}</span>
+          </div>
+          <div className="scrub">
             <div className="scrub-bar">
               <div className="scrub-fill" style={{ width: dur ? `${Math.min(100, (now / dur) * 100)}%` : "0%" }} />
             </div>
-            <span>{clock(dur)}</span>
           </div>
           <div className="osd-buttons">
             <button className="round" data-fid="osd-play" onClick={toggle}><Icon name={paused ? "play" : "pause"} /></button>
@@ -531,7 +545,7 @@ export default function Player({ id, resume, rid, sleep: sleeping }: { id: numbe
       {queueOpen && qAt >= 0 && (
         <QueuePanel at={qAt} rows={vq.items.map((e) => ({ key: `${e.id}`, title: e.title, sub: entrySub(e) }))}
           onMove={moveVideo} onRemove={removeVideo}
-          onJump={(i) => { const v = vq.items[i]; if (v && v.id !== id) nav.replace({ name: "player", id: v.id, rid, resume: true }); }}
+          onJump={(i) => { const v = vq.items[i]; if (v && v.id !== id) nav.replace({ name: "player", id: v.id, rid, resume: true, shuffle: quiet() || undefined }); }}
           onClose={() => { setQueueOpen(false); setTimeout(() => focus(document.querySelector<HTMLElement>('[data-fid="osd-queue"]'))); }} />
       )}
       {(menu === "find" || menu === "findLang") && file && (
