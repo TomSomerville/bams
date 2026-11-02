@@ -145,7 +145,7 @@ bams/
 │           ├── Library.tsx    /library/:id grid, sort, filter chips (Upcoming / Recent holiday, admins' Unidentified = `match_status=pending,unmatched`, clicking one opens Fix match; genres); admins: Unrecognized tab (?tab=unrecognized) (music libraries → MusicLibrary)
 │           ├── Detail.tsx     /title/:id[?season=<season id>[&episode=<id>]]: show (season tabs → episodes, watched + watch list toggles; `episode` picked out) or movie (Resume, TechInfo); watch list buttons; music → MusicDetail
 │           ├── Watchlist.tsx  /watchlist: every server's watch list as one grid (useEverywhere + listedOrder), sort, kind chips, rename (`watchlist_name` pref), empty state
-│           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists tabs: your playlists + New playlist, then imported), artist page, album page + TrackList (add-to-playlist / download icons; `edit`: drag + take out), Fix match,
+│           ├── Music.tsx      MusicLibrary (Artists/Albums/Playlists/Genres tabs, kept in the address as `view`/`genre`; TopSongs + `/top-songs/:id`: your playlists + New playlist, then imported), artist page, album page + TrackList (add-to-playlist / download icons; `edit`: drag + take out), Fix match,
 │           │                  PlaylistPage (/playlist/:id, Make a copy), UserPlaylistPage (/my-playlist/:id), PlaylistCard + cover Mosaic
 │           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
 │           │                  (at the end and CREDITS = 30 s before it; next-episode button), skip +30 / −10 s (SKIP_*),
@@ -261,13 +261,14 @@ host get 403 (bearer requests can't be forged by another site). `CORSMiddleware`
 `me=Depends(current_user)`; admin routes have `dependencies=ADMIN`. Public: `/api/auth/state|login|setup`, the
 web UI, `/docs`.
 
-## 3. Data model (`db.py`, schema v17)
+## 3. Data model (`db.py`, schema v18)
 
 | Table | Holds | Key columns |
 |---|---|---|
 | `settings` | key/value | `server_id` (`/api/hello` `id`, made once), `tmdb_key`, `tmdb_verified_at`, `language`, `music_lookup` ("1"/"0", default on), `music_output` ("aac" default \| "flac": what unplayable music is converted to), `max_transcodes` (0 = automatic), `watched_percent` (default 90), `resume_after` (s, default 30), `video_encoder` (an `stream.ENCODERS` id; absent = automatic), `opensubtitles_key` (+ `opensubtitles_verified_at`), `opensubtitles_user`/`opensubtitles_password` (optional account) + `opensubtitles_account` (JSON: level, downloads a day) |
 | `libraries` | a library | `name` (unique), `type` movie\|show\|music, `scan_interval_hours`, `last_scan_at/status`, `sort_order` (v7: the admin's order; `library.ORDER`) |
 | `library_roots` | its folders | `library_id`, `path` (absolute, as given) |
+| `artist_popularity` | an artist's songs by listens worldwide | `item_id` (artist), `ranking` (JSON `[{mbid, title, listens}]`, best first, from ListenBrainz), `fetched_at` (asked again after 30 days) |
 | `items` | **what something is** | `kind` movie\|show\|season\|episode\|artist\|album\|track, `parent_id` (season→show, episode→season, album→artist, track→album), music: `sort_title`, `disc_number`, `track_number`, `artist` (track performer if not the album artist), `duration` (s), `mbid` (MusicBrainz release/artist/recording), `extra` (JSON: release group, type, Wikipedia link, photo credit, `matched_by` tag\|search\|manual…), `poster_src` (v8, JSON: where the poster came from: `{from: folder, file, size, mtime_ns}` \| `embedded` \| `caa` \| `commons`, or `{from: null, checked}`); `title`, `parsed_title`, `title_key`, `year`, `season_number`, `episode_number`, metadata (`overview`, `genres` JSON, `rating`, `runtime`, `air_date`, `tagline`), ids (`tmdb_id`, `imdb_id`, `tvdb_id`), art (`poster`, `backdrop`, `still` = paths under data/images), `match_status` pending\|matched\|unmatched\|manual, `match_score`, `metadata_at` |
 | `item_keys` | grouping aliases | (`library_id`, `kind`, `title_key`, `year`) → `item_id`; survives merges so renamed folders keep joining the same show. Merged albums: `kind='album'`, `title_key` = `music.album_alias(artist, album)` ("artistkey\|albumkey", names not ids) |
 | `files` | **actual files** | `root_id` + `rel_path` ('/'-separated, relative to root), `size`, `mtime_ns`, `quick_hash`, `parse` JSON (incl. `v` = parser version; `manual: true` when identified by hand; music: `cues` = the folder's cue sheets as [rel, size, mtime], `cue` = {sheet, tracks} when split), `probe` JSON (`pv` = `probe.PROBE_VERSION`; `cuesheet` when the tags hold one), `available`, `missing_since`, `manual` (v6: JSON identification entered by hand, used instead of the name) |
@@ -288,7 +289,7 @@ web UI, `/docs`.
 Schema changes: bump `SCHEMA_VERSION` and add a step to `db.MIGRATIONS` (`{version: fn}`). New databases are
 created at v1 and run every step too, so each step is exercised by every test. Before migrating an existing DB,
 `migrate()` copies it to `data/backups/bams-schema-v{N}-{time}.db`. v2 rebuilt `items` (SQLite can't change a
-CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. v16 adds `holiday_tags`. v17 adds `items.edition`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
+CHECK constraint) with foreign keys off; v3 only adds columns; v4 adds `users`, `sessions`, `watch_state`. v8 adds CUE columns, `poster_src`, playlists. v11 adds `continue_hidden`. v12 adds `watchlist`. v16 adds `holiday_tags`. v17 adds `items.edition`. v18 adds `artist_popularity`. Music items: tracks are 1:1 with files (Plex-style) except CUE images
 (one file, many tracks) and merged albums (one track, several files);
 albums are found by `(parent_id=artist, title_key)` from the *parsed* title, so renaming an album to its
 MusicBrainz title doesn't break grouping; artists use `item_keys` (`kind='artist'`).
@@ -665,6 +666,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/scans?library_id=` | current + history | — |
 | `GET /api/holidays` → `{next, recent, all}` · `GET /api/holidays/{which}/random?kind=episode\|movie` → `{type: "video", items}` (every one, random order, Specials included: Shuffle) · `GET /api/holidays/{next\|recent\|id}/items?library=&sort=title\|random&limit=` · `GET /api/items/{id}/holidays` · `PUT /api/items/{id}/holidays/{holiday} {tagged: true\|false\|null}` (admin) | Upcoming / Recent Holiday rows, pages and filters; admins' overrides | Home, HolidayPage (+ Shuffle → random.tsx `playRandom`), Library, HolidayTags; tv Home/Holiday/Library |
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` (comma list: `pending,unmatched` = Unidentified) | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
+| `GET /api/libraries/{id}/genres` | a music library's genres `[{name, count}]` by name, count = artists (`?genre=` on `/items?kind=artist` lists them) | Music Genres tab |
+| `GET /api/items/{id}/top-tracks?limit=` | an artist's songs in this library in ListenBrainz's order, a play queue with `listens`, + `total`; asks ListenBrainz when its ranking is missing or older than 30 days | artist page, Top Songs page |
 | `GET /api/genres` | every show/movie genre `[{name, count}]`, most titles first | Home, HomeSettings (genre rows) |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
 | `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback; a movie's/episode's unprobed files are probed now) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |

@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-10-19** (release 0.18.5).
+Last updated: **2026-11-02** (release 0.21.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -465,6 +465,24 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-02: Music: Genres tab, main artist only, Top Played Songs from ListenBrainz (release 0.21.0, Fire TV 0.18.0, Android 0.2.3)
+- **What / why:** owner, using the music player. (1) The genre chips above Artists/Albums were too many: a Genres tab,
+  a genre's artists below the list (web, TV page, offline phone pages). (2) Credits like "A;B" listed as artists: albums
+  go under the first name (`music.main_artist`, `PARSER_VERSION` 3); existing albums move with their art and
+  identification (`_album(was=)`). (3) Top Played Songs on the artist page, ten + See more. First built on the user's
+  own plays, then the owner said they meant stats from a website: **ListenBrainz** worldwide listens (open CC0 data, no
+  key, uses the MusicBrainz ids BAMS has; Last.fm would need each server's own key). Only songs in the library show,
+  since they must play. Schema v18 `artist_popularity`, 30 days per artist. No music plays are recorded.
+- **Files:** `server/bams/{music,musicbrainz,db,app}.py`, `server/tests/test_music_top.py` (new); `web/src/pages/Music.tsx`,
+  `web/src/phone/pages.tsx`, `web/src/{App.tsx,api.ts,styles.css}`; `tv/src/screens/Music.tsx`, `tv/src/{App.tsx,api.ts,styles.css}`.
+- **Verified:** server tests 417 passed (`test_encoder_choice_api`: the known Linux failure), TV tests 54, `tsc` web + tv.
+  Scratch server with generated tagged music: the credit split, Genres on the web and with the keys in theatre mode,
+  Back keeps the genre. Top Played Songs against the real ListenBrainz service on the web. Theatre's Top Played Songs
+  was walked with the earlier data source; only its credit line changed after.
+- **Left open:** names joined by "&" or "," aren't split; artists not identified on MusicBrainz show no Top Played
+  Songs; versions titled differently from ListenBrainz's recording don't match; not tried on the owner's real library
+  or on devices; the Samsung app stays on 0.17.0 until it's built on the Windows PC.
 
 ### 2026-10-25: Theatre player end time, theatre holiday See all + Shuffle, Shuffle kept out of Continue Watching (release 0.20.1)
 - **What / why:** owner: (1) theatre mode's player had no end time: the TV page's player now shows the position left

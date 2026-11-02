@@ -3,6 +3,24 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.21.0 (2026-11-02), Fire TV app 0.18.0, Android app 0.2.3
+
+### Added
+- **Music: a Genres tab.** Music opens on Artists, with Artists, Albums, Playlists and Genres at the top. Genres lists
+  every genre; pick one and its artists appear below. Artists and Albums no longer start with a wall of genre chips.
+- **Music: Top Played Songs on an artist's page**, after the buttons and before Albums: the artist's ten most listened
+  to songs that are in your library, worldwide figures from [ListenBrainz](https://listenbrainz.org). Press a song to
+  play it; **See more** opens all of them. It needs the artist to be identified on MusicBrainz and music lookups on
+  (Settings); the ranking is kept for 30 days.
+
+### Changed
+- **Albums are filed under their main artist.** "A;B" and "A feat. B" go under A, and the song still shows everyone on
+  it. Your existing albums move on the next scan and keep their art and identification. Names with "&" or a comma
+  aren't split, because they can be one name ("Simon & Garfunkel").
+
+Update the server with the new installer. Fire TV 0.18.0 and Android 0.2.3 install over the older ones. The Samsung app
+stays on 0.17.0 until it's built on the Windows PC. Top Played Songs and the Genres tab need a server on 0.21.0.
+
 ## Fire TV app 0.17.1 (2026-10-25)
 
 ### Added

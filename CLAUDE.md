@@ -66,6 +66,8 @@ Be security-conscious by default: when in doubt, leave it out and ask the owner.
    - **TMDB:** each user pastes their **own** key in Settings. There is **no shared/project key** (user decision).
      Attribution text must stay, and cached TMDB data/images must be refreshed within 6 months
      (`matcher.REFRESH_AFTER`).
+   - **ListenBrainz** (Top Played Songs): no key, open CC0 listen data. At most **1 request/second**
+     (`MusicBrainz.top_recordings`), send `USER_AGENT`, keep the "Listening stats from ListenBrainz" credit in the UI.
    - **OpenSubtitles:** each server's admin pastes their **own** API key too (owner's decision, 2026-10-11), although
      OpenSubtitles' terms ask for one key per app and say they may ban apps whose users bring their own. Send the
      `USER_AGENT` ("BAMS v<version>"), stay under 5 requests/second (`opensubtitles._throttle`), never retry a login
@@ -419,4 +421,14 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **A holiday Shuffle is untracked** (`random.tsx` web + TV `untracked`): the players skip progress and resume only when
   the video was reached through the shuffle (web navigation state `shuffle`, TV player route `shuffle`), never just
   because its id is in the session's queue, or opening that episode normally later would go untracked too.
+- **An artist is the first credited name** (`music.main_artist`): `;`, NUL, " / " and feat/ft/featuring separate; "&",
+  "," and "/" without spaces never do (names). `items.artist` keeps the whole credit for showing. `_album(was=)` moves an
+  album filed under a whole credit by an older parser, keeping its art and identification.
+- **Music genres come from the tracks, not `items.genres` of artists** (`music.library_genres`, `GENRE_ARTISTS`):
+  `rollup` keeps only five per artist, so a genre read there misses artists. Genre tab state is in the web page's
+  address (`view`, `genre`); Library's `tab=unrecognized` is another page's.
+- **Top Played Songs are ListenBrainz's worldwide listens, not your plays** (owner, 2026-11-02): BAMS records no music
+  plays. `/top-tracks` asks only for an artist with an `mbid` and with `music_lookup` on, outside any transaction, and
+  keeps a failed refresh's old ranking (`artist_popularity`, 30 days). Only songs in the library are shown (they must
+  play): found by recording id, then `title_key`; one song on several releases shows once.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
