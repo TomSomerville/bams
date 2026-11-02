@@ -1,11 +1,11 @@
 // Music on the TV, the same pages as the web's (web/src/pages/Music.tsx): a music library (Artists / Albums /
-// Playlists), an artist (bio, albums), an album (tracks by disc), a playlist. Playing goes to the TV's one music
+// Playlists / Genres), an artist (bio, top played songs, albums), an album (tracks by disc), a playlist. Playing goes to the TV's one music
 // player (music.tsx), which keeps going while you browse.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  apiFor, mediaFor, type ItemDetail, type ItemSummary, type Playlist, type PlaylistSummary, type QueueTrack, type UserPlaylist,
-  type UserPlaylistSummary,
+  apiFor, mediaFor, type ItemDetail, type ItemSummary, type MusicGenre, type Playlist, type PlaylistSummary, type QueueTrack,
+  type TopTracks, type UserPlaylist, type UserPlaylistSummary,
 } from "../api";
 import { qualityLine } from "../../../web/src/quality";
 import { AddToPlaylistMenu, EditPlaylistMenu, HoldMenu, NewPlaylistMenu, PlaylistTrackMenu } from "../PlaylistMenus";
@@ -19,10 +19,10 @@ import { QueuePanel } from "../Queue";
 import { PlayRandomButton } from "../random";
 import { session } from "../platform";
 
-const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists" } as const;
+const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
 type Tab = keyof typeof TABS;
 
-/** A music library: artists, albums or playlists. */
+/** A music library: artists, albums, playlists, or a genre's artists under the list of genres. */
 export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name: string }) {
   const nav = useNav();
   const key = rid === undefined ? `${id}` : `r${rid}.${id}`;
@@ -30,24 +30,43 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [lists, setLists] = useState<PlaylistSummary[] | null>(null);
   const [mine, setMine] = useState<UserPlaylistSummary[] | null>(null);
+  const [genres, setGenres] = useState<MusicGenre[] | null>(null);
+  const [genre, setGenre] = useState<string | null>(() => session.get(`bams.mgenre.${key}`));
   const [making, setMaking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const pressed = useRef(false);  // OK on a genre: the focus goes to its artists once they're here
 
   useEffect(() => {
     session.set(`bams.mtab.${key}`, tab);
     setItems(null);
     setLists(null);
+    setErr(null);
     const api = apiFor(rid);
-    if (tab === "playlist") {
+    if (tab === "genre") {
+      api.get<MusicGenre[]>(`/api/libraries/${id}/genres`).then(setGenres).catch((e) => setErr(e.message));
+      if (genre) {
+        session.set(`bams.mgenre.${key}`, genre);
+        api.get<ItemSummary[]>(`/api/libraries/${id}/items?kind=artist&sort=title&limit=5000&genre=${encodeURIComponent(genre)}`)
+          .then(setItems).catch((e) => setErr(e.message));
+      }
+    }
+    else if (tab === "playlist") {
       api.get<PlaylistSummary[]>(`/api/libraries/${id}/playlists`).then(setLists).catch((e) => setErr(e.message));
       api.get<UserPlaylistSummary[]>("/api/user-playlists").then(setMine).catch(() => setMine([]));
     }
     else api.get<ItemSummary[]>(`/api/libraries/${id}/items?kind=${tab}&sort=${tab === "album" ? "artist" : "title"}&limit=5000`)
       .then(setItems).catch((e) => setErr(e.message));
-  }, [id, rid, tab, key]);
+  }, [id, rid, tab, key, genre]);
 
-  useFocusOnReady(items !== null || lists !== null);
-  const count = tab === "playlist" ? (lists && mine ? lists.length + mine.length : undefined) : items?.length;
+  useEffect(() => {
+    if (!pressed.current || !items?.length) return;
+    pressed.current = false;
+    focusId(`m-${items[0].id}`);
+  }, [items]);
+
+  useFocusOnReady(items !== null || lists !== null || genres !== null);
+  const count = tab === "playlist" ? (lists && mine ? lists.length + mine.length : undefined)
+    : tab === "genre" && !genre ? genres?.length : items?.length;
 
   return (
     <div className="page">
@@ -62,7 +81,22 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
         <PlayRandomButton chip path={`/api/libraries/${id}/random`} rid={rid} />
       </div>
       {err && <p className="error big">{err}</p>}
-      {items === null && lists === null && !err && <div className="spinner" />}
+      {items === null && lists === null && !err && (tab !== "genre" || !genres || genre) && <div className="spinner" />}
+      {tab === "genre" && genres && !genres.length && <p className="muted big">None of this library's songs have a genre in their tags.</p>}
+      {tab === "genre" && !!genres?.length && (
+        <>
+          <div className="chips genre-list">
+            {genres.map((g, i) => (
+              <button key={g.name} data-fid={`genre-${i}`} className={`chip ${genre === g.name ? "on" : ""}`}
+                onClick={() => {
+                  if (genre === g.name && items?.length) focusId(`m-${items[0].id}`);
+                  else { pressed.current = true; setGenre(g.name); }
+                }}>{g.name} <small>{g.count}</small></button>
+            ))}
+          </div>
+          {!genre && <p className="muted big">Pick a genre to see its artists.</p>}
+        </>
+      )}
       {tab === "playlist" && (
         <>
           <h2 className="list-head">Your playlists</h2>
@@ -84,9 +118,9 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
             created={(p) => { setMaking(false); nav.push({ name: "my-playlist", id: p.id, rid }); }} />}
         </>
       )}
-      {tab !== "playlist" && items && !items.length && <p className="muted big">Nothing here yet.</p>}
+      {tab !== "playlist" && (tab !== "genre" || genre) && items && !items.length && <p className="muted big">Nothing here yet.</p>}
       <div className="grid squares">
-        {tab !== "playlist" && items?.map((it) => (
+        {tab !== "playlist" && (tab !== "genre" || genre) && items?.map((it) => (
           <Square key={it.id} fid={`m-${it.id}`} rid={rid} img={it.poster} title={it.title} round={it.kind === "artist"}
             sub={it.kind === "album" ? [it.parent_title, it.year].filter(Boolean).join(" · ") : `${it.child_count ?? 0} albums`}
             onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
@@ -135,6 +169,8 @@ function TrackList({ tracks, rid, numbered = false, showAlbum = false, onHold }:
   );
 }
 
+const TOP_SONGS = 10;
+
 /** An artist's or an album's page. */
 export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
   const nav = useNav();
@@ -143,11 +179,15 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
   const [tracks, setTracks] = useState<QueueTrack[] | null>(null);
   const [adding, setAdding] = useState<{ items: number[]; title: string; fid: string } | null>(null);
   const isAlbum = item.kind === "album" || item.kind === "track";
+  const [top, setTop] = useState<TopTracks | null>(null);
   useEffect(() => {
+    // an older server has no such list: the page just goes without it
+    if (item.kind === "artist") apiFor(rid).get<TopTracks>(`/api/items/${item.id}/top-tracks?limit=${TOP_SONGS}`)
+      .then(setTop).catch(() => setTop({ tracks: [], total: -1 }));
     if (isAlbum) apiFor(rid).get<QueueTrack[]>(`/api/items/${item.kind === "track" && item.parent_id ? item.parent_id : item.id}/tracks`)
       .then(setTracks).catch(() => setTracks([]));
   }, [item.id, item.kind, item.parent_id, rid, isAlbum]);
-  useFocusOnReady(!isAlbum || tracks !== null);
+  useFocusOnReady(isAlbum ? tracks !== null : top !== null);
 
   const artist = item.kind === "album" ? item.ancestors.find((a) => a.kind === "artist") : null;
   const x = item.extra ?? {};
@@ -189,17 +229,76 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
           </div>
         </div>
       </div>
+      {top && top.total >= 0 && (
+        <>
+          <h2 className="list-head">Top Played Songs</h2>
+          {top.tracks.length ? <TrackList tracks={top.tracks} rid={rid} numbered showAlbum
+            onHold={(i) => setAdding({ items: [top.tracks[i].id], title: top.tracks[i].title, fid: `t-${top.tracks[i].id}-${i}` })} />
+            : <p className="muted big">ListenBrainz has no listening stats for this artist's songs here.</p>}
+          <p className="credit">Listening stats from ListenBrainz.</p>
+          {top.total > TOP_SONGS && (
+            <button className="chip see-more" data-fid="top-more" onClick={() => nav.push({ name: "top-songs", id: item.id, rid })}>See more</button>
+          )}
+        </>
+      )}
       {item.kind === "artist" && (
+        <>
+        <h2 className="list-head">Albums</h2>
         <div className="grid squares">
           {item.children.map((a) => (
             <Square key={a.id} fid={`alb-${a.id}`} rid={rid} img={a.poster} title={a.title} sub={a.year ? String(a.year) : null}
               onPress={() => nav.push({ name: "detail", id: a.id, rid })} />
           ))}
         </div>
+        </>
       )}
       {isAlbum && tracks && <TrackList tracks={tracks} rid={rid}
         onHold={(i) => setAdding({ items: [tracks[i].id], title: tracks[i].title, fid: `t-${tracks[i].id}-${i}` })} />}
       {adding && <AddToPlaylistMenu items={adding.items} title={adding.title} rid={rid}
+        onClose={() => { const back = adding.fid; setAdding(null); setTimeout(() => focusId(back)); }} />}
+    </div>
+  );
+}
+
+/** Every song of an artist in this library, most listened to worldwide first. */
+export function TopSongsScreen({ id, rid }: { id: number; rid?: number }) {
+  const music = useMusic();
+  const [adding, setAdding] = useState<{ track: QueueTrack; fid: string } | null>(null);
+  const [artist, setArtist] = useState<ItemDetail | null>(null);
+  const [top, setTop] = useState<TopTracks | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const media = mediaFor(rid);
+  useEffect(() => {
+    const api = apiFor(rid);
+    api.get<ItemDetail>(`/api/items/${id}`).then(setArtist).catch((e) => setErr(e.message));
+    api.get<TopTracks>(`/api/items/${id}/top-tracks?limit=1000`).then(setTop).catch((e) => setErr(e.message));
+  }, [id, rid]);
+  useFocusOnReady(artist !== null && top !== null);
+  if (err) return <div className="page"><p className="error big">{err}</p></div>;
+  if (!artist || !top) return <div className="page"><div className="spinner" /></div>;
+  return (
+    <div className="page music-detail">
+      <div className="detail-top">
+        {artist.poster ? <img className="music-cover round-art" src={media(artist.poster) ?? undefined} alt="" />
+          : <div className="music-cover no-art"><Icon name="music" size={90} /></div>}
+        <div className="detail-text">
+          <div className="eyebrow">Top Played Songs</div>
+          <h1>{artist.title}</h1>
+          <div className="meta">{top.total} songs</div>
+          <div className="button-row">
+            <button className="btn primary" data-autofocus data-fid="tplay" onClick={() => music.playTracks(top.tracks, rid)}>
+              <Icon name="play" size={30} /> Play
+            </button>
+            <button className="btn" data-fid="tshuffle" onClick={() => music.playTracks(top.tracks, rid, 0, true)}>
+              <Icon name="shuffle" size={30} /> Shuffle
+            </button>
+          </div>
+        </div>
+      </div>
+      <TrackList tracks={top.tracks} rid={rid} numbered showAlbum
+        onHold={(i) => setAdding({ track: top.tracks[i], fid: `t-${top.tracks[i].id}-${i}` })} />
+      <p className="credit">Listening stats from ListenBrainz.</p>
+      {adding && <AddToPlaylistMenu items={[adding.track.id]} title={adding.track.title} rid={rid}
         onClose={() => { const back = adding.fid; setAdding(null); setTimeout(() => focusId(back)); }} />}
     </div>
   );

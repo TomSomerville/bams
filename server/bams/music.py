@@ -38,10 +38,12 @@ from .parse import title_key
 
 log = logging.getLogger(__name__)
 
-PARSER_VERSION = 2  # bump to make the next scan re-read every music file's tags/path (2: CUE sheets)
+PARSER_VERSION = 3  # bump to make the next scan re-read every music file's tags/path (2: CUE sheets, 3: main artist)
 VARIOUS = "Various Artists"
 UNKNOWN_ARTIST = "Unknown Artist"
 UNKNOWN_ALBUM = "Unknown Album"
+POPULAR_REFRESH = 30 * 86400  # seconds a ListenBrainz ranking is kept before it's asked for again
+POPULAR_KEEP = 1000
 _VARIOUS_KEYS = {"variousartists", "various", "va", "compilations", "compilation", "soundtracks"}
 
 _DISC_DIR_RE = re.compile(r"^(?:cd|disc|disk)\s*[-_.]?\s*(\d{1,2})\b", re.IGNORECASE)
@@ -49,6 +51,10 @@ _TRAILING_BRACKET_RE = re.compile(r"\s*[\[(]([^\[\]()]*)[\])]\s*$")
 _YEAR_RE = re.compile(r"^(1[89]\d\d|2[01]\d\d)$")
 # "01 - Title", "01. Title", "01 Title", "1-03 Title" (disc-track), "103 Title" (disc 1, track 3)
 _NUM_PREFIX_RE = re.compile(r"^(?:(?P<disc>\d{1,2})[-.](?=\d{2}\D))?(?P<num>\d{1,3})(?:\s*[-._)]\s*|\s+)(?P<rest>\S.*)$")
+# Between artists in a tag: only what can't be part of a name. "&", "," and "and" stay ("Simon & Garfunkel",
+# "Earth, Wind & Fire"); so does a "/" without spaces ("AC/DC").
+_ARTIST_SEP_RE = re.compile(r"[;\x00]|\s+/\s+")
+_FEATURING_RE = re.compile(r"[\s(\[]+(?:feat|ft|featuring)\b\.?\s.*$", re.IGNORECASE)
 
 
 @dataclass
@@ -134,6 +140,23 @@ def _clean_title(stem: str, artist: str | None, album: str | None) -> tuple[str,
     return title, track or None, disc
 
 
+def _artists(v: str) -> list[str]:
+    """Every name in an artist tag: 'A;B', 'A / B' -> ['A', 'B']."""
+    return [a for a in (x.strip() for x in _ARTIST_SEP_RE.split(v)) if a]
+
+
+def main_artist(v: str) -> str:
+    """Who a release is filed under: the first name in the tag, without its features ('A;B', 'A feat. B' -> 'A')."""
+    names = _artists(v)
+    return _FEATURING_RE.sub("", names[0]).strip() or names[0] if names else v.strip()
+
+
+def _performer(v: str | None, album_artist: str) -> str | None:
+    """Everyone on a track, for showing beside its title; None when that's just the album artist."""
+    credit = ", ".join(_artists(v or "")) or None
+    return None if credit and title_key(credit) == title_key(album_artist) else credit
+
+
 def _genres(v: str | None) -> list[str]:
     out: list[str] = []
     for g in re.split(r"[;\x00]", v or ""):
@@ -163,16 +186,13 @@ def parse_track(rel: str, probe: dict | None = None) -> Track:
         compilation = True
 
     t_artist, t_album = tags.get("artist"), tags.get("album")
-    album_artist = (tags.get("album_artist") or (VARIOUS if compilation else None) or t_artist
-                    or artist_dir or UNKNOWN_ARTIST).strip()
+    album_artist = main_artist(tags.get("album_artist") or (VARIOUS if compilation else None) or t_artist
+                               or artist_dir or UNKNOWN_ARTIST)
     album = (t_album or album_dir or UNKNOWN_ALBUM).strip()
     name_title, name_track, name_disc = _clean_title(stem, t_artist or artist_dir, t_album or album_dir)
-    performer = (t_artist or "").strip() or None
-    if performer and title_key(performer) == title_key(album_artist):
-        performer = None
     return Track(
         title=(tags.get("title") or "").strip() or name_title,
-        album=album, album_artist=album_artist, artist=performer,
+        album=album, album_artist=album_artist, artist=_performer(t_artist, album_artist),
         year=_year(tags.get("date")) or _year(tags.get("originaldate")) or dir_year,
         track=_num(tags.get("track")) or name_track,
         disc=_num(tags.get("disc")) or disc_dir or name_disc,
@@ -188,16 +208,13 @@ def parse_cue_tracks(rel: str, probe: dict | None, sheet: cue.CueSheet, block: c
     performer and titles come first; the file's own tags and folders fill what it leaves out."""
     base = parse_track(rel, probe)
     total = (probe or {}).get("duration")
-    album_artist = (sheet.performer or "").strip() or base.album_artist
+    album_artist = main_artist(sheet.performer or "") or base.album_artist
     out = []
     for ct in block.tracks:
         end = ct.end if ct.end is not None else total
-        performer = (ct.performer or "").strip() or None
-        if performer and title_key(performer) == title_key(album_artist):
-            performer = None
         out.append(Track(
             title=(ct.title or "").strip() or f"Track {ct.number}",
-            album=(sheet.title or "").strip() or base.album, album_artist=album_artist, artist=performer,
+            album=(sheet.title or "").strip() or base.album, album_artist=album_artist, artist=_performer(ct.performer, album_artist),
             year=_year(sheet.date) or base.year, track=ct.number, disc=base.disc,
             genres=_genres(sheet.genre) or base.genres,
             duration=round(end - ct.start, 3) if end is not None else None,
@@ -233,9 +250,11 @@ def album_alias(artist: str, title: str) -> str:
     return f"{title_key(artist) or artist.casefold()}|{title_key(title) or title.casefold()}"
 
 
-def _album(con: sqlite3.Connection, lib_id: int, artist: str, title: str) -> int:
+def _album(con: sqlite3.Connection, lib_id: int, artist: str, title: str, was: int | None = None) -> int:
     """Albums group by album artist + album title (so one album split over two folders stays one). An album
-    that was merged into another (same MusicBrainz release, music_match.merge_albums) goes to that one."""
+    that was merged into another (same MusicBrainz release, music_match.merge_albums) goes to that one. `was` = the
+    album the track is on now: filed under a whole credit ("A;B") by an older parser, it moves to its main artist
+    with its art and identification."""
     alias = con.execute("SELECT item_id FROM item_keys WHERE library_id=? AND kind='album' AND title_key=?",
                         (lib_id, album_alias(artist, title))).fetchone()
     if alias:
@@ -246,6 +265,11 @@ def _album(con: sqlite3.Connection, lib_id: int, artist: str, title: str) -> int
                       (artist_id, key)).fetchone()
     if row:
         return row["id"]
+    old = was and con.execute("""SELECT al.title_key, ar.title artist FROM items al JOIN items ar ON ar.id=al.parent_id
+                                 WHERE al.id=?""", (was,)).fetchone()
+    if old and old["title_key"] == key and title_key(main_artist(old["artist"])) == title_key(artist):
+        con.execute("UPDATE items SET parent_id=?, updated_at=? WHERE id=?", (artist_id, now(), was))
+        return was
     return _insert(con, lib_id, "album", title, parent_id=artist_id, parsed_title=title, title_key=key,
                    sort_title=sort_title(title))
 
@@ -258,14 +282,14 @@ def link_tracks(con: sqlite3.Connection, lib_id: int, file_id: int, tracks: list
     """(Re)attach a file to its track(s) (several for a CUE image), creating the artist/album as needed. Track
     rows are kept across re-reads (their ids are what playlists and history hang off), matched up by track
     number for CUE files; only their fields and album change."""
-    prev = con.execute("""SELECT i.id, i.match_status, i.track_number FROM file_items fi JOIN items i ON i.id=fi.item_id
+    prev = con.execute("""SELECT i.id, i.parent_id, i.match_status, i.track_number FROM file_items fi JOIN items i ON i.id=fi.item_id
                           WHERE fi.file_id=? AND i.kind='track' ORDER BY fi.cue_start, i.id""", (file_id,)).fetchall()
     con.execute("DELETE FROM file_items WHERE file_id=?", (file_id,))
     by_num = {p["track_number"]: p for p in prev}
     ids: list[int] = []
     for t in tracks:
         old = (by_num.pop(t.track, None) if len(tracks) > 1 else None) or (prev[0] if len(tracks) == 1 and prev else None)
-        album = _album(con, lib_id, t.album_artist, t.album)
+        album = _album(con, lib_id, t.album_artist, t.album, old["parent_id"] if old else None)
         cols = {"parent_id": album, "title": t.title, "parsed_title": t.title, "title_key": title_key(t.title),
                 "disc_number": t.disc, "track_number": t.track, "artist": t.artist, "year": t.year,
                 "duration": t.duration, "genres": jdump(t.genres) if t.genres else None}
@@ -299,6 +323,65 @@ def rollup(con: sqlite3.Connection, lib_id: int) -> None:
             acc.extend(g for g in jload(r["g"]) if g not in acc)
         con.execute("UPDATE items SET genres=NULL WHERE library_id=? AND kind=?", (lib_id, parent_kind))
         con.executemany("UPDATE items SET genres=? WHERE id=?", [(jdump(g[:5]), p) for p, g in genres.items()])
+
+
+# ------------------------------------------------------------------ genres and popularity
+
+def library_genres(con: sqlite3.Connection, lib_id: int) -> list[dict]:
+    """A library's genres by name, each with how many artists have a track in it. From the tracks: `rollup` keeps only
+    five per artist. "Hip-Hop" and "hip-hop" are one genre."""
+    return [dict(r) for r in con.execute("""
+        SELECT MIN(g.value) name, COUNT(DISTINCT al.parent_id) count
+        FROM items t JOIN items al ON al.id=t.parent_id, json_each(t.genres) g
+        WHERE t.library_id=? AND t.kind='track' AND t.genres IS NOT NULL
+        GROUP BY g.value COLLATE NOCASE ORDER BY name COLLATE NOCASE""", (lib_id,))]
+
+
+GENRE_ARTISTS = """id IN (SELECT al.parent_id FROM items t JOIN items al ON al.id=t.parent_id, json_each(t.genres) g
+                          WHERE t.library_id=? AND t.kind='track' AND t.genres IS NOT NULL
+                            AND g.value = ? COLLATE NOCASE)"""
+
+
+def popular_stale(con: sqlite3.Connection, artist_id: int) -> bool:
+    """No ListenBrainz ranking kept for this artist, or an old one."""
+    r = con.execute("SELECT fetched_at FROM artist_popularity WHERE item_id=?", (artist_id,)).fetchone()
+    return not r or now() - r["fetched_at"] > POPULAR_REFRESH
+
+
+def store_popular(con: sqlite3.Connection, artist_id: int, recordings: list[dict]) -> None:
+    """Keep ListenBrainz's ranking (musicbrainz.top_recordings): only what matching needs, the answer can be megabytes."""
+    ranking = [{"mbid": r.get("recording_mbid"), "title": r.get("recording_name"), "listens": r.get("total_listen_count") or 0}
+               for r in recordings[:POPULAR_KEEP]]
+    with Tx(con):
+        con.execute("""INSERT INTO artist_popularity(item_id, ranking, fetched_at) VALUES (?,?,?)
+                       ON CONFLICT(item_id) DO UPDATE SET ranking=excluded.ranking, fetched_at=excluded.fetched_at""",
+                    (artist_id, jdump(ranking), now()))
+
+
+def top_tracks(con: sqlite3.Connection, artist_id: int, limit: int) -> tuple[dict[int, int], int]:
+    """The artist's songs in this library in ListenBrainz's order: {track id: listens worldwide} (at most `limit`), and
+    how many there are in all. A song is found by its MusicBrainz recording, else by title; several copies of one song
+    (an album and a best-of) count once."""
+    r = con.execute("SELECT ranking FROM artist_popularity WHERE item_id=?", (artist_id,)).fetchone()
+    by_mbid: dict[str, int] = {}
+    by_title: dict[str, int] = {}
+    for t in con.execute("""SELECT t.id, t.mbid, t.title_key FROM items t JOIN items al ON al.id=t.parent_id
+                            WHERE al.parent_id=? AND t.kind='track' ORDER BY al.year IS NULL, al.year, t.id""", (artist_id,)):
+        if t["mbid"]:
+            by_mbid.setdefault(t["mbid"], t["id"])
+        if t["title_key"]:
+            by_title.setdefault(t["title_key"], t["id"])
+    found: dict[int, int] = {}
+    seen: set[str] = set()
+    for rec in (jload(r["ranking"]) if r else None) or []:
+        key = title_key(rec["title"])
+        if key in seen:  # the same song on several recordings: the best ranked one stands for it
+            continue
+        track = by_mbid.get(rec["mbid"]) or by_title.get(key)
+        if track and track not in found:
+            found[track] = rec["listens"]
+            seen.add(key)
+    return dict(list(found.items())[:limit]), len(found)
 
 
 # ------------------------------------------------------------------ artwork

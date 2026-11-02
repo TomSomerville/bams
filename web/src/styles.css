@@ -476,6 +476,13 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .track-time { color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .disc-head { display: flex; align-items: center; gap: 8px; padding: 18px 12px 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .music-section .tech-note { margin-top: 18px; }
+.music-section.top-songs { padding-bottom: 0; }
+.music-section.top-songs + .music-section { padding-top: 28px; }
+.top-songs .section-head { margin: 0 0 14px; }
+.top-songs .section-head h2 { margin: 0; }
+.top-songs .music-credits { margin-top: 12px; }
+/* many genres stay in their own scrolling box, so the artists are right below them */
+.genre-list { max-height: 34vh; overflow-y: auto; }
 .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
 .eq i { width: 3px; background: var(--cyan); border-radius: 1px; animation: eq 0.9s ease-in-out infinite alternate; }
 .eq i:nth-child(2) { animation-delay: -0.3s; }

@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth, fsbrowse, hls, identify, library, matcher, music_match, probe, readonly, stream, subtitles, watch
-from . import devices, holidays, netflow, opensubtitles, security, updates, user_playlists
+from . import devices, holidays, music, netflow, opensubtitles, security, updates, user_playlists
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
@@ -1453,9 +1453,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     @app.get("/api/libraries/{lib_id}/items")
     def library_items(lib_id: int, sort: str = "title", kind: str | None = None, match_status: str | None = None,
-                      q: str | None = None, limit: int = Query(500, le=5000), offset: int = 0, con=Depends(db),
-                      me=Depends(current_user)):
-        """Top-level items of a library: shows, movies, or (music, `kind=artist|album|track`) artists by default."""
+                      q: str | None = None, genre: str | None = None, limit: int = Query(500, le=5000), offset: int = 0,
+                      con=Depends(db), me=Depends(current_user)):
+        """Top-level items of a library: shows, movies, or (music, `kind=artist|album|track`) artists by default.
+        `genre`: a music library's artists with a track in that genre."""
         lib = library.get(con, lib_id)
         allowed = _LIB_KINDS[lib["type"]]
         if kind is not None and kind not in allowed:
@@ -1468,9 +1469,22 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         if q:
             where.append("title LIKE ?")
             args.append(f"%{q}%")
+        if genre:
+            if args[1] != "artist":
+                raise HTTPException(400, "only artists can be listed by genre")
+            where.append(music.GENRE_ARTISTS)
+            args += [lib_id, genre]
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {_SORTS.get(sort, _SORTS['title'])} "
                            "LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
         return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
+
+    @app.get("/api/libraries/{lib_id}/genres")
+    def library_genres(lib_id: int, con=Depends(db)):
+        """A music library's genres `[{name, count}]` by name; count = artists in it (Music: the Genres tab)."""
+        lib = library.get(con, lib_id)
+        if lib["type"] != "music":
+            raise HTTPException(400, f"a {lib['type']} library has no music genres")
+        return music.library_genres(con, lib_id)
 
     @app.get("/api/items")
     def all_items(kind: str = Query("show,movie", pattern="^(show|movie|artist|album|track)(,(show|movie|artist|album|track))*$"),
@@ -1725,6 +1739,22 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             return _queue(con, user_playlists.track_ids(con, item_id))
         except user_playlists.PlaylistError:
             raise HTTPException(404, "no such artist/album/track") from None
+
+    @app.get("/api/items/{item_id}/top-tracks")
+    def artist_top_tracks(item_id: int, limit: int = Query(10, ge=1, le=1000), con=Depends(db)):
+        """The artist's songs in this library, most listened to worldwide first (ListenBrainz), as a play queue with
+        `listens`; `total` = how many there are beyond `limit` too. Asks ListenBrainz when its ranking is missing or old
+        (never when the owner turned music lookups off), outside any transaction; if that fails, what's kept stands."""
+        r = con.execute("SELECT kind, mbid FROM items WHERE id=?", (item_id,)).fetchone()
+        if not r or r["kind"] != "artist":
+            raise HTTPException(404, "no such artist")
+        if r["mbid"] and music_lookup_enabled(con) and music.popular_stale(con, item_id):
+            with MusicBrainz() as mb:
+                recordings = mb.top_recordings(r["mbid"])
+            if recordings is not None:
+                music.store_popular(con, item_id, recordings)
+        listens, total = music.top_tracks(con, item_id, limit)
+        return {"tracks": [{**t, "listens": listens[t["id"]]} for t in _queue(con, list(listens))], "total": total}
 
     def _queue(con, ids: list[int]) -> list[dict]:
         """Tracks as a play queue, in the order of `ids` (a playlist may repeat one). A track with several files

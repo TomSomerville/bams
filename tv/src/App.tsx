@@ -20,7 +20,7 @@ import Accounts from "./screens/Accounts";
 import HolidayScreen from "./screens/Holiday";
 import Rail from "./Rail";
 import { useMusic } from "./music";
-import { NowPlaying, PlaylistScreen, UserPlaylistScreen } from "./screens/Music";
+import { NowPlaying, PlaylistScreen, TopSongsScreen, UserPlaylistScreen } from "./screens/Music";
 
 export type Route =
   | { name: "home" }
@@ -34,6 +34,7 @@ export type Route =
   | { name: "player"; id: number; resume: boolean; rid?: number; sleep?: number; shuffle?: boolean }
   | { name: "playlist"; id: number; rid?: number }
   | { name: "my-playlist"; id: number; rid?: number }
+  | { name: "top-songs"; id: number; rid?: number }
   | { name: "search" }
   | { name: "settings" }
   // theatre mode: the accounts signed in on this PC (Switch account)
@@ -360,6 +361,7 @@ export default function App() {
               {r.name === "search" && <Search />}
               {r.name === "playlist" && <PlaylistScreen id={r.id} rid={r.rid} />}
               {r.name === "my-playlist" && <UserPlaylistScreen key={r.id} id={r.id} rid={r.rid} />}
+              {r.name === "top-songs" && <TopSongsScreen key={r.id} id={r.id} rid={r.rid} />}
               {r.name === "settings" && <Settings />}
               {r.name === "accounts" && <Accounts />}
             </main>

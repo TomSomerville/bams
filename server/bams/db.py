@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -392,8 +392,16 @@ def _v17(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE items ADD COLUMN edition TEXT")
 
 
+def _v18(con: sqlite3.Connection) -> None:
+    """v18: each artist's songs ranked by listens worldwide, from ListenBrainz (Top Played Songs, owner 2026-11-02)."""
+    con.execute("""CREATE TABLE artist_popularity (
+        item_id    INTEGER PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,  -- an artist
+        ranking    TEXT NOT NULL,                 -- JSON: [{mbid, title, listens}], best first
+        fetched_at REAL NOT NULL)""")
+
+
 MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11,
-              12: _v12, 13: _v13, 14: _v14, 15: _v15, 16: _v16, 17: _v17}  # target version -> step
+              12: _v12, 13: _v13, 14: _v14, 15: _v15, 16: _v16, 17: _v17, 18: _v18}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

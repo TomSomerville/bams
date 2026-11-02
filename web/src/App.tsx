@@ -7,7 +7,7 @@ import { useMusic } from "./music";
 import Home from "./pages/Home";
 import Library from "./pages/Library";
 import Detail from "./pages/Detail";
-import { PlaylistPage, UserPlaylistPage } from "./pages/Music";
+import { PlaylistPage, TopSongsPage, UserPlaylistPage } from "./pages/Music";
 import Player from "./pages/Player";
 import Search from "./pages/Search";
 import Watchlist from "./pages/Watchlist";
@@ -55,12 +55,14 @@ export default function App() {
           <Route path="/title/:id" element={<Detail />} />
           <Route path="/playlist/:id" element={<PlaylistPage />} />
           <Route path="/my-playlist/:id" element={<UserPlaylistPage />} />
+          <Route path="/top-songs/:id" element={<TopSongsPage />} />
           {/* another BAMS server's pages (servers.tsx): the same pages, talking to that server */}
           <Route path="/r/:rid" element={<RemoteScope />}>
             <Route path="library/:id" element={<Library />} />
             <Route path="title/:id" element={<Detail />} />
             <Route path="playlist/:id" element={<PlaylistPage />} />
             <Route path="my-playlist/:id" element={<UserPlaylistPage />} />
+            <Route path="top-songs/:id" element={<TopSongsPage />} />
           </Route>
           <Route path="/search" element={<Search />} />
           <Route path="/settings" element={<Settings />} />

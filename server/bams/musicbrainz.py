@@ -1,4 +1,4 @@
-"""Online music metadata: MusicBrainz, Cover Art Archive, and Wikidata/Wikipedia/Wikimedia Commons.
+"""Online music metadata: MusicBrainz, Cover Art Archive, ListenBrainz and Wikidata/Wikipedia/Wikimedia Commons.
 
 No keys or accounts: all of these are open services. What their terms ask of us:
   - MusicBrainz (musicbrainz.org/doc/MusicBrainz_API): at most ~1 request/second, and a User-Agent naming
@@ -6,6 +6,8 @@ No keys or accounts: all of these are open services. What their terms ask of us:
     only core data; MusicBrainz's tags/genres are CC BY-NC-SA, so genres keep coming from the files' own tags.
   - Cover Art Archive: images belong to their rights holders; BAMS caches them for the owner's own library,
     the same way it caches TMDB posters. Nothing is redistributed (the repo ships no artwork).
+  - ListenBrainz (listenbrainz.readthedocs.io): listen data is CC0; at most 1 request/second, with a User-Agent. Top
+    Played Songs credits it in the UI.
   - Wikipedia text is CC BY-SA and Commons photos carry their own licences: the UI shows a link to the
     article and the photo's author + licence next to them.
 """
@@ -25,12 +27,15 @@ log = logging.getLogger(__name__)
 
 MB = "https://musicbrainz.org/ws/2"
 CAA = "https://coverartarchive.org"
+LB = "https://api.listenbrainz.org/1"
 USER_AGENT = f"BAMS/{VERSION} ( https://github.com/TomSomerville/bams )"
 _MB_INTERVAL = 1.1  # seconds between MusicBrainz requests (their limit is 1/s per client IP)
 VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"  # MusicBrainz's special "Various Artists"
 # The limit is per IP, so it's shared by every client in the process (scan worker + Fix match requests).
 _mb_lock = threading.Lock()
 _mb_last = [0.0]
+_lb_lock = threading.Lock()
+_lb_last = [0.0]
 
 
 class MusicLookupError(Exception):
@@ -128,6 +133,13 @@ class MusicBrainz:
             log.info("lookup failed %s: %s", url, e)
             return None
         return r.json() if r.status_code == 200 else None
+
+    def top_recordings(self, artist_mbid: str) -> list[dict] | None:
+        """ListenBrainz: the artist's recordings by listens worldwide, best first. None when it can't say right now."""
+        with _lb_lock:
+            time.sleep(max(0.0, _lb_last[0] + self.min_interval - time.monotonic()))
+            _lb_last[0] = time.monotonic()
+        return self._json(f"{LB}/popularity/top-recordings-for-artist/{artist_mbid}")
 
     def wikidata(self, qid: str) -> dict | None:
         d = self._json(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json")

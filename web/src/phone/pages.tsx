@@ -217,14 +217,16 @@ export function ShowsPage() {
   );
 }
 
-const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists" } as const;
+const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
 
 export function MusicPage() {
   const { lib } = useLib();
   const [tab, setTab] = useState<keyof typeof TABS>("artist");
+  const [genre, setGenre] = useState<string | null>(null);
   if (!lib) return <div className="page muted">Loading…</div>;
   const { artists, albums } = shelves(lib);
-  const n = tab === "artist" ? artists.length : tab === "album" ? albums.length : lib.playlists.length;
+  const genres = [...new Set(artists.flatMap((i) => i.genres))].sort((a, b) => a.localeCompare(b));
+  const n = tab === "artist" ? artists.length : tab === "album" ? albums.length : tab === "genre" ? genres.length : lib.playlists.length;
   return (
     <div className="page">
       <div className="page-head">
@@ -237,10 +239,16 @@ export function MusicPage() {
         <span className="count">{plural(n, tab)}</span>
       </div>
       {!n && <p className="muted">No {TABS[tab].toLowerCase()} downloaded.</p>}
+      {tab === "genre" && n > 0 && (
+        <div className="chips genre-list">
+          {genres.map((g) => <button key={g} className={`chip ${genre === g ? "on" : ""}`} onClick={() => setGenre(g)}>{g}</button>)}
+        </div>
+      )}
       <div className="grid">
         {tab === "artist" && artists.map((i) => <Card key={ik(i.sid, i.id)} it={i} round />)}
         {tab === "album" && albums.map((i) => <Card key={ik(i.sid, i.id)} it={i} square />)}
         {tab === "playlist" && lib.playlists.map((p) => <PlaylistCard key={`${p.sid}:${p.ref}`} p={p} />)}
+        {tab === "genre" && artists.filter((i) => genre && i.genres.includes(genre)).map((i) => <Card key={ik(i.sid, i.id)} it={i} round />)}
       </div>
     </div>
   );

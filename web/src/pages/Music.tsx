@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type {
-  ItemDetail, ItemSummary, Playlist, PlaylistSummary, QueueTrack, ServerLibrary, UserPlaylist, UserPlaylistSummary,
+  ItemDetail, ItemSummary, MusicGenre, Playlist, PlaylistSummary, QueueTrack, ServerLibrary, TopTracks, UserPlaylist,
+  UserPlaylistSummary,
 } from "../api";
 import { Backdrop, Poster } from "../components/Art";
 import { AlbumCard, ArtistCard } from "../components/Cards";
@@ -21,26 +22,32 @@ import { useApi } from "../useApi";
 const ALBUM_SORTS = { artist: "Artist", title: "Title", year: "Year", added: "Recently added" } as const;
 const ARTIST_SORTS = { title: "Name", added: "Recently added" } as const;
 
-const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists" } as const;
+const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
+type Tab = keyof typeof TABS;
 
 export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
   const { libName } = useScope();
-  const [tab, setTab] = useState<keyof typeof TABS>("artist");
+  // the tab and the genre are in the address: Back from an artist comes back to them
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = (params.get("view") as Tab) in TABS ? params.get("view") as Tab : "artist";
+  const genre = tab === "genre" ? params.get("genre") : null;
   const [albumSort, setAlbumSort] = useState<keyof typeof ALBUM_SORTS>("artist");
   const [artistSort, setArtistSort] = useState<keyof typeof ARTIST_SORTS>("title");
-  const [genre, setGenre] = useState<string | null>(null);
   const sort = tab === "album" ? albumSort : artistSort;
-  const { data: items } = useApi<ItemSummary[]>(
-    tab === "playlist" ? null : `/api/libraries/${lib.id}/items?kind=${tab}&sort=${sort}&limit=5000`);
+  const kind = tab === "album" ? "album" : "artist";
+  const listed = tab === "artist" || tab === "album" || !!genre;
+  const { data: items } = useApi<ItemSummary[]>(!listed ? null : `/api/libraries/${lib.id}/items?kind=${kind}&sort=${sort}&limit=5000${
+    genre ? `&genre=${encodeURIComponent(genre)}` : ""}`);
+  const { data: genres, error: genresError } = useApi<MusicGenre[]>(tab === "genre" ? `/api/libraries/${lib.id}/genres` : null);
   const { data: lists } = useApi<PlaylistSummary[]>(tab === "playlist" ? `/api/libraries/${lib.id}/playlists` : null);
   const { data: mine } = useApi<UserPlaylistSummary[]>(tab === "playlist" ? "/api/user-playlists" : null);
   const [making, setMaking] = useState(false);
   const nav = useNavigate();
   const { to } = useScope();
 
-  const genres = useMemo(() => [...new Set((items ?? []).flatMap((i) => i.genres))].sort(), [items]);
-  const list = (items ?? []).filter((i) => !genre || i.genres.includes(genre));
+  const list = listed ? items ?? [] : [];
   const sorts = tab === "album" ? ALBUM_SORTS : ARTIST_SORTS;
+  const pick = (next: Tab, g?: string) => setParams({ ...(next === "artist" ? {} : { view: next }), ...(g ? { genre: g } : {}) }, { replace: true });
 
   return (
     <div className="page">
@@ -49,15 +56,16 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
         <div className="segmented" role="tablist">
           {(Object.keys(TABS) as (keyof typeof TABS)[]).map((k) => (
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""}
-              onClick={() => { setTab(k); setGenre(null); }}>
+              onClick={() => pick(k)}>
               {TABS[k]}
             </button>
           ))}
         </div>
         {tab === "playlist" ? (lists && mine && <span className="count">{plural(lists.length + mine.length, "playlist")}</span>)
-          : items && <span className="count">{plural(list.length, tab)}</span>}
+          : listed ? items && <span className="count">{plural(list.length, kind)}</span>
+          : genres && <span className="count">{plural(genres.length, "genre")}</span>}
         <PlayRandomButton className="btn ghost small page-random" path={`/api/libraries/${lib.id}/random`} />
-        {tab !== "playlist" && <label className="sort">
+        {listed && <label className="sort">
           Sort
           <select value={sort} onChange={(e) => (tab === "album"
             ? setAlbumSort(e.target.value as keyof typeof ALBUM_SORTS)
@@ -88,18 +96,25 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
           {making && <NewPlaylistDialog onClose={() => setMaking(false)} created={(p) => nav(to(`/my-playlist/${p.id}`))} />}
         </>
       )}
-      {tab !== "playlist" && genres.length > 1 && (
-        <div className="chips">
-          <button className={`chip ${!genre ? "on" : ""}`} onClick={() => setGenre(null)}>All</button>
-          {genres.map((g) => (
-            <button key={g} className={`chip ${genre === g ? "on" : ""}`} onClick={() => setGenre(g)}>{g}</button>
-          ))}
-        </div>
+      {tab === "genre" && (
+        <>
+          {genresError && <p className="key-msg bad">{genresError}</p>}
+          {genres && !genres.length && <p className="muted">None of this library's songs have a genre in their tags.</p>}
+          {genres && genres.length > 0 && (
+            <div className="chips genre-list">
+              {genres.map((g) => (
+                <button key={g.name} className={`chip ${genre === g.name ? "on" : ""}`} aria-pressed={genre === g.name}
+                  onClick={() => pick("genre", g.name)}>{g.name}<span className="chip-count">{g.count}</span></button>
+              ))}
+            </div>
+          )}
+          {genres && genres.length > 0 && !genre && <p className="muted">Pick a genre to see its artists.</p>}
+        </>
       )}
-      {tab !== "playlist" && items && !items.length && (
+      {listed && !genre && items && !items.length && (
         <p className="muted">No music found in this library yet. Scans run in the background; check their status in Settings.</p>
       )}
-      {tab !== "playlist" && <div className="grid">
+      {listed && <div className="grid">
         {list.map((i) => (tab === "album" ? <AlbumCard key={i.id} item={i} /> : <ArtistCard key={i.id} item={i} />))}
       </div>}
     </div>
@@ -204,9 +219,71 @@ function ArtistView({ item, reload }: { item: ItemDetail; reload: () => void }) 
         </>}>
         <Actions item={item} reload={reload} />
       </Header>
+      <TopSongs item={item} />
       <section className="music-section">
         <h2>Albums</h2>
         <div className="grid">{item.children.map((a) => <AlbumCard key={a.id} item={a} showArtist={false} />)}</div>
+      </section>
+    </div>
+  );
+}
+
+const TOP_SONGS = 10;
+
+/** An artist's songs in this library that the world listens to most (ListenBrainz). "See more" opens all of them. */
+function TopSongs({ item }: { item: ItemDetail }) {
+  const { to } = useScope();
+  const { data } = useApi<TopTracks>(`/api/items/${item.id}/top-tracks?limit=${TOP_SONGS}`);
+  if (!data) return null;
+  return (
+    <section className="music-section top-songs">
+      <div className="section-head">
+        <h2>Top Played Songs</h2>
+        {data.total > TOP_SONGS && <Link to={to(`/top-songs/${item.id}`)} className="btn ghost small">See more</Link>}
+      </div>
+      {data.tracks.length ? <TrackList tracks={data.tracks} albumArtist={item.title} showAlbum numbered />
+        : <p className="muted">ListenBrainz has no listening stats for this artist's songs here.</p>}
+      <ListenBrainzCredit />
+    </section>
+  );
+}
+
+function ListenBrainzCredit() {
+  return <p className="music-credits muted">Listening stats from <a href="https://listenbrainz.org" target="_blank" rel="noreferrer">ListenBrainz</a></p>;
+}
+
+/** /top-songs/:id: every song of an artist in this library, most listened to worldwide first. */
+export function TopSongsPage() {
+  const { id } = useParams();
+  const music = useMusic();
+  const { to } = useScope();
+  const { data: artist, error } = useApi<ItemDetail>(`/api/items/${id}`);
+  const { data } = useApi<TopTracks>(`/api/items/${id}/top-tracks?limit=1000`);
+  if (error) return <div className="page"><h1>Artist not found</h1><p className="muted">{error}</p></div>;
+  if (!artist || !data) return <div className="page muted">Loading…</div>;
+  return (
+    <div className="detail music-detail">
+      <div className="detail-body music-head">
+        <div className="music-art round"><Poster src={artist.poster} title={artist.title} /></div>
+        <div className="detail-info">
+          <div className="hero-kicker">Top Played Songs</div>
+          <h1>{artist.title}</h1>
+          <div className="meta">
+            <Link to={to(`/title/${artist.id}`)} className="music-artist-link">Artist page</Link>
+            <span>{plural(data.total, "song")}</span>
+          </div>
+          {data.tracks.length > 0 && (
+            <div className="actions">
+              <button className="btn primary" onClick={() => music.playTracks(data.tracks)}><Icon name="play" /> Play</button>
+              <button className="btn ghost" onClick={() => music.playTracks(data.tracks, 0, true)}><Icon name="shuffle" /> Shuffle</button>
+            </div>
+          )}
+        </div>
+      </div>
+      <section className="music-section">
+        {data.tracks.length ? <TrackList tracks={data.tracks} albumArtist={artist.title} showAlbum numbered />
+          : <p className="muted">ListenBrainz has no listening stats for this artist's songs here.</p>}
+        <ListenBrainzCredit />
       </section>
     </div>
   );

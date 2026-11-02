@@ -371,6 +371,13 @@ export type QueueTrack = {
 };
 
 /** A playlist imported from a .m3u/.m3u8/.pls file in a music library. */
+/** GET /api/libraries/:id/genres: a music library's genres, `count` = artists in it. */
+export type MusicGenre = { name: string; count: number };
+
+/** GET /api/items/:id/top-tracks: the artist's songs in this library, most listened to worldwide first (ListenBrainz;
+ *  `total`: all of them, the list stops at `limit`). */
+export type TopTracks = { tracks: (QueueTrack & { listens: number })[]; total: number };
+
 export type PlaylistSummary = {
   id: number;
   library_id: number;
