@@ -80,3 +80,11 @@ Android only installs an update signed with the same key as the copy already ins
   downloads and sign-in).
 
 Bump `bamsVersion` in `gradle.properties` for every APK that goes to a phone.
+
+## Updates inside the app
+
+`Updater.kt` looks through the GitHub releases for the newest `BAMS-Android-<v>.apk` (not every release has one), so an
+APK can be added to an existing release. Release assets must keep that name. It's asked once a day when the app opens,
+and from Downloads; the download is checked against GitHub's `digest` for the asset and goes to Android's installer.
+Debug builds never update. To try it, build a release with an older number
+(`./gradlew assembleRelease -PbamsVersion=0.2.0`): it finds the real release and installs it over itself.

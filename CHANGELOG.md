@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## Android app 0.2.4 (2026-11-02)
+
+### Added
+- **The app updates itself from the GitHub releases.** When a newer version is out it asks, at most once a day; the
+  bottom of Downloads has **Check for updates** too. The first time, Android asks you to allow installs from BAMS. The
+  download is checked against the SHA-256 GitHub lists for it, and the app closes while it installs.
+
+`BAMS-Android-0.2.4.apk` is on the 0.21.0 release and installs over 0.2.3 by hand; later versions can update in the app.
+
 ## 0.21.0 (2026-11-02), Fire TV app 0.18.0, Android app 0.2.3
 
 ### Added

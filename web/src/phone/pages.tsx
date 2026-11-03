@@ -107,11 +107,38 @@ function Empty() {
   );
 }
 
-/** The app's version, at the bottom of Downloads (which build is on the phone). */
-function AppVersion() {
+/** The app's version, at the bottom of Downloads (which build is on the phone), and its update (Updater.kt). */
+function AppUpdate() {
   const [v, setV] = useState<string | null>(null);
-  useEffect(() => { app<{ version: string }>("info").then((i) => setV(i.version)).catch(() => {}); }, []);
-  return v ? <p className="fine-print">BAMS for Android {v}</p> : null;
+  const [update, setUpdate] = useState<{ version: string; size: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const check = () => app<{ version: string; size: number } | null>("updateCheck");
+  useEffect(() => {
+    app<{ version: string }>("info").then((i) => setV(i.version)).catch(() => {});
+    check().then(setUpdate).catch(() => {});  // offline: the button says so if they ask
+  }, []);
+  const install = () => {
+    setBusy(true);
+    setNote(null);
+    app("updateInstall").catch((e) => setNote(e.message)).finally(() => setBusy(false));
+  };
+  const look = () => {
+    setBusy(true);
+    setNote(null);
+    check().then((u) => { setUpdate(u); if (!u) setNote("This is the newest version."); })
+      .catch((e) => setNote(e.message)).finally(() => setBusy(false));
+  };
+  if (!v) return null;
+  return (
+    <div className="key-row">
+      {update ? <button className="btn small primary" disabled={busy} onClick={install}>
+        {busy ? "Downloading…" : `Update to ${update.version} (${fmtSize(update.size)})`}</button>
+        : <button className="btn small ghost" disabled={busy} onClick={look}>Check for updates</button>}
+      <span className="muted">BAMS for Android {v}</span>
+      {note && <p className="muted fine-print">{note}</p>}
+    </div>
+  );
 }
 
 export function DownloadsPage() {
@@ -168,7 +195,7 @@ export function DownloadsPage() {
           </ul>
         </>
       )}
-      <AppVersion />
+      <AppUpdate />
     </div>
   );
 }

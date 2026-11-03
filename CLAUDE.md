@@ -431,4 +431,10 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   plays. `/top-tracks` asks only for an artist with an `mbid` and with `music_lookup` on, outside any transaction, and
   keeps a failed refresh's old ranking (`artist_popularity`, 30 days). Only songs in the library are shown (they must
   play): found by recording id, then `title_key`; one song on several releases shows once.
+- **An Android-only APK goes on the current server release** (`gh release upload`, and add it to `SHA256SUMS.txt`), never
+  on a release of its own: that would become "latest", which the server's updater reads. `Updater.kt` finds the newest
+  `BAMS-Android-<v>.apk` across releases, so the name must stay. After the person allows installs in Android's settings
+  the install goes on by itself (`Updater.waiting`): the daily prompt alone would leave them stranded.
+- **Never `pkill -f` a pattern from a Bash tool call:** the pattern is in the shell's own command line, so it kills that
+  shell and whatever it was about to start.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

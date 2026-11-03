@@ -117,6 +117,17 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
     /** What only the app's own pages may do. */
     private fun appPage(m: JSONObject, done: (Any?) -> Unit, fail: (String) -> Unit, later: (() -> Any?) -> Unit) {
         when (m.optString("type")) {
+            "updateCheck" -> later { activity.updater.check()?.json() }
+            "updateInstall" -> Thread {  // not `later`: a download must not hold up the catalog's one worker
+                try {
+                    val r = activity.updater.check() ?: throw HttpError(0, "This is the newest version.")
+                    activity.updater.install(r)
+                    app.onMain { done(null) }
+                } catch (e: Exception) {
+                    Log.w(App.TAG, "update: ${e.message}")
+                    app.onMain { fail(e.message ?: "The update failed.") }
+                }
+            }.start()
             "library" -> done(app.store.library(app.servers).put("progress", app.progress.json()))
             "removeDownload" -> later { app.store.remove(m.getString("key")); app.emit("downloads"); null }
             "servers" -> later { servers(m.optBoolean("check")) }

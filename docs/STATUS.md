@@ -466,6 +466,18 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-11-02: The Android app updates itself from GitHub (Android 0.2.4)
+- **What / why:** owner asked to update the app from inside it. GitHub releases over a network share: they work away
+  from home, need no login, and already carry every APK. `Updater.kt` finds the newest APK across releases, verifies
+  GitHub's SHA-256, installs through `PackageInstaller`; prompt once a day, button on Downloads, own pages only.
+- **Files:** `android/.../Updater.kt` (new), `Bridge.kt`, `MainActivity.kt`, `AndroidManifest.xml`, `web/src/phone/pages.tsx`.
+- **Verified:** Android 16 emulator, the new code built as 0.2.0 against the real GitHub release: prompt found 0.2.3,
+  allow step, it carried on and installed over itself, the updated app reopened; the Downloads button did the same; real
+  0.2.4 says it's the newest. The emulator's test found the allow step dropped the update: fixed (`Updater.waiting`).
+- **Left open:** not tried on a real phone; a damaged download wasn't simulated.
+  An update during music or downloads closes the app.
+  Fire TV and Samsung have no in-app update.
+
 ### 2026-11-02: Music: Genres tab, main artist only, Top Played Songs from ListenBrainz (release 0.21.0, Fire TV 0.18.0, Android 0.2.3)
 - **What / why:** owner, using the music player. (1) The genre chips above Artists/Albums were too many: a Genres tab,
   a genre's artists below the list (web, TV page, offline phone pages). (2) Credits like "A;B" listed as artists: albums

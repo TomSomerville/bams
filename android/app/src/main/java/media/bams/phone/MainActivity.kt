@@ -45,6 +45,8 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var bridge: Bridge
     private lateinit var music: Music
+    lateinit var updater: Updater
+        private set
     private val app get() = application as App
     private val main = Handler(Looper.getMainLooper())
     private var fullscreen: View? = null
@@ -166,6 +168,8 @@ class MainActivity : Activity() {
         }
 
         music = Music(this) { bridge.event("music", music.state()) }
+        updater = Updater(this)
+        updater.installerAnswer(intent)
         bridge = Bridge(this, web, music)
         bridge.register()
         app.listeners += pageEvents
@@ -185,6 +189,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        updater.installerAnswer(intent)
         if (intent.getStringExtra(OPEN) == "downloads") showApp("downloads")
     }
 
@@ -295,6 +300,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         web.onResume()
+        updater.offer()
         if (current != null) DownloadService.start(this)
         else bridge.event("network")  // the Downloads page looks for the server again
     }

@@ -194,6 +194,7 @@ bams/
 │   ├── app/build.gradle.kts   copies web/dist-app into assets/app each build; version `bamsVersion` (gradle.properties); release signing from keystore.properties (git-ignored)
 │   └── app/src/main/java/media/bams/phone/
 │       ├── MainActivity.kt    WebView: the server's page or the app's own (WebViewAssetLoader /app/, /dl/ pictures); finds a server at start, falls back to Downloads when its page fails; full-screen video (the web player's, bridge `videoFullscreen`, 0.2.2: bars hidden, landscape), Back (out of full screen first), insets
+│       ├── Updater.kt         the app updates itself: newest BAMS-Android-<v>.apk in the GitHub releases, checked against GitHub's digest, PackageInstaller; asked once a day; Downloads has a button (phone/pages.tsx AppUpdate)
 │       ├── Bridge.kt          window.bamsAndroid (origin rules: the app's servers + its own pages): download/status/remove/info/settings; own pages only: library, servers, playVideo, music
 │       ├── Servers.kt         servers by `/api/hello` id, each with every address (home/away), reach() tries them; cookie sign-in shared between addresses
 │       ├── Store.kt           downloads catalog: roots (what was asked for + manifest) and files (each once, ref-counted), status, library(); location / Wi-Fi only settings
