@@ -1,0 +1,42 @@
+# Step 0 of docs/IOS-PLAN.md: builds the throwaway iPad test app (ios/spike) into an unsigned, ad-hoc signed IPA for
+# TrollStore, kept as a workflow artifact. Removed after step 0.
+name: iOS step 0 test app
+
+on:
+  push:
+    branches: [claude/ios-step0]
+    paths: [ios/spike/**, .github/workflows/ios-spike.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 16.4
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app && xcodebuild -version
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Build
+        working-directory: ios/spike
+        run: |
+          xcodegen generate
+          xcodebuild -project BAMSSpike.xcodeproj -scheme BAMSSpike -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/Spike.xcarchive \
+            archive CODE_SIGNING_ALLOWED=NO
+      - name: IPA
+        working-directory: ios/spike
+        run: |
+          app=build/Spike.xcarchive/Products/Applications/BAMSSpike.app
+          codesign --force --sign - --entitlements Spike/Spike.entitlements "$app"
+          codesign -d --entitlements - "$app"
+          mkdir -p ipa/Payload && cp -R "$app" ipa/Payload/
+          (cd ipa && zip -qry ../BAMSSpike.ipa Payload)
+          ls -l BAMSSpike.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BAMSSpike-ipa
+          path: ios/spike/BAMSSpike.ipa
