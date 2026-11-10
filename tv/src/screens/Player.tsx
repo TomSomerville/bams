@@ -19,6 +19,24 @@ const OSD_HIDE = 5000;   // ms without a key before the controls fade while play
 const SEEK_SETTLE = 700; // ms after the last left/right press before the seek is made
 const UP_NEXT = 10;      // seconds before the next episode starts by itself
 const SLEEP_MORE = 2;    // sleep mode on an episode: this one, then this many more, then playback stops (as on the web)
+// theatre mode's Quality menu (a PC), like the web player's (web/src/pages/Player.tsx)
+const QUALITIES = [2160, 1440, 1080, 720, 480, 360];
+const qualityName = (h: number) => h === 2160 ? "4K" : `${h}p`;
+type Quality = "auto" | number | null;  // null = Original: as-is when it plays here, else converted at full size
+
+/** The 16:9 frame the picture fills, as the server sizes conversions (stream._box): 1920x800 scope films are 1080p. */
+const frameOf = (f: FileInfo) => Math.max(f.probe?.video?.height ?? 0, (f.probe?.video?.width ?? 0) * 9 / 16);
+/** The sizes the Quality menu offers: up to the file's own (with some leeway: 1912x1072 is 1080p), never more than
+ *  the server makes (above 1080p needs a GPU encoder). None without FFmpeg on the server. */
+const sizesFor = (f: FileInfo, bigOk: boolean) => !f.playback.hls_url ? []
+  : QUALITIES.filter((h) => h <= (bigOk ? 2160 : 1080) && h <= frameOf(f) * 1.05);
+/** What the chosen quality means for this file: converted at a size, "auto" (several sizes, hls.js picks), or null
+ *  (as the plan says). A size remembered from another video is a cap: a file that isn't bigger plays as it is. */
+function qualityFor(f: FileInfo, q: Quality, picked: boolean, bigOk: boolean): { height?: number; auto?: boolean } | null {
+  if (!pc() || !f.playback.hls_url || q === null) return null;
+  if (q === "auto") return { auto: true };
+  return sizesFor(f, bigOk).includes(q) && (picked || q < frameOf(f) * 0.95) ? { height: q } : null;
+}
 
 /** The player: the file as-is when the TV can (AVPlay decodes MKV/HEVC/AC3..., a Fire TV what its decoders take),
  *  else an HLS session from the server (sound converted, or everything converted). Saves the position like the web player does.
@@ -50,7 +68,9 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
   const [buffering, setBuffering] = useState(true);
   const [osd, setOsd] = useState(true);
   // "find": Check OpenSubtitles, "findLang": its language list
-  const [menu, setMenu] = useState<"audio" | "subs" | "find" | "findLang" | null>(null);
+  const [menu, setMenu] = useState<"audio" | "subs" | "quality" | "find" | "findLang" | null>(null);
+  const [quality, setQuality] = useState<Quality>(() => pc() ? prefs.quality : null);
+  const [bigOk, setBigOk] = useState(true);  // the server converts above 1080p (a GPU encoder; the CPU stops there)
   const [seekTo, setSeekTo] = useState<number | null>(null);
   const [upNext, setUpNext] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +89,9 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
     // a PC's fallback steps (fail): Dolby sound copied this time, AAC wanted instead, the remux tried
     passed: false, noPass: false, triedRemux: false,
     // begin() calls so far (a later one, or leaving, makes an earlier one stale); when a stream that played was lost
-    starts: 0, lostAt: 0 });
+    starts: 0, lostAt: 0,
+    // the Quality menu (a PC): the choice, whether it was made in this player, whether the server goes above 1080p
+    quality: (pc() ? prefs.quality : null) as Quality, picked: false, bigOk: true });
   const timers = useRef<{ osd?: ReturnType<typeof setTimeout>; seek?: ReturnType<typeof setTimeout>; next?: ReturnType<typeof setInterval> }>({});
 
   // Play Random (random.tsx): while this video is in the random queue, "next" is the queue's next, not the next episode
@@ -107,7 +129,8 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
     const n = ++s.starts;
     const stale = () => n !== s.starts || engine.current !== e;
     const burn = s.sub?.image ? s.sub.id : null;
-    const how = force ? { mode: force, why: "fallback" } : plan(f, s.audio, burn);
+    const q = qualityFor(f, s.quality, s.picked, s.bigOk);
+    const how = force ? { mode: force, why: "fallback" } : q ? { mode: "convert" as Mode, why: "quality" } : plan(f, s.audio, burn);
     setError(null);
     setBuffering(true);
     closeSession();
@@ -134,7 +157,8 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
         const r = await api.post<{ id: string; playlist: string }>(f.playback.hls_url, {
           remux: how.mode !== "convert", ts: !hasExo() && !pc(), audio: s.audio, channels: 6, start: at,
           passthrough: s.passed,
-          height: how.mode === "convert" ? convertHeight() : undefined, burn: burn ?? undefined,
+          height: how.mode === "convert" ? q?.height ?? convertHeight() : undefined, burn: burn ?? undefined,
+          auto: how.mode === "convert" && !!q?.auto,
         });
         if (stale()) return void api.del(`/api/hls/${r.id}`).catch(() => undefined);
         s.session = r.id;
@@ -256,6 +280,16 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Whether the server makes sizes above 1080p (4K needs a GPU encoder), for the Quality menu (a PC).
+  useEffect(() => {
+    if (!pc()) return;
+    let live = true;
+    api.get<{ video_encoder?: { hardware?: boolean } | null }>("/api/status")
+      .then((r) => { if (live) { st.current.bigOk = !!r.video_encoder?.hardware; setBigOk(st.current.bigOk); } })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [rid]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // the position goes to the server every 10 s while playing
   useEffect(() => {
     if (paused) return report();
@@ -355,6 +389,23 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
     void begin(now);  // the server makes the stream with that track
   };
 
+  /** The Quality menu (a PC): the stream restarts from here, converted at that size (or as it was). Remembered. */
+  const chooseQuality = (q: Quality) => {
+    setMenu(null);
+    setTimeout(() => focus(document.querySelector<HTMLElement>('[data-fid="osd-quality"]')));
+    const s = st.current;
+    const f = s.file;
+    if (!f) return;
+    const was = qualityFor(f, s.quality, s.picked, s.bigOk);
+    setPref("quality", q);
+    s.quality = q;
+    s.picked = true;
+    setQuality(q);
+    const now = qualityFor(f, q, true, s.bigOk);
+    if (JSON.stringify(was) === JSON.stringify(now)) return;  // already playing that way
+    void begin(engine.current?.time() ?? s.startAt);
+  };
+
   const toggleSleep = () => {
     const n = sleep !== null ? null : nextOf() ? SLEEP_MORE : 0;
     st.current.sleep = n;
@@ -404,7 +455,7 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
       }
       if (menu) {
         if (isBack(e) && menu === "findLang") { setMenu("find"); return true; }
-        if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu === "audio" ? "audio" : "subs"}"]`))); return true; }
+        if (isBack(e)) { setMenu(null); setTimeout(() => focus(document.querySelector<HTMLElement>(`[data-fid="osd-${menu === "audio" || menu === "quality" ? menu : "subs"}"]`))); return true; }
         return false;  // arrows and OK move within the menu
       }
       const active = document.activeElement as HTMLElement | null;
@@ -464,6 +515,12 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
   const subs = [...(file?.subtitles ?? []), ...found.filter((f) => !file?.subtitles?.some((x) => x.id === f.id))]
     .filter((t) => !removed.includes(t.id));
   // who may remove a downloaded subtitle: whoever downloaded it, or an admin (of the server the video is on)
+  // the Quality menu (a PC, a server with FFmpeg): what's chosen for this file, and what "Original" would play
+  const sizes = file ? sizesFor(file, bigOk) : [];
+  const qualityMenu = pc() && !!file?.playback.hls_url;
+  const chosen = file ? qualityFor(file, quality, st.current.picked, bigOk) : null;
+  const asIs = !!file && plan(file, audio, sub?.image ? sub.id : null).mode !== "convert";
+  const qualityLabel = chosen?.auto ? "Auto" : chosen?.height ? qualityName(chosen.height) : asIs ? "Original" : "Full size";
   const me = rid === undefined ? nav.user : nav.servers.find((x) => x.id === rid)?.user ?? null;
   const mayRemove = (t: SubtitleTrack) => t.source === "download" && !!me && (me.is_admin || t.added_by === me.id);
   const removeSub = async (t: SubtitleTrack) => {
@@ -529,6 +586,9 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
             {(subs.length > 0 || !!item?.opensubtitles) && (
               <button className="pill" data-fid="osd-subs" onClick={() => setMenu("subs")}><Icon name="subs" /> Subtitles</button>
             )}
+            {qualityMenu && (
+              <button className="pill" data-fid="osd-quality" onClick={() => setMenu("quality")}><Icon name="gear" /> {qualityLabel}</button>
+            )}
             {nextId && <button className="pill" data-fid="osd-next" onClick={playNext}><Icon name="next" /> {qAt >= 0 ? "Next" : "Next episode"}</button>}
             {qAt >= 0 && <button className="pill" data-fid="osd-queue" onClick={() => setQueueOpen(true)}><Icon name="list" /> Up next</button>}
             {(item?.kind === "movie" || item?.kind === "episode") && (
@@ -551,6 +611,13 @@ export default function Player({ id, resume, rid, sleep: sleeping, shuffle }: { 
       {(menu === "find" || menu === "findLang") && file && (
         <FindSubs fileId={file.id} rid={rid} lang={osLang} picking={menu === "findLang"} current={sub?.id ?? null}
           tracks={subs} onLang={() => setMenu("findLang")} onPickLang={pickOsLang} onUse={takeFound} />
+      )}
+      {menu === "quality" && file && qualityMenu && (
+        <Menu title="Quality" options={[
+          { key: "orig", label: asIs ? "Original (as-is)" : "Full size (converted)", on: !chosen, pick: () => chooseQuality(null) },
+          { key: "auto", label: "Auto (adapts to the network)", on: !!chosen?.auto, pick: () => chooseQuality("auto") },
+          ...sizes.map((h) => ({ key: `h${h}`, label: `${qualityName(h)} (converted)`, on: chosen?.height === h, pick: () => chooseQuality(h) })),
+        ]} />
       )}
       {(menu === "audio" || menu === "subs") && file && (
         <Menu title={menu === "audio" ? "Sound" : "Subtitles"}

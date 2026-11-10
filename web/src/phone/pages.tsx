@@ -250,8 +250,15 @@ export function MusicPage() {
   const { lib } = useLib();
   const [tab, setTab] = useState<keyof typeof TABS>("artist");
   const [genre, setGenre] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   if (!lib) return <div className="page muted">Loading…</div>;
   const { artists, albums } = shelves(lib);
+  // Shuffle All: every downloaded song, in shuffle from a random one (the player's shuffle keeps the first in place)
+  const songs = [...lib.tracks.values()].filter((t) => here(lib, t.sid, t.id));
+  const shuffleAll = () => {
+    setErr(null);
+    playTracks(songs, Math.floor(Math.random() * songs.length), true).catch((e) => setErr(e.message));
+  };
   const genres = [...new Set(artists.flatMap((i) => i.genres))].sort((a, b) => a.localeCompare(b));
   const n = tab === "artist" ? artists.length : tab === "album" ? albums.length : tab === "genre" ? genres.length : lib.playlists.length;
   return (
@@ -265,6 +272,13 @@ export function MusicPage() {
         </div>
         <span className="count">{plural(n, tab)}</span>
       </div>
+      {songs.length > 0 && (
+        <div className="actions music-all">
+          <button className="btn primary" onClick={shuffleAll}><Icon name="shuffle" /> Shuffle All</button>
+          <span className="muted">{plural(songs.length, "song")}</span>
+        </div>
+      )}
+      {err && <p className="key-msg bad">{err}</p>}
       {!n && <p className="muted">No {TABS[tab].toLowerCase()} downloaded.</p>}
       {tab === "genre" && n > 0 && (
         <div className="chips genre-list">

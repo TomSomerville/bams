@@ -311,7 +311,9 @@ export class VideoEngine implements Engine {
     this.ev.onBuffering(true);
     if (hls && !v.canPlayType("application/vnd.apple.mpegurl")) {
       if (!Hls.isSupported()) throw new Error("This browser can't play HLS.");
-      const h = new Hls({ startPosition: start, maxBufferLength: 30 });
+      // several sizes (theatre mode's Quality "Auto"): start from the biggest, as the web player does, then follow
+      // what segments really take (hls.js assumes a slow network at first)
+      const h = new Hls({ startPosition: start, maxBufferLength: 30, abrEwmaDefaultEstimate: 20_000_000 });
       this.hls = h;
       h.on(Hls.Events.ERROR, (_e, d) => {
         if (d.fatal) this.ev.onError(`${d.type}: ${d.details}`);

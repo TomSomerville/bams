@@ -673,6 +673,39 @@ button.avatar { border: 0; cursor: pointer; color: #fff; font: inherit; font-wei
 .find-subs-list .match-text strong { overflow-wrap: anywhere; }
 .find-subs-list .tag { margin-left: 6px; }
 .find-subs-foot { padding: 0 18px 16px; margin-top: 4px; }
+/* Each part has a ceiling and scrolls inside it: many downloads tried used to push the search results out of the
+   dialog. If the screen is too short even for that (a phone on its side), the whole dialog scrolls. */
+.find-subs .modal { overflow-y: auto; }
+.find-subs-have { max-height: min(200px, 32vh); max-height: min(200px, 32dvh); overflow-y: auto; flex-shrink: 0; }
+.find-subs-list { min-height: 140px; }
+/* phones and short windows: smaller text and buttons, so more fits */
+@media (max-width: 720px), (max-height: 560px) {
+  .find-subs.modal-backdrop { padding: 8px; }
+  .find-subs .modal { max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
+  .find-subs .modal-head { padding: 10px 14px 4px; }
+  .find-subs .modal-head h3 { font-size: 15px; }
+  .find-subs h3 .muted { font-size: 12px; }
+  .find-subs .picker-path { padding: 4px 14px; }
+  .find-subs .picker-path select { height: 32px; font-size: 13px; padding: 0 8px; }
+  .find-subs-have { padding: 2px 14px 0; font-size: 12px; }
+  .find-subs-row { gap: 6px; padding: 3px 0; }
+  .find-subs-row .btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
+  .find-subs-list { padding: 0 6px; min-height: 120px; }
+  .find-subs-list button { padding: 6px 8px; font-size: 13px; }
+  .find-subs-list .match-overview { font-size: 11px; }
+  .find-subs-foot { padding: 0 14px 10px; font-size: 11px; }
+}
+/* a phone held upright: the name on its own line, the buttons under it */
+@media (max-width: 560px) {
+  .find-subs-row { flex-wrap: wrap; row-gap: 4px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .find-subs-row > span:first-child { flex-basis: 100%; }
+}
+/* a phone on its side: too short for two scrolling boxes, so the results take their full height and the whole
+   dialog scrolls (the downloads keep their own small box) */
+@media (max-height: 480px) {
+  .find-subs-have { max-height: 30dvh; }
+  .find-subs-list { min-height: 0; flex: 0 0 auto; overflow-y: visible; }
+}
 .skip-btn { display: inline-flex; align-items: center; gap: 1px; border-radius: 18px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .up-next { position: absolute; right: 32px; bottom: 120px; z-index: 4; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 12px; background: rgba(12, 12, 20, 0.92); border: 1px solid var(--border); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6); cursor: default; }
 .player-video::cue { background: rgba(0, 0, 0, 0.62); color: #fff; font-family: inherit; font-size: 1.05em; line-height: 1.35; }
@@ -879,3 +912,4 @@ button.nav-item { background: none; border: 0; font: inherit; text-align: left; 
 .accounts-form { padding: 0 18px 18px; }
 .accounts-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .chip.shuffle-chip { display: inline-flex; align-items: center; gap: 6px; border-color: var(--violet); }
+.music-all { align-items: center; margin: -4px 0 18px; }  /* the phone's offline Music: Shuffle All */

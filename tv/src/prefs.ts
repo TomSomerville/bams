@@ -14,10 +14,12 @@ type Prefs = {
   subDelay: number;
   /** the language last searched in "Check OpenSubtitles" */
   osLang: string | null;
+  /** theatre mode's Quality menu (a PC): null = Original (as-is when it plays), "auto", or a height to convert to */
+  quality: "auto" | number | null;
 };
 
 const KEY = "bams.prefs";
-const DEFAULTS: Prefs = { alwaysConvert: false, dts: false, audioLang: null, subLang: null, subDelay: 0, osLang: null };
+const DEFAULTS: Prefs = { alwaysConvert: false, dts: false, audioLang: null, subLang: null, subDelay: 0, osLang: null, quality: null };
 
 function load(): Prefs {
   try {
