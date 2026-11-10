@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-02** (release 0.21.0).
+Last updated: **2026-11-10** (release 0.22.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -370,6 +370,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   Account → Switch account / Sign out; adding one uses the name + password screen ("Back to <name>" returns).
 - Everywhere (TVs too): the Upcoming / Recent Holiday Home rows with a "See all" card (`screens/Holiday.tsx`) and the
   holiday chips in libraries (2026-10-19; Samsung/Fire TV get them with their next app builds).
+- Player Quality menu (2026-11-10, PC only): Original / Auto / sizes, as the web player's; `prefs.quality`.
 - Everywhere (TVs too): media tickets are renewed when a picture or the player fails or the page comes back from a
   sleep (tickets die with a server restart).
 
@@ -465,6 +466,26 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-10: Theatre Quality menu, OpenSubtitles dialog on phones, Shuffle All in phone Downloads (release 0.22.0, Android 0.2.5)
+- **What / why:** owner. (1) Theatre mode had no quality choice: the TV page's player gets a Quality menu on a PC only
+  (`pc()`), the web player's rules (Original / Auto / sizes up to the file's frame, >1080p only with a hardware encoder,
+  a remembered size caps bigger files only); it forces `convert` with `height`/`auto` in `begin()`, kept in
+  `prefs.quality` (`bams.theatre.prefs`). hls.js starts Auto at the biggest size (`abrEwmaDefaultEstimate`). Samsung/Fire
+  TV untouched. (2) On a phone on its side, many downloaded subtitles pushed the results out of "Check OpenSubtitles":
+  CSS only (`.find-subs*`): the downloads box has a ceiling and scrolls, the dialog scrolls, smaller sizes under 720 px
+  wide / 560 px tall, name above its buttons under 560 px wide. (3) Shuffle All on the offline Music page
+  (`phone/pages.tsx` `MusicPage`): every downloaded song to the app's player with shuffle, from a random index (its
+  shuffle keeps the first in place).
+- **Files:** `tv/src/screens/Player.tsx`, `tv/src/{prefs,engine}.ts`, `web/src/styles.css`, `web/src/phone/pages.tsx`,
+  `android/gradle.properties`.
+- **Verified:** TV tests 54, `tsc` web + tv. Scratch server from this checkout, theatre in Chrome: 720p HEVC film,
+  Original → 480p (852×480, converted) → Auto → Original, each from the same place, 480p remembered after a reload.
+  OpenSubtitles dialog at 915×412 and 412×860 with stubbed results and five fake downloads (no OpenSubtitles calls).
+  Offline pages with a stub bridge: Shuffle All sent all 9 songs of 3 albums with `shuffle`. Release APK 0.2.5 signed
+  with the release key (same certificate as 0.2.4).
+- **Left open:** Quality not on the Samsung/Fire TV apps; Auto's sizes not watched switching under a slow network; not
+  tried on the owner's phone or a real theatre box.
 
 ### 2026-11-02: The Android app updates itself from GitHub (Android 0.2.4)
 - **What / why:** owner asked to update the app from inside it. GitHub releases over a network share: they work away

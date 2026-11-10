@@ -435,6 +435,8 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   on a release of its own: that would become "latest", which the server's updater reads. `Updater.kt` finds the newest
   `BAMS-Android-<v>.apk` across releases, so the name must stay. After the person allows installs in Android's settings
   the install goes on by itself (`Updater.waiting`): the daily prompt alone would leave them stranded.
+- **Give a test server an absolute `--data-dir`:** FFmpeg runs in the HLS variant's folder (`spawn(cwd=)`), so a relative
+  data dir made every conversion fail ("Failed to open file data/transcode/…") and it looked like a code bug.
 - **Never `pkill -f` a pattern from a Bash tool call:** the pattern is in the shell's own command line, so it kills that
   shell and whatever it was about to start.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

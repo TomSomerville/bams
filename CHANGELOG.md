@@ -3,6 +3,23 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.22.0 (2026-11-10), Android app 0.2.5
+
+### Added
+- **Theatre mode: a Quality button in the player**, like the web player's: Original (as it is), Auto (adapts to the
+  network) or a size the server converts to, up to the video's own (above 1080p only with a graphics card that converts
+  it). Changing it carries on from the same place; the choice is remembered on that PC, and a size picked for one video
+  only shrinks bigger ones.
+- **Android app: Shuffle All** at the top of Downloads → Music: every downloaded song, shuffled, from a random one.
+
+### Changed
+- **The OpenSubtitles window fits phones.** Smaller text and buttons on phones and short windows; "Already on this
+  video" has a height limit and scrolls by itself, so many tried subtitles no longer push the search results out of
+  the window; when the screen is too short the whole window scrolls.
+
+Update the server with the new installer (the Quality button and the OpenSubtitles window come with it). Android 0.2.5
+installs over 0.2.4, or update from the app. The Samsung and Fire TV apps don't change.
+
 ## Android app 0.2.4 (2026-11-02)
 
 ### Added
