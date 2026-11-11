@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.24.3 (2026-11-11), Android app 0.2.9
+
+### Changed
+- **Music artwork on phones: three to a row again**, still with the smaller names. Four made an artist's counts
+  ("10 albums, 44 singles") too cramped to read; now they always show in full (on a narrow phone they take a second
+  line). Albums keep their artist and year on one line.
+
+Update the server and the Android app to 0.2.9 (its offline pages).
+
 ## 0.24.2 (2026-11-11), Android app 0.2.8
 
 ### Changed

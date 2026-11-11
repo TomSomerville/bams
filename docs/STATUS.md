@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.24.2, Android 0.2.8).
+Last updated: **2026-11-11** (release 0.24.3, Android 0.2.9).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -468,6 +468,15 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: Music artwork on phones back to three a row (release 0.24.3, Android 0.2.9)
+- **What / why:** owner, after 0.24.2: four a row made artists too small to read "10 albums, 44 singles"; three is
+  right. Music grids at ≤ 720px: `minmax(100px, 1fr)` (three, ~120px on a 412px phone, ~103px on 360px), names 12px,
+  captions 11px; an artist's counts wrap instead of being cut, an album's line stays one line.
+- **Files:** `web/src/styles.css`, `android/gradle.properties`.
+- **Verified:** scratch server at 412 and 360px wide with long counts typed into the cards: three a row, nothing cut,
+  no sideways scroll. Not checked on the phone itself.
+- **Left open:** none.
 
 ### 2026-11-11: Smaller music artwork on phones (release 0.24.2, Android 0.2.8)
 - **What / why:** owner: the Android app's Music artist/album grids felt cramped, too few artists on screen. At
