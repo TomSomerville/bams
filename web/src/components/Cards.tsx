@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { ContinueItem, ItemSummary, PlayMethod, ShownItem, WatchlistItem } from "../api";
 import { useAuth } from "../auth";
 import { listedLook } from "../everywhere";
-import { fmtRuntime, PLAY_LABEL, plural, subLabel, sxe } from "../format";
+import { fmtRuntime, PLAY_LABEL, recordsLabel, subLabel, sxe } from "../format";
 import { listName } from "../homeRows";
 import { useMusic } from "../music";
 import { callFor, useItemServer } from "../servers";
@@ -288,7 +288,7 @@ export function ArtistCard({ item }: { item: ItemSummary }) {
     <Link to={to(`/title/${item.id}`)} className="poster-card artist-card">
       <div className="poster-frame round"><Poster src={item.poster} title={item.title} /></div>
       <div className="poster-title">{item.title}</div>
-      <div className="poster-sub">{plural(item.child_count ?? 0, "album")}</div>
+      <div className="poster-sub">{recordsLabel(item)}</div>
     </Link>
   );
 }

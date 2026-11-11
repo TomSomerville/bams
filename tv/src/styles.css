@@ -337,6 +337,8 @@ html.pointer .osd.on button { pointer-events: auto; }
 .np-quality { font-size: 17px; font-weight: 600; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .playlist-desc { font-size: 26px; color: var(--muted); margin-top: 10px; }
 .list-head { font-size: 32px; margin: 26px 0 18px; }
+.singles-head { display: flex; align-items: center; gap: 28px; }
+.singles-head h2 { font-size: inherit; margin: 0; }
 .chips.genre-list { padding: 4px; margin-bottom: 30px; }
 .chip small { opacity: 0.65; font-size: 0.8em; font-weight: 500; }
 .chip.see-more { margin-top: 16px; }

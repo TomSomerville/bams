@@ -146,6 +146,10 @@ export type ItemSummary = {
   parent_title?: string | null;
   /** seconds */
   duration?: number | null;
+  /** albums: a single (MusicBrainz says so, or it has at most 2 tracks and MusicBrainz doesn't know it) */
+  single?: boolean;
+  /** artists: how many of their albums (child_count) are singles */
+  single_count?: number;
   // tracks
   track_number?: number | null;
   disc_number?: number | null;

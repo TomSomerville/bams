@@ -8,7 +8,7 @@ import { Backdrop, Poster } from "../components/Art";
 import { AlbumCard, ArtistCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import MusicFixMatch from "../components/MusicFixMatch";
-import { fmtClock, fmtLength, plural } from "../format";
+import { fmtClock, fmtLength, plural, recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../format";
 import { useScope } from "../servers";
 import { useMusic } from "../music";
 import { PlayRandomButton } from "../random";
@@ -207,11 +207,12 @@ const lifeSpan = (x: ItemDetail["extra"]) => {
 
 function ArtistView({ item, reload }: { item: ItemDetail; reload: () => void }) {
   const tracks = item.children.reduce((n, a) => n + (a.child_count ?? 0), 0);
+  const albums = item.children.filter((a) => !a.single);
   return (
     <div className="detail music-detail">
       <Header item={item} kicker={item.extra.type === "Person" ? "Artist" : item.extra.type ?? "Artist"} round
         sub={<>
-          <span>{plural(item.children.length, "album")}</span>
+          <span>{recordsLabel(item)}</span>
           <span>{plural(tracks, "track")}</span>
           {lifeSpan(item.extra) && <span>{lifeSpan(item.extra)}</span>}
           {item.extra.country && <span>{item.extra.country}</span>}
@@ -220,11 +221,45 @@ function ArtistView({ item, reload }: { item: ItemDetail; reload: () => void }) 
         <Actions item={item} reload={reload} />
       </Header>
       <TopSongs item={item} />
-      <section className="music-section">
-        <h2>Albums</h2>
-        <div className="grid">{item.children.map((a) => <AlbumCard key={a.id} item={a} showArtist={false} />)}</div>
-      </section>
+      {albums.length > 0 && (
+        <section className="music-section">
+          <h2>Albums</h2>
+          <div className="grid">{albums.map((a) => <AlbumCard key={a.id} item={a} showArtist={false} />)}</div>
+        </section>
+      )}
+      {(item.single_count ?? 0) > 0 && <Singles item={item} />}
     </div>
+  );
+}
+
+const SINGLE_SORTS: Record<SingleSort, string> = { title: "Name", year: "Year" };
+const SINGLE_SORT_KEY = "bams.singlesSort";
+
+/** An artist's singles as a list of their songs, sorted by name or by the single's year (the choice is remembered). */
+function Singles({ item }: { item: ItemDetail }) {
+  const { data } = useApi<SingleTrack[]>(`/api/items/${item.id}/singles`);
+  const [sort, setSort] = useState<SingleSort>(() => {
+    try { return localStorage.getItem(SINGLE_SORT_KEY) === "title" ? "title" : "year"; } catch { return "year"; }
+  });
+  const pick = (v: SingleSort) => {
+    setSort(v);
+    try { localStorage.setItem(SINGLE_SORT_KEY, v); } catch { /* private window: just this page */ }
+  };
+  const tracks = data ? sortSingles(data, sort) : [];
+  return (
+    <section className="music-section singles">
+      <div className="section-head">
+        <h2>Singles</h2>
+        <label className="sort">
+          Sort
+          <select value={sort} onChange={(e) => pick(e.target.value as SingleSort)}>
+            {Object.entries(SINGLE_SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+      </div>
+      {!data ? <p className="muted">Loading…</p>
+        : <TrackList tracks={tracks} albumArtist={item.title} numbered note={(t) => singleNote(t as SingleTrack)} />}
+    </section>
   );
 }
 
@@ -295,9 +330,11 @@ function Equalizer() {
 
 /** Track rows. Clicking one plays the list from there. `edit`: one of your playlists, whose rows can be dragged
  *  into another order (by their handle) and taken out. */
-export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = false, edit }: {
+export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = false, note, edit }: {
   /** numbered: number rows by their place in the list (a playlist), not by their track number */
   tracks: QueueTrack[]; albumArtist?: string; showAlbum?: boolean; numbered?: boolean;
+  /** what the row's second line says after the performer, instead of the album (Singles: the single and its year) */
+  note?: (t: QueueTrack) => string | null;
   edit?: { move: (from: number, to: number) => void; remove: (i: number) => void };
 }) {
   const music = useMusic();
@@ -330,9 +367,10 @@ export function TrackList({ tracks, albumArtist, showAlbum = false, numbered = f
               </span>
               <span className="track-text">
                 <span className="track-title">{t.title}</span>
-                {(performer || showAlbum) && (
-                  <span className="muted track-sub">{[performer, showAlbum ? t.album : null].filter(Boolean).join(" · ")}</span>
-                )}
+                {(() => {
+                  const sub = [performer, note ? note(t) : showAlbum ? t.album : null].filter(Boolean).join(" · ");
+                  return sub ? <span className="muted track-sub">{sub}</span> : null;
+                })()}
               </span>
               {t.playback.mode === "transcode" && (
                 <span className="np-badge" title={`Converted to ${t.playback.output === "flac" ? "FLAC" : "AAC"} while streaming`}>Converted</span>

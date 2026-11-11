@@ -358,6 +358,25 @@ def store_popular(con: sqlite3.Connection, artist_id: int, recordings: list[dict
                     (artist_id, jdump(ranking), now()))
 
 
+# Singles: an album MusicBrainz calls a "Single" (its release group's primary type); one it doesn't know (not identified,
+# or identified before the type was kept) is a single when it has at most this many tracks. EPs stay albums.
+SINGLE_MAX_TRACKS = 2
+
+
+def single_sql(a: str) -> str:
+    """SQL that is 1 when the album row aliased `a` is a single, else 0."""
+    typ = f"(CASE WHEN json_valid({a}.extra) THEN json_extract({a}.extra, '$.type') END)"
+    return (f"COALESCE({typ} = 'Single', (SELECT COUNT(*) FROM items st WHERE st.parent_id = {a}.id) "
+            f"BETWEEN 1 AND {SINGLE_MAX_TRACKS})")
+
+
+def single_ids(con: sqlite3.Connection, artist_id: int) -> list[int]:
+    """The artist's singles, oldest first."""
+    return [r[0] for r in con.execute(
+        f"SELECT a.id FROM items a WHERE a.parent_id=? AND a.kind='album' AND {single_sql('a')} "
+        "ORDER BY a.year IS NULL, a.year, a.title COLLATE NOCASE", (artist_id,))]
+
+
 # A version note after a song's title: "(2011 Remaster)", "[Live]", "- Radio Edit", "(feat. X)". ListenBrainz ranks the
 # song under its plain title, the files often carry the note.
 _VERSION_NOTE_RE = re.compile(r"\s*(?:[(\[][^()\[\]]*[)\]]|\s-\s.*)\s*$")

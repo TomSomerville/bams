@@ -481,6 +481,11 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .top-songs .section-head { margin: 0 0 14px; }
 .top-songs .section-head h2 { margin: 0; }
 .top-songs .music-credits { margin-top: 12px; }
+/* an artist's Singles: a song list under the albums, with its own Sort */
+.music-section.singles { padding-top: 0; }
+.singles .section-head { margin: 0 0 14px; }
+.singles .section-head h2 { margin: 0; }
+.singles .section-head .sort { margin-left: auto; }
 /* many genres stay in their own scrolling box, so the artists are right below them */
 .genre-list { max-height: 34vh; overflow-y: auto; }
 .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }

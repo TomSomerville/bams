@@ -1,4 +1,4 @@
-import type { ItemSummary, PlayMethod } from "./api";
+import type { ItemSummary, PlayMethod, QueueTrack } from "./api";
 
 /** S01E02; an unnumbered episode (an extra in a season folder) is just S00. */
 export const sxe = (s: number, e?: number | null) =>
@@ -13,6 +13,24 @@ export const seasonsLabel = (i: ItemSummary) => {
   const n = i.child_count ?? 0;
   return `${n} season${n === 1 ? "" : "s"}`;
 };
+
+/** An artist's records: "2 albums, 3 singles", "1 album", "3 singles" (singles only when there are some). */
+export const recordsLabel = (i: ItemSummary) => {
+  const singles = i.single_count ?? 0, albums = (i.child_count ?? 0) - singles;
+  return albums || !singles
+    ? [plural(albums, "album"), singles ? plural(singles, "single") : null].filter(Boolean).join(", ")
+    : plural(singles, "single");
+};
+
+/** A song of an artist's singles (GET /api/items/:id/singles), with its single's year. Shared with the TV app. */
+export type SingleTrack = QueueTrack & { year: number | null };
+export type SingleSort = "year" | "title";
+export const sortSingles = (list: SingleTrack[], by: SingleSort) => (by === "title"
+  ? [...list].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true }))
+  : [...list].sort((a, b) => (a.year ?? 9999) - (b.year ?? 9999)));  // stable: a single's songs stay in order
+/** A singles row's second line: the single's name when it isn't the song's, and its year. */
+export const singleNote = (t: SingleTrack) =>
+  [t.album.localeCompare(t.title, undefined, { sensitivity: "base" }) ? t.album : null, t.year].filter(Boolean).join(" · ") || null;
 
 export const subLabel = (i: ItemSummary) =>
   [i.year, i.kind === "show" ? seasonsLabel(i) : fmtRuntime(i.runtime)].filter(Boolean).join(" · ");

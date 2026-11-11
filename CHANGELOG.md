@@ -3,6 +3,17 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.24.0 (2026-11-11)
+
+### Added
+- **Singles apart from albums.** Under each artist the count now says "2 albums, 3 singles", and the artist page lists
+  the singles under the albums as songs (run time, add to playlist, and download in the Android app), sorted by year
+  or by name. A single is what MusicBrainz calls one; a release MusicBrainz doesn't know counts as a single when it
+  has one or two tracks. EPs stay with the albums. On the web, in the Android app online and in theatre mode.
+
+Update the server with the new installer; no rescan needed. The Android, Samsung and Fire TV apps don't change (the
+Samsung and Fire TV apps get the Singles list with their next build).
+
 ## 0.23.1 (2026-11-11), Android app 0.2.7
 
 ### Added

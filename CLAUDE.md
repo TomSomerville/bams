@@ -315,6 +315,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   (before it reads the name and password: a failed account sign-in with that message is the *key*; `Client.request`
   says so). `/infos/formats` works with any key, so it can't check one. `Client.check()` uses a small search; searching never counts against
   the download limit, downloads do (also when picked from the TV).
+- **`web/src/format.ts` is shared with the TV app too** (`recordsLabel`, singles sorting): no React, router or storage
+  in it. Singles are decided only by `music.single_sql` (MusicBrainz type, else ≤ `SINGLE_MAX_TRACKS` tracks): don't
+  re-decide it in a client.
 - **`web/src/subtitleLangs.ts` is shared with the TV app** (OpenSubtitles' language list): no React, router or
   storage in it, like `everywhere.ts`.
 - **Sleep mode's count rides in the navigation state** (web `location.state.sleep`, TV route `sleep`): both players

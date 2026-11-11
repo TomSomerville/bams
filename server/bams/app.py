@@ -57,9 +57,13 @@ def _img(rel: str | None) -> str | None:
 
 # Item rows plus how many children they have (seasons of a show, episodes of a season, albums of an
 # artist, tracks of an album), their parent's title (an album's artist), and for an artist without an
-# image of their own, the cover of their earliest album.
+# image of their own, the cover of their earliest album. Albums say whether they're singles, artists how many
+# singles they have (music.single_sql).
 ITEM_SELECT = """SELECT items.*, (SELECT COUNT(*) FROM items c WHERE c.parent_id = items.id) AS child_count,
     (SELECT p.title FROM items p WHERE p.id = items.parent_id) AS parent_title,
+    CASE WHEN items.kind = 'album' THEN """ + music.single_sql("items") + """ END AS single,
+    CASE WHEN items.kind = 'artist' THEN (SELECT COUNT(*) FROM items sa WHERE sa.parent_id = items.id
+        AND sa.kind = 'album' AND """ + music.single_sql("sa") + """) END AS single_count,
     CASE WHEN items.kind = 'artist' AND items.poster IS NULL THEN
         (SELECT a.poster FROM items a WHERE a.parent_id = items.id AND a.poster IS NOT NULL
          ORDER BY a.year IS NULL, a.year LIMIT 1) END AS fallback_poster
@@ -80,6 +84,10 @@ def item_summary(r: sqlite3.Row) -> dict:
     if r["kind"] in ("album", "track"):
         d.update(parent_id=r["parent_id"], parent_title=r["parent_title"] if "parent_title" in keys else None,
                  duration=r["duration"])
+    if r["kind"] == "album" and "single" in keys:
+        d["single"] = bool(r["single"])
+    if r["kind"] == "artist" and "single_count" in keys:
+        d["single_count"] = r["single_count"] or 0
     if r["kind"] == "track":
         d.update(track_number=r["track_number"], disc_number=r["disc_number"], artist=r["artist"])
     if r["kind"] == "season":
@@ -1755,6 +1763,19 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 music.store_popular(con, item_id, recordings)
         listens, total = music.top_tracks(con, item_id, limit)
         return {"tracks": [{**t, "listens": listens[t["id"]]} for t in _queue(con, list(listens))], "total": total}
+
+    @app.get("/api/items/{item_id}/singles")
+    def artist_singles(item_id: int, con=Depends(db)):
+        """The songs of an artist's singles (music.single_sql) as a play queue, oldest single first; each carries its
+        single's `year`."""
+        r = con.execute("SELECT kind FROM items WHERE id=?", (item_id,)).fetchone()
+        if not r or r["kind"] != "artist":
+            raise HTTPException(404, "no such artist")
+        singles = music.single_ids(con, item_id)
+        year = {a["id"]: a["year"] for a in con.execute(
+            f"SELECT id, year FROM items WHERE id IN ({','.join('?' * len(singles))})", singles)} if singles else {}
+        ids = [t for a in singles for t in user_playlists.track_ids(con, a)]
+        return [{**t, "year": year.get(t["album_id"])} for t in _queue(con, ids)]
 
     def _queue(con, ids: list[int]) -> list[dict]:
         """Tracks as a play queue, in the order of `ids` (a playlist may repeat one). A track with several files

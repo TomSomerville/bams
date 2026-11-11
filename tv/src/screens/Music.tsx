@@ -8,6 +8,7 @@ import {
   type TopTracks, type UserPlaylist, type UserPlaylistSummary,
 } from "../api";
 import { qualityLine } from "../../../web/src/quality";
+import { recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../../../web/src/format";
 import { AddToPlaylistMenu, EditPlaylistMenu, HoldMenu, NewPlaylistMenu, PlaylistTrackMenu } from "../PlaylistMenus";
 import { useFocusOnReady, useNav } from "../App";
 import { Square } from "../Cards";
@@ -122,7 +123,7 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
       <div className="grid squares">
         {tab !== "playlist" && (tab !== "genre" || genre) && items?.map((it) => (
           <Square key={it.id} fid={`m-${it.id}`} rid={rid} img={it.poster} title={it.title} round={it.kind === "artist"}
-            sub={it.kind === "album" ? [it.parent_title, it.year].filter(Boolean).join(" · ") : `${it.child_count ?? 0} albums`}
+            sub={it.kind === "album" ? [it.parent_title, it.year].filter(Boolean).join(" · ") : recordsLabel(it)}
             onPress={() => nav.push({ name: "detail", id: it.id, rid })} />
         ))}
         {tab === "playlist" && lists?.map((p) => (
@@ -135,8 +136,10 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
 }
 
 /** A list of tracks; OK plays from that one. */
-function TrackList({ tracks, rid, numbered = false, showAlbum = false, onHold }: {
+function TrackList({ tracks, rid, numbered = false, showAlbum = false, note, onHold }: {
   tracks: QueueTrack[]; rid?: number; numbered?: boolean; showAlbum?: boolean;
+  /** the second line after the performer, instead of the album (Singles: the single and its year) */
+  note?: (t: QueueTrack) => string | null;
   /** holding OK on a track (hold.ts): its menu (add to a playlist; in your own playlist, move or take out) */
   onHold?: (i: number) => void;
 }) {
@@ -158,7 +161,10 @@ function TrackList({ tracks, rid, numbered = false, showAlbum = false, onHold }:
               onClick={() => (on ? music.toggle() : music.playTracks(tracks, rid, i))}>
               <span className="track-num">{on && music.playing ? <Icon name="music" size={26} /> : numbered ? i + 1 : t.track_number ?? ""}</span>
               <span className="track-title">{t.title}
-                {(showAlbum || t.artist !== t.album_artist) && <small>{[t.artist !== t.album_artist ? t.artist : null, showAlbum ? t.album : null].filter(Boolean).join(" · ")}</small>}
+                {(() => {
+                  const sub = [t.artist !== t.album_artist ? t.artist : null, note ? note(t) : showAlbum ? t.album : null].filter(Boolean).join(" · ");
+                  return sub ? <small>{sub}</small> : null;
+                })()}
               </span>
               <span className="track-time">{clock(t.duration)}</span>
             </button>
@@ -171,6 +177,7 @@ function TrackList({ tracks, rid, numbered = false, showAlbum = false, onHold }:
 
 const TOP_SONGS = 10;
 
+
 /** An artist's or an album's page. */
 export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
   const nav = useNav();
@@ -180,13 +187,18 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
   const [adding, setAdding] = useState<{ items: number[]; title: string; fid: string } | null>(null);
   const isAlbum = item.kind === "album" || item.kind === "track";
   const [top, setTop] = useState<TopTracks | null>(null);
+  const [singles, setSingles] = useState<SingleTrack[] | null>(null);
+  const [singleSort, setSingleSort] = useState<SingleSort>("year");
   useEffect(() => {
+    setSingles(null);
+    if (item.kind === "artist" && item.single_count) apiFor(rid).get<SingleTrack[]>(`/api/items/${item.id}/singles`)
+      .then(setSingles).catch(() => setSingles([]));
     // an older server has no such list: the page just goes without it
     if (item.kind === "artist") apiFor(rid).get<TopTracks>(`/api/items/${item.id}/top-tracks?limit=${TOP_SONGS}`)
       .then(setTop).catch(() => setTop({ tracks: [], total: -1 }));
     if (isAlbum) apiFor(rid).get<QueueTrack[]>(`/api/items/${item.kind === "track" && item.parent_id ? item.parent_id : item.id}/tracks`)
       .then(setTracks).catch(() => setTracks([]));
-  }, [item.id, item.kind, item.parent_id, rid, isAlbum]);
+  }, [item.id, item.kind, item.parent_id, item.single_count, rid, isAlbum]);
   useFocusOnReady(isAlbum ? tracks !== null : top !== null);
 
   const artist = item.kind === "album" ? item.ancestors.find((a) => a.kind === "artist") : null;
@@ -194,7 +206,7 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
   const credit = x.image_credit;
   const playId = item.kind === "track" && item.parent_id ? item.parent_id : item.id;
   const sub = item.kind === "artist"
-    ? [`${item.children.length} albums`, x.country, x.life_span?.begin ? `since ${x.life_span.begin.slice(0, 4)}` : null]
+    ? [recordsLabel(item), x.country, x.life_span?.begin ? `since ${x.life_span.begin.slice(0, 4)}` : null]
     : [artist?.title, item.year, tracks ? `${tracks.length} tracks` : null,
        tracks ? clock(tracks.reduce((s, t) => s + (t.duration ?? 0), 0)) : null];
 
@@ -241,17 +253,35 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
           )}
         </>
       )}
-      {item.kind === "artist" && (
+      {item.kind === "artist" && item.children.some((a) => !a.single) && (
         <>
         <h2 className="list-head">Albums</h2>
         <div className="grid squares">
-          {item.children.map((a) => (
+          {item.children.filter((a) => !a.single).map((a) => (
             <Square key={a.id} fid={`alb-${a.id}`} rid={rid} img={a.poster} title={a.title} sub={a.year ? String(a.year) : null}
               onPress={() => nav.push({ name: "detail", id: a.id, rid })} />
           ))}
         </div>
         </>
       )}
+      {item.kind === "artist" && singles && singles.length > 0 && (() => {
+        const list = sortSingles(singles, singleSort);
+        return (
+          <>
+            <div className="list-head singles-head">
+              <h2>Singles</h2>
+              <div className="chips">
+                {(["year", "title"] as const).map((k) => (
+                  <button key={k} className={`chip ${singleSort === k ? "on" : ""}`} data-fid={`ssort-${k}`} aria-pressed={singleSort === k}
+                    onClick={() => setSingleSort(k)}>{k === "year" ? "Year" : "Name"}</button>
+                ))}
+              </div>
+            </div>
+            <TrackList tracks={list} rid={rid} numbered note={(t) => singleNote(t as SingleTrack)}
+              onHold={(i) => setAdding({ items: [list[i].id], title: list[i].title, fid: `t-${list[i].id}-${i}` })} />
+          </>
+        );
+      })()}
       {isAlbum && tracks && <TrackList tracks={tracks} rid={rid}
         onHold={(i) => setAdding({ items: [tracks[i].id], title: tracks[i].title, fid: `t-${tracks[i].id}-${i}` })} />}
       {adding && <AddToPlaylistMenu items={adding.items} title={adding.title} rid={rid}

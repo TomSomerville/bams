@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.23.1).
+Last updated: **2026-11-11** (release 0.24.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -289,7 +289,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
   confirm-new-password. Settings → Home page (per person): banner on/off, rows on/off and order (drag, arrow keys, ▲▼), reset. Playback card: encoder choice (CPU/GPU). Library cards:
   live scan progress (N of M, size, time left, bar) and ▲▼ order buttons. Sidebar: this server's libraries under its
   name; admins drag them into order; anyone drags another server's libraries into order (kept in the browser).
-- Music: library page (Artists/Albums/Playlists tabs, sort, genres), artist page (bio, photo credit, albums), album page
+- Music: library page (Artists/Albums/Playlists tabs, sort, genres), artist page (bio, photo credit, albums, singles as a
+  song list sorted by year or name, 0.24.0), album page
   (tracklist by disc, format note, Wikipedia/MusicBrainz links), playlist page (`/playlist/:id`, cover mosaic, missing
   entries), Fix match (goes to the kept album after a merge), a now-playing bar with queue that keeps playing across
   pages (media keys via Media Session) and pauses when a video starts (on phones, tapping it opens a full-screen
@@ -467,6 +468,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: Singles apart from albums (release 0.24.0)
+- **What / why:** owner: artist cards and pages should say "1 album, 3 singles", and the artist page should list the
+  singles under the albums as songs, sortable by name and year. A single (`music.single_sql`): MusicBrainz's
+  release-group type `Single` (kept in `extra.type` since music identification), else, with no type, 1 to
+  `SINGLE_MAX_TRACKS` (2) tracks; EPs stay albums. 3 was tried first and called a partly-downloaded, unidentified
+  album a single. `ITEM_SELECT` adds `single` (albums) and `single_count` (artists); `GET /api/items/{id}/singles`
+  gives the singles' songs as a play queue with each single's `year`. Sorting is the page's (`format.ts`
+  `sortSingles`, shared with the TV app; the web remembers it in `bams.singlesSort`).
+- **Files:** `server/bams/{music,app}.py`, `server/tests/test_music_singles.py`; `web/src/{format,api}.ts`,
+  `web/src/pages/Music.tsx` (`Singles`, `TrackList note`), `web/src/components/Cards.tsx`, `web/src/styles.css`;
+  `tv/src/screens/Music.tsx`, `tv/src/styles.css`.
+- **Verified:** server tests (428, the known Linux encoder test deselected); web and TV type-check and build; scratch
+  server in the browser at desktop and phone width: "1 album, 1 single" cards, Albums without the single, Singles list
+  with the single's year, Year → Name reorders and is remembered, no sideways scroll.
+- **Left open:** the Samsung/Fire TV apps get it with their next build (theatre mode has it now); not checked on a TV.
 
 ### 2026-11-11: Update for downloaded playlists; Downloads ran out of memory (release 0.23.1, Android 0.2.7)
 - **What / why:** owner. (1) Copying an imported playlist to edit it, then keeping the phone's copy current: an
