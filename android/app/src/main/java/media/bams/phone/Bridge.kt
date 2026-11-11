@@ -171,20 +171,29 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
                 }
             }
             "musicPlay" -> {
-                val ts = m.getJSONArray("tracks")
-                val out = JSONArray()
-                var index = m.optInt("index")
-                for (i in 0 until ts.length()) {
-                    val t = ts.getJSONObject(i)
-                    val sid = t.getString("sid")
-                    val f = app.store.file("$sid|${t.getInt("file")}")?.takeIf { it.state == "done" }
-                    val path = f?.let { app.store.target(it) }
-                    if (path == null || !path.exists()) { if (i < m.optInt("index")) index--; continue }
-                    val art = t.str("poster")?.let { app.store.image(sid, it).path }
-                    out.put(JSONObject(t.toString()).put("path", path.path).put("art", art))
+                // Off the main thread: a Shuffle All of a whole library is thousands of files to find on the disk.
+                app.musicIo.execute {
+                    val ts = m.getJSONArray("tracks")
+                    val out = JSONArray()
+                    var index = m.optInt("index")
+                    val where = app.store.targets()
+                    val art = HashMap<String, String?>()  // an album's tracks share their cover: look once
+                    for (i in 0 until ts.length()) {
+                        val t = ts.getJSONObject(i)
+                        val sid = t.getString("sid")
+                        val f = app.store.file("$sid|${t.getInt("file")}")?.takeIf { it.state == "done" }
+                        val path = f?.let { where(it) }
+                        if (path == null || !path.exists()) { if (i < m.optInt("index")) index--; continue }
+                        val cover = t.str("poster")?.let { p ->
+                            art.getOrPut("$sid|$p") { app.store.image(sid, p).takeIf { it.exists() }?.path }
+                        }
+                        out.put(JSONObject(t.toString()).put("path", path.path).put("art", cover))
+                    }
+                    app.onMain {
+                        if (out.length() == 0) fail("Those tracks aren't on this phone yet.")
+                        else { music.play(out, index.coerceIn(0, out.length() - 1), m.optBoolean("shuffle")); done(null) }
+                    }
                 }
-                if (out.length() == 0) fail("Those tracks aren't on this phone yet.")
-                else { music.play(out, index.coerceIn(0, out.length() - 1), m.optBoolean("shuffle")); done(null) }
             }
             else -> fail("The app doesn't know \"${m.optString("type")}\".")
         }

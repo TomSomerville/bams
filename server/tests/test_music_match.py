@@ -234,3 +234,64 @@ def test_api_toggle_and_fix_match(tmp_path, monkeypatch):
         assert c.post(f"/api/items/{album['id']}/music-match", json={"mbid": unknown}).status_code == 502
     finally:
         readonly.set_protected_roots([])
+
+
+def with_songs(calls: list, base: httpx.MockTransport) -> httpx.MockTransport:
+    """`fake`, plus MusicBrainz's recording search: "Blew" is a song of the second Nirvana."""
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/ws/2/recording":
+            calls.append(req)
+            hits = [{"id": "r-blew", "title": "Blew", "artist-credit": _credit("Nirvana", "n2")},
+                    {"id": "r-other", "title": "Blew (cover)", "artist-credit": _credit("Nirvana", "n1")}]
+            return httpx.Response(200, json={"recordings": hits if '"Blew"' in req.url.params["query"] else []})
+        if req.url.path == "/ws/2/artist/n2":
+            return httpx.Response(200, json={"id": "n2", "name": "Nirvana", "sort-name": "Nirvana"})
+        return base.handle_request(req)
+    return httpx.MockTransport(handler)
+
+
+def test_songs_tell_apart_artists_who_share_a_name(lib):
+    """Two MusicBrainz artists are called Nirvana: the one credited for this Nirvana's songs is the one. Artists left
+    unidentified by older rules are tried again once (ARTIST_RULES), not at every scan."""
+    paths, con, lib_id = lib
+    nirvana = item(con, "artist", "Nirvana")["id"]
+    con.execute("UPDATE items SET match_status='unmatched' WHERE id=?", (nirvana,))  # what older rules left
+    calls: list = []
+    with MusicBrainz(transport=with_songs(calls, fake([])), min_interval=0) as mb:
+        music_match.match_music_library(con, mb, paths.images, lib_id)
+    r = item(con, "artist", "Nirvana")
+    assert (r["mbid"], r["match_status"]) == ("n2", "matched")
+    assert len(calls) == 1
+
+    con.execute("UPDATE items SET match_status='unmatched', mbid=NULL WHERE id=?", (nirvana,))
+    calls.clear()
+    with MusicBrainz(transport=with_songs(calls, fake([])), min_interval=0) as mb:
+        music_match.match_music_library(con, mb, paths.images, lib_id)
+    assert calls == [] and item(con, "artist", "Nirvana")["match_status"] == "unmatched"  # rules unchanged: left alone
+
+
+def test_songs_that_dont_agree_leave_the_artist_unidentified(lib):
+    paths, con, lib_id = lib
+    calls: list = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/ws/2/recording":  # both bands have a "Blew"
+            return httpx.Response(200, json={"recordings": [
+                {"id": "a", "title": "Blew", "artist-credit": _credit("Nirvana", "n1")},
+                {"id": "b", "title": "Blew", "artist-credit": _credit("Nirvana", "n2")}]})
+        return fake(calls).handle_request(req)
+    with MusicBrainz(transport=httpx.MockTransport(handler), min_interval=0) as mb:
+        music_match.match_music_library(con, mb, paths.images, lib_id)
+    assert item(con, "artist", "Nirvana")["mbid"] is None
+
+
+def test_album_with_a_guest_gives_its_main_artist_the_id(lib):
+    """Albums are filed under the first credited name: "Real Artist feat. Guest" identifies Real Artist."""
+    paths, con, lib_id = lib
+    REAL_ALBUM["artist-credit"] = _credit() + [{"name": "Guest", "joinphrase": "", "artist": {"id": "g", "name": "Guest"}}]
+    try:
+        with MusicBrainz(transport=fake([]), min_interval=0) as mb:
+            music_match.match_music_library(con, mb, paths.images, lib_id)
+    finally:
+        REAL_ALBUM["artist-credit"] = _credit()
+    assert item(con, "artist", "Real Artist")["mbid"] == ARTIST_ID

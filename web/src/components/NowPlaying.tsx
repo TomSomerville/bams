@@ -2,17 +2,19 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtClock } from "../format";
 import { useMusic } from "../music";
-import { ridOf, scopeLink } from "../servers";
+import { ridOf, scopeLink, ScopeFor } from "../servers";
 import { Poster } from "./Art";
+import FullPlayer, { useFullPlayer, useNarrow } from "./FullPlayer";
 import Icon from "./Icon";
+import { AddToPlaylist } from "./Playlists";
 import { useReorder } from "./useReorder";
 import { qualityLine } from "../quality";
 import type { QueueTrack } from "../api";
 
 /** The queue, reorderable: drag a row by its handle (mouse or touch), or focus the handle and use the arrow keys. */
-function QueueList() {
+function QueueList({ scroller = ".np-queue" }: { scroller?: string }) {
   const m = useMusic();
-  const { listRef, dragging, handle, rowClass } = useReorder<HTMLOListElement>(m.queue.length, m.move, ".np-queue");
+  const { listRef, dragging, handle, rowClass } = useReorder<HTMLOListElement>(m.queue.length, m.move, scroller);
 
   // rows keyed by track (not place), so a handle keeps focus while the arrow keys move it
   const seen = new Map<number, number>();
@@ -50,13 +52,31 @@ function Quality({ t }: { t: QueueTrack }) {
 export default function NowPlaying() {
   const m = useMusic();
   const [showQueue, setShowQueue] = useState(false);
+  const full = useFullPlayer();
+  const narrow = useNarrow();
   const t = m.current;
   if (!t) return null;
   const pct = m.duration ? Math.min(100, (m.time / m.duration) * 100) : 0;
-  const to = (p: string) => scopeLink(ridOf(t.playback.url), p);  // the track may be from another BAMS server
+  const rid = ridOf(t.playback.url);
+  const to = (p: string) => scopeLink(rid, p);  // the track may be from another BAMS server
+
+  if (full.open) {
+    return (
+      <FullPlayer
+        poster={t.poster} title={t.title} artist={t.artist} album={t.album}
+        albumTo={to(`/title/${t.album_id}`)} artistTo={to(`/title/${t.artist_id}`)} quality={qualityLine(t.playback)}
+        playing={m.playing} time={m.time} duration={m.duration} canNext={m.index + 1 < m.queue.length} error={m.error}
+        onToggle={m.toggle} onPrev={m.prev} onNext={m.next} onSeek={m.seek} onClose={full.hide}
+        addToPlaylist={<ScopeFor rid={rid}><AddToPlaylist small items={[t.id]} title={t.title} /></ScopeFor>}
+        queue={<QueueList scroller=".fp-queue-list" />}
+      />
+    );
+  }
 
   return (
-    <div className="now-playing" role="region" aria-label="Now playing">
+    // phones: the bar (but its buttons) opens the full-screen player
+    <div className={`now-playing ${narrow ? "np-tap" : ""}`} role="region" aria-label="Now playing"
+      onClick={narrow ? (e) => { if (!(e.target as HTMLElement).closest("button, a, input")) full.show(); } : undefined}>
       {showQueue && (
         <div className="np-queue">
           <div className="np-queue-head">
@@ -67,14 +87,25 @@ export default function NowPlaying() {
         </div>
       )}
 
-      <div className="np-track">
-        <Link to={to(`/title/${t.album_id}`)} className="np-cover"><Poster src={t.poster} title={t.album} /></Link>
-        <div className="np-text">
-          <Link to={to(`/title/${t.album_id}`)} className="np-title">{t.title}</Link>
-          <Link to={to(`/title/${t.artist_id}`)} className="np-artist muted">{t.artist}</Link>
-          <Quality t={t} />
+      {narrow ? (
+        <div className="np-track">
+          <span className="np-cover"><Poster src={t.poster} title={t.album} /></span>
+          <div className="np-text">
+            <span className="np-title">{t.title}</span>
+            <span className="np-artist muted">{t.artist}</span>
+            <Quality t={t} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="np-track">
+          <Link to={to(`/title/${t.album_id}`)} className="np-cover"><Poster src={t.poster} title={t.album} /></Link>
+          <div className="np-text">
+            <Link to={to(`/title/${t.album_id}`)} className="np-title">{t.title}</Link>
+            <Link to={to(`/title/${t.artist_id}`)} className="np-artist muted">{t.artist}</Link>
+            <Quality t={t} />
+          </div>
+        </div>
+      )}
 
       <div className="np-center">
         <div className="np-buttons">

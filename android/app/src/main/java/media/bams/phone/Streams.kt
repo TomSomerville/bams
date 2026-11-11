@@ -9,6 +9,8 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ShuffleOrder
 import java.util.Collections
 import java.util.Locale
 
@@ -77,6 +79,32 @@ object Streams {
         }
 
         private fun current(): Stream? = all[p.currentMediaItem?.mediaId]
+
+        /** Shuffle plays the song it starts on first, then the rest in a random order. ExoPlayer's own order puts that
+         *  song anywhere: what came before it never played (a Shuffle All of 2000 songs stopped after ~1000). */
+        private fun shuffleFromCurrent() {
+            val exo = p as? ExoPlayer ?: return
+            val n = p.mediaItemCount
+            if (n == 0) return
+            val cur = p.currentMediaItemIndex.coerceIn(0, n - 1)
+            val rest = (0 until n).filter { it != cur }.shuffled()
+            exo.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(cur) + rest.toIntArray(), System.nanoTime()))
+        }
+
+        override fun setShuffleModeEnabled(enabled: Boolean) {
+            if (enabled) shuffleFromCurrent()
+            super.setShuffleModeEnabled(enabled)
+        }
+
+        override fun setMediaItems(items: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long) {
+            super.setMediaItems(items, startIndex, startPositionMs)
+            if (shuffleModeEnabled) shuffleFromCurrent()
+        }
+
+        override fun setMediaItems(items: MutableList<MediaItem>, resetPosition: Boolean) {
+            super.setMediaItems(items, resetPosition)
+            if (shuffleModeEnabled) shuffleFromCurrent()
+        }
 
         private fun restart(s: Stream, index: Int, at: Double) {
             all[s.key] = s.copy(offset = at)

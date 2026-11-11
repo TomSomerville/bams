@@ -30,7 +30,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from . import music
-from .db import Tx, jdump, jload, now
+from .db import Tx, get_setting, jdump, jload, now, set_setting
 from .musicbrainz import VARIOUS_ARTISTS_MBID, MusicBrainz, MusicLookupError, wikidata_id
 from .parse import title_key
 
@@ -42,6 +42,9 @@ REFRESH_AFTER = 120 * 86400  # look identified albums/artists up again after ~4 
 REFRESH_PER_SCAN = 50  # at most this many per scan (MusicBrainz allows 1 request/second)
 _GIVE_UP_AFTER = 5  # consecutive service errors: MusicBrainz is down, try again next scan
 _SKIP_ARTISTS = (music.VARIOUS, music.UNKNOWN_ARTIST)
+# Bump when artist identification finds more than before: the next scan retries artists left unidentified.
+# 2 (0.22.1): the first name of an album's credit, and songs telling apart artists who share a name.
+ARTIST_RULES = 2
 
 
 @dataclass
@@ -226,8 +229,9 @@ def match_album(con: sqlite3.Connection, mb: MusicBrainz, images: Path, album_id
             con.execute("""UPDATE items SET mbid=?, title=CASE WHEN ? THEN ? ELSE title END, match_status='matched',
                            updated_at=? WHERE id=?""",
                         ((mt.get("recording") or {}).get("id"), from_name, mt.get("title"), now(), t["id"]))
-        # The album artist's MusicBrainz id, for the artist step (only when the credit is clearly them).
-        if len(credit) == 1:
+        # The album artist's MusicBrainz id, for the artist step (only when the credit is clearly them). Albums are
+        # filed under the first credited name ("A feat. B" goes under A), so the first credit is the one to check.
+        if credit:
             a = credit[0].get("artist") or {}
             artist_row = con.execute("SELECT title, mbid FROM items WHERE id=?", (f["artist_id"],)).fetchone()
             if a.get("id") and not artist_row["mbid"] and a["id"] != VARIOUS_ARTISTS_MBID \
@@ -298,6 +302,33 @@ def merge_albums(con: sqlite3.Connection, keep: int, drop: int) -> None:
 
 # ------------------------------------------------------------------ artists
 
+SONGS_TO_ASK = 3  # songs looked up to tell apart artists of one name (each a MusicBrainz request)
+
+
+def _artist_by_songs(con: sqlite3.Connection, mb: MusicBrainz, artist_id: int, name: str,
+                     candidates: list[dict]) -> str | None:
+    """Which of several MusicBrainz artists named `name` this one is, from who MusicBrainz credits for its songs:
+    a song already identified (its recording) first, else a search on the song's title and the name. None when the
+    songs don't say, or point at different ones (never a guess)."""
+    ids = {a.get("id") for a in candidates}
+    votes: Counter[str] = Counter()
+    songs = con.execute("""SELECT t.mbid, t.title FROM items t JOIN items al ON al.id=t.parent_id
+                           WHERE al.parent_id=? AND t.kind='track' AND t.title IS NOT NULL
+                           ORDER BY t.mbid IS NULL, t.id LIMIT ?""", (artist_id, SONGS_TO_ASK)).fetchall()
+    for s in songs:
+        if s["mbid"]:
+            recs = [r] if (r := mb.recording(s["mbid"])) else []
+        else:
+            recs = [r for r in mb.search_recordings(s["title"], name) if title_key(r.get("title")) == title_key(s["title"])]
+        found = {(c.get("artist") or {}).get("id") for r in recs for c in r.get("artist-credit") or []} & ids
+        if len(found) == 1:
+            votes[found.pop()] += 1
+    if len(votes) == 1:
+        return next(iter(votes))
+    log.info("artist %r: its songs don't tell which of %d artists it is (%s)", name, len(ids), dict(votes) or "no hits")
+    return None
+
+
 def match_artist(con: sqlite3.Connection, mb: MusicBrainz, images: Path, artist_id: int, *, mbid: str | None = None,
                  manual: bool = False, refresh: bool = False, lang: str = "en",
                  stats: MusicMatchStats | None = None) -> bool:
@@ -310,6 +341,9 @@ def match_artist(con: sqlite3.Connection, mb: MusicBrainz, images: Path, artist_
         exact = [a for a in mb.search_artists(name)
                  if title_key(a.get("name")) == title_key(name)
                  or any(title_key(x.get("name")) == title_key(name) for x in a.get("aliases") or [])]
+        if len(exact) > 1:  # several artists of that name: their songs say which one this is
+            theirs = _artist_by_songs(con, mb, artist_id, name, exact)
+            exact = [a for a in exact if a.get("id") == theirs]
         if len(exact) != 1:
             _mark_unmatched(con, artist_id, None)
             log.info("artist %r: %s on MusicBrainz", name, "ambiguous" if exact else "not found")
@@ -362,7 +396,12 @@ def match_music_library(con: sqlite3.Connection, mb: MusicBrainz, images: Path, 
     statuses = ("pending", "unmatched") if retry_unmatched else ("pending",)
     marks = ",".join("?" * len(statuses))
     failures = 0
+    rules_key = f"music_artist_rules:{lib_id}"
+    artists_again = get_setting(con, rules_key) != str(ARTIST_RULES)
     for kind, fn in (("album", match_album), ("artist", match_artist)):
+        if kind == "artist" and artists_again and not retry_unmatched:
+            statuses = ("pending", "unmatched")
+            marks = ",".join("?" * len(statuses))
         todo = [r["id"] for r in con.execute(
             f"""SELECT id FROM items WHERE library_id=? AND kind=? AND match_status IN ({marks})
                 AND NOT (kind='artist' AND title IN (?, ?)) ORDER BY id""", (lib_id, kind, *statuses, *_SKIP_ARTISTS))]
@@ -384,6 +423,8 @@ def match_music_library(con: sqlite3.Connection, mb: MusicBrainz, images: Path, 
                 continue
             setattr(stats, f"{kind}s_{'matched' if ok else 'unmatched'}",
                     getattr(stats, f"{kind}s_{'matched' if ok else 'unmatched'}") + 1)
+        if kind == "artist":
+            set_setting(con, rules_key, str(ARTIST_RULES))
 
     # Identified a while ago: look them up again (oldest first, a few per scan).
     stale = con.execute("""SELECT id, kind, mbid, match_status FROM items WHERE library_id=? AND kind IN ('album', 'artist')

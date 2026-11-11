@@ -158,3 +158,21 @@ def test_top_played_songs_without_an_identified_artist_or_lookups(api, monkeypat
     set_setting(con, "music_lookup", "0")
     assert c.get(f"/api/items/{ar}/top-tracks").json()["total"] == 0
     assert calls == []  # the owner turned lookups off
+
+
+@pytest.mark.parametrize("title, key", [
+    ("Song - 2011 Remaster", "song"), ("Song (Live)", "song"), ("Song [Remastered] (feat. Guest)", "song"),
+    ("Song (Live) - Remastered 2009", "song"), ("(Untitled)", "untitled"), ("Weird Fishes/Arpeggi", "weirdfishesarpeggi"),
+])
+def test_song_key_drops_version_notes(title, key):
+    assert music.song_key(title) == key
+
+
+def test_top_played_songs_match_titles_with_version_notes(api, monkeypatch):
+    """The files say "Song - 2011 Remaster", ListenBrainz says "Song": the same song. A song's exact title still wins."""
+    c, con, lib_id = api
+    ar, (remaster, live, plain) = _album(con, lib_id, "Alpha", "A1", ["Hit - 2011 Remaster", "Ballad (Live)", "Ballad"])
+    con.execute("UPDATE items SET mbid='artist-id' WHERE id=?", (ar,))
+    lb(monkeypatch, (200, [rec("Hit", 900), rec("Ballad", 500), rec("Ballad (Live at Somewhere)", 50)]))
+    r = c.get(f"/api/items/{ar}/top-tracks").json()
+    assert [(t["id"], t["listens"]) for t in r["tracks"]] == [(remaster, 900), (plain, 500)] and r["total"] == 2

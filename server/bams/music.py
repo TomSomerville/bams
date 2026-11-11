@@ -358,26 +358,43 @@ def store_popular(con: sqlite3.Connection, artist_id: int, recordings: list[dict
                     (artist_id, jdump(ranking), now()))
 
 
+# A version note after a song's title: "(2011 Remaster)", "[Live]", "- Radio Edit", "(feat. X)". ListenBrainz ranks the
+# song under its plain title, the files often carry the note.
+_VERSION_NOTE_RE = re.compile(r"\s*(?:[(\[][^()\[\]]*[)\]]|\s-\s.*)\s*$")
+
+
+def song_key(title: str | None) -> str:
+    """A song's title without its version notes, normalised: "Song - 2011 Remaster" and "Song (Live)" are "song".
+    A title that is only a note ("(Untitled)") keeps it."""
+    t = title or ""
+    while (shorter := _VERSION_NOTE_RE.sub("", t)) != t and title_key(shorter):
+        t = shorter
+    return title_key(t)
+
+
 def top_tracks(con: sqlite3.Connection, artist_id: int, limit: int) -> tuple[dict[int, int], int]:
     """The artist's songs in this library in ListenBrainz's order: {track id: listens worldwide} (at most `limit`), and
-    how many there are in all. A song is found by its MusicBrainz recording, else by title; several copies of one song
-    (an album and a best-of) count once."""
+    how many there are in all. A song is found by its MusicBrainz recording, else by title, else by title without
+    version notes (`song_key`); several copies of one song (an album and a best-of, a live take) count once."""
     r = con.execute("SELECT ranking FROM artist_popularity WHERE item_id=?", (artist_id,)).fetchone()
     by_mbid: dict[str, int] = {}
     by_title: dict[str, int] = {}
-    for t in con.execute("""SELECT t.id, t.mbid, t.title_key FROM items t JOIN items al ON al.id=t.parent_id
+    by_song: dict[str, int] = {}
+    for t in con.execute("""SELECT t.id, t.mbid, t.title, t.title_key FROM items t JOIN items al ON al.id=t.parent_id
                             WHERE al.parent_id=? AND t.kind='track' ORDER BY al.year IS NULL, al.year, t.id""", (artist_id,)):
         if t["mbid"]:
             by_mbid.setdefault(t["mbid"], t["id"])
         if t["title_key"]:
             by_title.setdefault(t["title_key"], t["id"])
+        if key := song_key(t["title"]):
+            by_song.setdefault(key, t["id"])
     found: dict[int, int] = {}
     seen: set[str] = set()
     for rec in (jload(r["ranking"]) if r else None) or []:
-        key = title_key(rec["title"])
-        if key in seen:  # the same song on several recordings: the best ranked one stands for it
+        key = song_key(rec["title"])
+        if not key or key in seen:  # the same song on several recordings: the best ranked one stands for it
             continue
-        track = by_mbid.get(rec["mbid"]) or by_title.get(key)
+        track = by_mbid.get(rec["mbid"]) or by_title.get(title_key(rec["title"])) or by_song.get(key)
         if track and track not in found:
             found[track] = rec["listens"]
             seen.add(key)

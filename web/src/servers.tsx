@@ -422,6 +422,15 @@ export function useEverywhere<T>(sources: Source[], path: string | null): { list
   return { lists, done };
 }
 
+/** The pages and dialogs below it act on server `rid` (null: this one), wherever they are: the music bar plays
+ *  songs of any server, outside every route's scope. */
+export function ScopeFor({ rid, children }: { rid: number | null; children: ReactNode }) {
+  const { servers } = useRemotes();
+  const remote = rid === null ? null : servers?.find((s) => s.id === rid) ?? null;
+  const scope = useMemo(() => (rid === null ? LOCAL : makeScope(rid, remote)), [rid, remote]);
+  return <ScopeCtx.Provider value={scope}>{children}</ScopeCtx.Provider>;
+}
+
 /** Route element for /r/:rid/…: the pages below it show that server. */
 export function RemoteScope() {
   const rid = Number(useParams().rid);

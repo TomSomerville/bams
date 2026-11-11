@@ -253,7 +253,7 @@ export function MusicPage() {
   const [err, setErr] = useState<string | null>(null);
   if (!lib) return <div className="page muted">Loading…</div>;
   const { artists, albums } = shelves(lib);
-  // Shuffle All: every downloaded song, in shuffle from a random one (the player's shuffle keeps the first in place)
+  // Shuffle All: every downloaded song, shuffled from a random one (the app's player plays the one it starts on first: Streams.kt)
   const songs = [...lib.tracks.values()].filter((t) => here(lib, t.sid, t.id));
   const shuffleAll = () => {
     setErr(null);

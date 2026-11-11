@@ -168,6 +168,13 @@ class Store(private val context: Context) {
 
     fun target(f: FileEntry): File? = dir(f)?.let { File(it, f.name) }
 
+    /** [target] for many files at once (a music queue of thousands): [dir] asks Android for every storage each time,
+     *  which took seconds over a whole music library; this asks once. */
+    fun targets(): (FileEntry) -> File? {
+        val vols = Volumes.all(context).associateBy { it.id }
+        return { f -> vols[f.volume]?.let { File(File(File(it.dir, f.sid), f.fid.toString()), f.name) } }
+    }
+
     fun image(sid: String, url: String): File = File(File(imageDir, sid), url.removePrefix("/api/images/"))
 
     // ---- for DownloadService
@@ -249,8 +256,9 @@ class Store(private val context: Context) {
             rs.put(r.json().put("status", rootState(r)).put("manifest", manifest(r.key)))
         }
         val fs = JSONObject()
+        val mounted = Volumes.all(context).map { it.id }.toSet()  // once, not per file (see targets)
         for (f in files.values) {
-            val here = f.state == "done" && dir(f) != null
+            val here = f.state == "done" && f.volume in mounted
             fs.put(f.key, JSONObject().put("state", if (f.state == "done" && !here) "missing" else f.state)
                 .put("size", f.size).put("got", f.got).put("audio", f.audio))
         }

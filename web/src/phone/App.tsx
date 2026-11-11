@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { app, DOWNLOADS_CHANGED } from "../android";
 import { Poster } from "../components/Art";
+import FullPlayer, { useFullPlayer, useNarrow } from "../components/FullPlayer";
 import Icon from "../components/Icon";
 import { fmtClock } from "../format";
 import { qualityLine } from "../quality";
@@ -17,6 +18,8 @@ export const useLib = () => useContext(LibCtx);
 export type MusicState = {
   ready: boolean; playing?: boolean; index?: number; position?: number; duration?: number | null;
   shuffle?: boolean; queue?: string[];
+  /** the queue's places in the order they play (shuffled when shuffle is on); apps before 0.2.6 don't send it */
+  order?: number[];
 };
 const MusicCtx = createContext<MusicState>({ ready: false });
 export const useMusicState = () => useContext(MusicCtx);
@@ -73,9 +76,42 @@ function Banner() {
   );
 }
 
+/** The play queue in the order it plays, from the app's player: tap a song to play it, × takes it out. */
+function OfflineQueue() {
+  const m = useMusicState();
+  const { lib } = useLib();
+  if (!m.queue || !lib) return null;
+  const order = m.order?.length === m.queue.length ? m.order : m.queue.map((_, i) => i);
+  return (
+    <div className="np-queue-rows">
+      <ol>
+        {order.map((i) => {
+          const [sid, id] = (m.queue![i] ?? "").split("|");
+          const t = lib.tracks.get(ik(sid, Number(id)));
+          return (
+            <li key={i}>
+              <button className={`np-q-row ${i === m.index ? "on" : ""}`} onClick={() => musicCmd("jump", i)}>
+                <span className="np-q-title">{t?.title ?? "Unknown song"}</span>
+                <span className="muted">{t?.artist}</span>
+                <span className="muted np-q-time">{fmtClock(t?.duration ?? null)}</span>
+              </button>
+              {i !== m.index && (
+                <button type="button" className="icon-btn subtle np-q-remove" onClick={() => musicCmd("remove", i)}
+                  aria-label={`Remove ${t?.title ?? "song"}`} title="Remove from the queue"><Icon name="close" size={14} /></button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function NowPlaying() {
   const m = useMusicState();
   const { lib } = useLib();
+  const full = useFullPlayer();
+  const narrow = useNarrow();
   if (!m.ready || !m.queue?.length || m.index === undefined || !lib) return null;
   const [sid, id] = (m.queue[m.index] ?? "").split("|");
   const t = lib.tracks.get(ik(sid, Number(id)));
@@ -83,16 +119,47 @@ function NowPlaying() {
   const dur = m.duration ?? t.duration ?? 0;
   const pos = m.position ?? 0;
   const pct = dur ? Math.min(100, (pos / dur) * 100) : 0;
+  // downloaded files play as they are: the file's own quality
+  const quality = qualityLine({ ...t.playback, mode: "file" });
+  const canNext = m.index + 1 < m.queue.length || !!m.shuffle;
+
+  if (full.open) {
+    return (
+      <FullPlayer
+        poster={t.poster} title={t.title} artist={t.artist} album={t.album}
+        albumTo={`/t/${sid}/${t.album_id}`} artistTo={`/t/${sid}/${t.artist_id}`} quality={quality}
+        playing={!!m.playing} time={pos} duration={dur} canNext={canNext}
+        onToggle={() => musicCmd("toggle")} onPrev={() => musicCmd("prev")} onNext={() => musicCmd("next")}
+        onSeek={(v) => musicCmd("seek", v)} onClose={full.hide}
+        shuffle={{ on: !!m.shuffle, toggle: () => musicCmd("shuffle") }}
+        queue={<OfflineQueue />}
+      />
+    );
+  }
   return (
-    <div className="now-playing" role="region" aria-label="Now playing">
+    // phones: the bar (but its buttons) opens the full-screen player
+    <div className={`now-playing ${narrow ? "np-tap" : ""}`} role="region" aria-label="Now playing"
+      onClick={narrow ? (e) => { if (!(e.target as HTMLElement).closest("button, a, input")) full.show(); } : undefined}>
       <div className="np-track">
-        <Link to={`/t/${sid}/${t.album_id}`} className="np-cover"><Poster src={t.poster} title={t.album} /></Link>
-        <div className="np-text">
-          <Link to={`/t/${sid}/${t.album_id}`} className="np-title">{t.title}</Link>
-          <Link to={`/t/${sid}/${t.artist_id}`} className="np-artist muted">{t.artist}</Link>
-          {/* downloaded files play as they are: the file's own quality */}
-          {qualityLine({ ...t.playback, mode: "file" }) && <span className="np-quality">{qualityLine({ ...t.playback, mode: "file" })}</span>}
-        </div>
+        {narrow ? (
+          <>
+            <span className="np-cover"><Poster src={t.poster} title={t.album} /></span>
+            <div className="np-text">
+              <span className="np-title">{t.title}</span>
+              <span className="np-artist muted">{t.artist}</span>
+              {quality && <span className="np-quality">{quality}</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            <Link to={`/t/${sid}/${t.album_id}`} className="np-cover"><Poster src={t.poster} title={t.album} /></Link>
+            <div className="np-text">
+              <Link to={`/t/${sid}/${t.album_id}`} className="np-title">{t.title}</Link>
+              <Link to={`/t/${sid}/${t.artist_id}`} className="np-artist muted">{t.artist}</Link>
+              {quality && <span className="np-quality">{quality}</span>}
+            </div>
+          </>
+        )}
       </div>
       <div className="np-center">
         <div className="np-buttons">
@@ -100,7 +167,7 @@ function NowPlaying() {
           <button className="icon-btn np-play" onClick={() => musicCmd("toggle")} aria-label={m.playing ? "Pause" : "Play"}>
             <Icon name={m.playing ? "pause" : "play"} size={22} />
           </button>
-          <button className="icon-btn" onClick={() => musicCmd("next")} disabled={m.index + 1 >= m.queue.length && !m.shuffle} aria-label="Next">
+          <button className="icon-btn" onClick={() => musicCmd("next")} disabled={!canNext} aria-label="Next">
             <Icon name="skipForward" size={20} />
           </button>
         </div>

@@ -29,7 +29,10 @@ class Music(private val context: Context, private val changed: () -> Unit) {
     private val future = MediaController.Builder(context, SessionToken(context, ComponentName(context, MusicService::class.java)))
         .buildAsync()
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = changed()
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) lists = null
+            changed()
+        }
     }
     private val ticker = object : Runnable {
         override fun run() {
@@ -56,12 +59,13 @@ class Music(private val context: Context, private val changed: () -> Unit) {
 
     private fun num(t: JSONObject, k: String): Double? = if (t.isNull(k)) null else t.getDouble(k)
 
-    /** Downloaded tracks, [tracks]: each {sid, id, path, title, artist, album, art (a local file), start, end}; seconds. */
+    /** Downloaded tracks, [tracks]: each {sid, id, path, title, artist, album, art (a local file that exists, or
+     *  null), start, end}; seconds. */
     fun play(tracks: JSONArray, index: Int, shuffle: Boolean) {
         val c = controller ?: return
         val items = (0 until tracks.length()).map { i ->
             val t = tracks.getJSONObject(i)
-            val art = t.str("art")?.let { File(it) }?.takeIf { it.exists() }?.let { Uri.fromFile(it) }
+            val art = t.str("art")?.let { Uri.fromFile(File(it)) }  // the bridge only passes covers that are there
             Streams.build("${t.getString("sid")}|${t.getInt("id")}", Uri.fromFile(File(t.getString("path"))), meta(t, art),
                 num(t, "start"), num(t, "end"))
         }
@@ -120,14 +124,31 @@ class Music(private val context: Context, private val changed: () -> Unit) {
         controller?.pause()
     }
 
-    fun state(): JSONObject {
-        val c = controller ?: return JSONObject().put("ready", false)
+    /** The queue's ids, and the order they play in (shuffle: not the queue's), made again only when either changes:
+     *  the state goes to the page every second, and a Shuffle All queue is thousands of songs. */
+    private var lists: Pair<JSONArray, JSONArray>? = null
+
+    private fun lists(c: MediaController): Pair<JSONArray, JSONArray> = lists ?: run {
         val ids = JSONArray()
         for (i in 0 until c.mediaItemCount) ids.put(c.getMediaItemAt(i).mediaId)
+        val order = JSONArray()
+        val tl = c.currentTimeline
+        val shuffle = c.shuffleModeEnabled
+        var i = if (tl.isEmpty) androidx.media3.common.C.INDEX_UNSET else tl.getFirstWindowIndex(shuffle)
+        while (i != androidx.media3.common.C.INDEX_UNSET && order.length() < tl.windowCount) {
+            order.put(i)
+            i = tl.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, shuffle)
+        }
+        Pair(ids, order).also { lists = it }
+    }
+
+    fun state(): JSONObject {
+        val c = controller ?: return JSONObject().put("ready", false)
+        val (ids, order) = lists(c)
         val dur = c.duration
         return JSONObject().put("ready", true).put("playing", c.isPlaying).put("index", c.currentMediaItemIndex)
             .put("position", c.currentPosition / 1000.0).put("duration", if (dur > 0) dur / 1000.0 else JSONObject.NULL)
-            .put("shuffle", c.shuffleModeEnabled).put("queue", ids).put("volume", c.volume.toDouble())
+            .put("shuffle", c.shuffleModeEnabled).put("queue", ids).put("order", order).put("volume", c.volume.toDouble())
             .put("error", c.playerError?.let { "This track couldn't be played." } ?: JSONObject.NULL)
     }
 

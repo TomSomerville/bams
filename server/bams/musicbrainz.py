@@ -104,6 +104,14 @@ class MusicBrainz:
     def search_artists(self, name: str, limit: int = 5) -> list[dict]:
         return (self._mb("/artist", query=f'artist:"{lucene(name)}"', limit=limit) or {}).get("artists", [])
 
+    def search_recordings(self, title: str, artist: str, limit: int = 10) -> list[dict]:
+        """Songs by title and artist name, each with its artist credit."""
+        q = f'recording:"{lucene(title)}" AND artist:"{lucene(artist)}"'
+        return (self._mb("/recording", query=q, limit=limit) or {}).get("recordings", [])
+
+    def recording(self, mbid: str) -> dict | None:
+        return self._mb(f"/recording/{mbid}", inc="artist-credits")
+
     def artist(self, mbid: str) -> dict | None:
         return self._mb(f"/artist/{mbid}", inc="url-rels")
 
