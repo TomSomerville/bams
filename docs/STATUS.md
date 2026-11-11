@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.24.1).
+Last updated: **2026-11-11** (release 0.24.2, Android 0.2.8).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -468,6 +468,16 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: Smaller music artwork on phones (release 0.24.2, Android 0.2.8)
+- **What / why:** owner: the Android app's Music artist/album grids felt cramped, too few artists on screen. At
+  ≤ 720px a grid of music cards (`.grid:has(> .artist-card, > .album-card)`) takes 78px-minimum columns (four on a
+  phone, ~88px art, was three at ~120px), smaller names, captions on one line. Online pages and offline Downloads share
+  it (`styles.css`), hence the APK.
+- **Files:** `web/src/styles.css`, `android/gradle.properties`.
+- **Verified:** scratch server at 412px wide: Artists, Albums and an artist's albums four to a row, no sideways scroll.
+  Not checked on the phone itself.
+- **Left open:** none.
 
 ### 2026-11-11: ListenBrainz token for Top Played Songs (release 0.24.1)
 - **What / why:** owner: Run The Jewels showed no Top Played Songs on the live server. ListenBrainz's
