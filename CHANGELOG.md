@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## Android app 0.2.10 (2026-11-11, on the 0.24.3 release)
+
+### Changed
+- **No white circle behind the logo when the app starts.** The app has a proper Android icon now: the BAMS logo on
+  the app's own dark background, so Android 12 and newer show just the logo on the start screen. On the home screen
+  the icon looks as before, filling the icon shape properly.
+
+Only the Android app changes; the server stays on 0.24.3.
+
 ## 0.24.3 (2026-11-11), Android app 0.2.9
 
 ### Changed

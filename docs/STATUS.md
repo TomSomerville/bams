@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.24.3, Android 0.2.9).
+Last updated: **2026-11-11** (release 0.24.3, Android 0.2.10).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -468,6 +468,18 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: Android start screen without a white circle (Android 0.2.10, on the 0.24.3 release)
+- **What / why:** owner: the app's start screen showed the logo on a white circle. The app had only a legacy square
+  PNG icon, which Android 12+ puts on a light circle there. Now an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml`:
+  `@color/bg` background, `ic_launcher_foreground` = `web/public/brand/bams-icon.png` 56dp wide on 108dp, inside the
+  safe circle), and `values-v31/themes.xml` sets the splash background and icon background to `@color/bg`. The legacy
+  PNGs stay for nothing older (minSdk 26 uses the adaptive one).
+- **Files:** `android/app/src/main/res/{mipmap-anydpi-v26,values-v31}/`, `mipmap-*/ic_launcher_foreground.png`,
+  `android/gradle.properties`.
+- **Verified:** emulator (Android 16): start screen shows the logo on the dark background, no circle; the app drawer
+  icon is the logo on a dark rounded square. Not checked on the owner's Samsung.
+- **Left open:** no monochrome layer (Android 13 themed icons show the full-colour icon).
 
 ### 2026-11-11: Music artwork on phones back to three a row (release 0.24.3, Android 0.2.9)
 - **What / why:** owner, after 0.24.2: four a row made artists too small to read "10 albums, 44 singles"; three is
