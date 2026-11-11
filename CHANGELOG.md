@@ -3,6 +3,21 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.23.1 (2026-11-11), Android app 0.2.7
+
+### Added
+- **Update for downloaded playlists.** A playlist on the phone (one of yours, or an imported one) gets an Update button
+  next to "Downloaded": the phone fetches the songs added since and lets go of the songs taken out (unless another
+  download, an album say, still has them); the rest stays as it is. Edit a playlist, press Update, done.
+
+### Fixed
+- **Android app: Downloads crashed with a big music library.** Opening it built one message with every download's
+  details (tens of MB with thousands of songs) and the app ran out of memory, every time. The page now gets each
+  download's details on its own, in pieces, and the app no longer keeps them all in memory.
+
+Update the server with the new installer (the Update button comes with it) and the Android app to 0.2.7 (it lets go
+of songs taken out; 0.2.6 only adds new ones). The Samsung and Fire TV apps don't change.
+
 ## 0.23.0 (2026-11-11), Android app 0.2.6
 
 ### Added

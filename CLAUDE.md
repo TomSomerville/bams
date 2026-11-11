@@ -442,6 +442,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   shuffle turns on. Keep it for any new way of starting a shuffled queue.
 - **Android: never resolve storage per file in a loop** (`Store.dir` asks Android about every storage each call): over a
   music library that took seconds on the main thread. Use `Store.targets()` / one `Volumes.all`, off the main thread.
+- **The Android app has 256 MB of Java heap; a big music library's manifests are tens of MB** (thousands of album
+  details): never hold them all parsed or build one string of them (0.2.6 crashed opening Downloads). `Store` keeps
+  only `Summary`s; the pages get manifests one at a time, in pieces (Bridge "manifest"). Test with big manifests.
 - **Testing Back in the Android WebView needs real taps** (`adb shell input tap`): history entries a page adds after a
   scripted click (CDP, `el.click()`) are skipped by Back, which then leaves the app; real taps behave.
 - **Never `pkill -f` a pattern from a Bash tool call:** the pattern is in the shell's own command line, so it kills that

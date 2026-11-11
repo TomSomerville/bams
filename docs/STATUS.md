@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.23.0).
+Last updated: **2026-11-11** (release 0.23.1).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -467,6 +467,27 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: Update for downloaded playlists; Downloads ran out of memory (release 0.23.1, Android 0.2.7)
+- **What / why:** owner. (1) Copying an imported playlist to edit it, then keeping the phone's copy current: an
+  Update button (`DownloadButton updatable`, both playlist pages) asks for the download again; `Store.add` on a root
+  it has now lets go of files the new manifest doesn't list (unless another root wants them, as `remove` does). (2) On
+  the owner's phone (0.2.6, ~38 GB of downloads), Downloads crashed at once after downloading a copy of a big playlist:
+  `OutOfMemoryError` in `Bridge` building the "library" reply (one JSON string of every manifest: a 150 MB allocation,
+  256 MB limit), and `Store` kept every manifest parsed (`manifests`). Now `Store` keeps only a `Summary` per root
+  (file ids, images, items' ancestors; read with `JsonReader`, never the whole tree), "library" sends a `stamp` per
+  root instead of its manifest, and the pages fetch each changed manifest through Bridge "manifest" in 2 MB base64
+  pieces (`MANIFEST_PIECE`; `phone/App.tsx` `loadLibrary`, one load at a time).
+- **Files:** `android/app/src/main/java/media/bams/phone/{Store,Bridge,DownloadService,App}.kt`,
+  `android/gradle.properties`; `web/src/components/Download.tsx`, `web/src/pages/Music.tsx`, `web/src/phone/{App,lib}.ts*`.
+- **Verified:** read the phone's crash log over wireless debugging (the OOM above). Emulator (192 MB heap) with two 40 MB
+  playlist manifests: the old code crashed the same way; the new one opens Downloads with both playlists and every
+  song, Java heap ~16 MB. 0.2.7 release build installed on the owner's phone over 0.2.6 (same key): no crash, Java
+  heap 41 MB. Update against a scratch server (emulator): a song taken out left the phone, two added came, the others
+  untouched (same file times); a song taken out that an album download has stayed; the app's online page showed
+  Downloaded + Update → "Downloading 93%" → "Up to date".
+- **Left open:** a download (or Update) still parses its whole manifest once (`Http.json`): an enormous single playlist
+  could still run out there; slimmer playlist manifests from the server (every album's full details now) would fix it.
 
 ### 2026-11-11: Top Played Songs for more artists, offline Shuffle fixed and faster, full-screen music player (release 0.23.0, Android 0.2.6)
 - **What / why:** owner. (1) "Top Played Songs isn't working": ListenBrainz answered fine (checked live); the gaps were
