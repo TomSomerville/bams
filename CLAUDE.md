@@ -437,6 +437,13 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   the install goes on by itself (`Updater.waiting`): the daily prompt alone would leave them stranded.
 - **Give a test server an absolute `--data-dir`:** FFmpeg runs in the HLS variant's folder (`spawn(cwd=)`), so a relative
   data dir made every conversion fail ("Failed to open file data/transcode/…") and it looked like a code bug.
+- **ExoPlayer's shuffle order puts the start song anywhere** (`DefaultShuffleOrder`), so the songs "before" it never
+  played (Shuffle All stopped halfway): `Streams.Player.shuffleFromCurrent` sets the order on `setMediaItems` and when
+  shuffle turns on. Keep it for any new way of starting a shuffled queue.
+- **Android: never resolve storage per file in a loop** (`Store.dir` asks Android about every storage each call): over a
+  music library that took seconds on the main thread. Use `Store.targets()` / one `Volumes.all`, off the main thread.
+- **Testing Back in the Android WebView needs real taps** (`adb shell input tap`): history entries a page adds after a
+  scripted click (CDP, `el.click()`) are skipped by Back, which then leaves the app; real taps behave.
 - **Never `pkill -f` a pattern from a Bash tool call:** the pattern is in the shell's own command line, so it kills that
   shell and whatever it was about to start.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).

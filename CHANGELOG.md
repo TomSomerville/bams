@@ -3,6 +3,30 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.23.0 (2026-11-11), Android app 0.2.6
+
+### Added
+- **Full-screen music player on phones.** Tap the bar at the bottom while music plays: the album art fills the screen,
+  with the song, artist and album under it (tap one to go to that album or artist), the file's format and quality, a
+  button to add the song to a playlist, the play queue, and the play controls. Back closes it. It works in the browser
+  on a phone, in the Android app online, and in the app's offline Downloads (there without "add to playlist", since
+  playlists live on the server).
+
+### Fixed
+- **Top Played Songs show for many more artists.** An artist whose album credit had a guest ("A feat. B"), or whose
+  name several bands share, wasn't identified, so ListenBrainz was never asked about them: the first credited name now
+  counts, and artists of one name are told apart by who recorded their songs. Artists left unidentified are tried
+  again once on the next scan. Songs titled with a version note ("Song - 2011 Remaster", "Song (Live)") now match.
+- **Android app: Shuffle played only about half the songs.** The song it started on landed anywhere in the random
+  order, and everything before it never played (a Shuffle All of 2000 songs stopped after about 1000). Shuffle now
+  plays that song first, then all the others in a random order; turning shuffle on mid-album does the same.
+- **Android app: Shuffle All starts sooner.** Finding the downloaded files asked Android about every storage twice per
+  song, with the screen frozen; it now asks once, away from the screen. The offline pages open faster with many
+  downloads for the same reason.
+
+Update the server with the new installer (the full-screen player online and Top Played Songs come with it). Android
+0.2.6 installs over 0.2.5, or update from the app. The Samsung and Fire TV apps don't change.
+
 ## 0.22.0 (2026-11-10), Android app 0.2.5
 
 ### Added

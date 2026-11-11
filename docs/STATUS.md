@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-10** (release 0.22.0).
+Last updated: **2026-11-11** (release 0.23.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -292,7 +292,8 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 - Music: library page (Artists/Albums/Playlists tabs, sort, genres), artist page (bio, photo credit, albums), album page
   (tracklist by disc, format note, Wikipedia/MusicBrainz links), playlist page (`/playlist/:id`, cover mosaic, missing
   entries), Fix match (goes to the kept album after a merge), a now-playing bar with queue that keeps playing across
-  pages (media keys via Media Session) and pauses when a video starts; gapless hand-over between tracks and CUE
+  pages (media keys via Media Session) and pauses when a video starts (on phones, tapping it opens a full-screen
+  player, 0.23.0, online and offline); gapless hand-over between tracks and CUE
   tracks played as stretches of one file; music in Home and Search; Music library type + identification toggle +
   converted-music format (AAC/FLAC) in Settings.
 - Settings → Security (`SecuritySettings.tsx`, admins): wrong-password threshold, account locks (lock/unlock), who can
@@ -466,6 +467,41 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: Top Played Songs for more artists, offline Shuffle fixed and faster, full-screen music player (release 0.23.0, Android 0.2.6)
+- **What / why:** owner. (1) "Top Played Songs isn't working": ListenBrainz answered fine (checked live); the gaps were
+  ours. Artists without a MusicBrainz id are never asked: the album step now takes the *first* credit (albums are filed
+  under the main artist) instead of only a single-name credit, and `match_artist` tells several same-named artists apart
+  by their songs (`_artist_by_songs`: an identified track's recording, else a recording search on title + name; only a
+  unanimous answer counts). `ARTIST_RULES` (setting `music_artist_rules:<lib>`) retries unmatched artists once.
+  `music.song_key` (title without trailing "(…)", "[…]", " - …" notes) is a third matching step in `top_tracks` and
+  the de-duplication key. (2) Offline Shuffle All took ~10 s on the owner's phone: `musicPlay` ran on the main thread
+  and `Store.target` → `dir` called `Volumes.mounted` + `Volumes.get` (each `getExternalFilesDirs` + StorageManager for
+  every storage) per song; now `Store.targets()` asks once, on its own thread (`App.musicIo`: `io` can wait on an
+  unreachable server). `Store.library` likewise. Measured on the emulator with 2000 songs: files 350–580 → 130–175 ms,
+  sound 0.94–1.36 → 0.61–0.70 s (one song: ~60 ms; the rest is Media3 taking 2000 items; sending the first song alone
+  and adding the rest after didn't help). Found on the way: ExoPlayer's `DefaultShuffleOrder` put the start song at a
+  random place (965th of 2000), so the songs before it never played (the 0.22.0 entry's "its shuffle keeps the first in
+  place" was wrong): `Streams.Player.shuffleFromCurrent` sets an order with the current song first on
+  `setMediaItems`/`setShuffleModeEnabled(true)`. `Music.state` now sends `order` (play order), cached until the
+  timeline changes. (3) Full-screen player (`components/FullPlayer.tsx`), opened by tapping the bar on screens ≤720 px
+  wide (web `NowPlaying.tsx`, phone `phone/App.tsx`); open = navigation state `player`, so Back closes it. Art, title →
+  album, artist → artist, album, quality line, add to playlist (online; `servers.ScopeFor` puts the dialog on the
+  track's server), queue (web: the reorderable list; offline: `OfflineQueue` in play order, tap to jump, × to remove),
+  seek, prev/play/next (+ shuffle offline).
+- **Files:** `server/bams/{music,music_match,musicbrainz,config}.py`, `server/tests/test_music_{top,match}.py`;
+  `web/src/components/{FullPlayer,NowPlaying}.tsx`, `web/src/phone/{App,pages}.tsx`, `web/src/{servers.tsx,styles.css}`;
+  `android/app/src/main/java/media/bams/phone/{App,Bridge,Music,Store,Streams}.kt`, `android/gradle.properties`.
+- **Verified:** server tests 427 passed (`test_encoder_choice_api`: the known Linux failure), `tsc` web + tv. Live
+  MusicBrainz/ListenBrainz from a scratch library: Radiohead's songs in ListenBrainz's order; a "Nirvana" folder with an
+  unidentifiable album resolved to the right band through its songs and "Smells Like Teen Spirit - Remastered" matched
+  (before: nothing). Emulator (Android 16): timings above with 2000 fake downloads; the shuffle order starts on the
+  chosen song (three runs); a real offline catalog (scratch server manifests, 19 songs): Shuffle All → tap the bar →
+  full player with cover and "FLAC · 16-bit / 44.1 kHz", queue in play order, Back (a real tap) closes it. Browser at
+  375×812 against a scratch server: player fits, queue, add-to-playlist dialog on top, artist link, Back.
+- **Left open:** not timed on a real phone (the emulator is far faster; the owner's ~10 s should drop in proportion);
+  Media3 still takes ~0.45 s (emulator) for 2000 items: a windowed queue would fix it; artists missing from MusicBrainz
+  still show no Top Played Songs; offline has no add-to-playlist.
 
 ### 2026-11-10: Theatre Quality menu, OpenSubtitles dialog on phones, Shuffle All in phone Downloads (release 0.22.0, Android 0.2.5)
 - **What / why:** owner. (1) Theatre mode had no quality choice: the TV page's player gets a Quality menu on a PC only

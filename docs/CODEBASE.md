@@ -72,8 +72,9 @@ bams/
 │   │   ├── playlists.py       Imported .m3u/.m3u8/.pls: parse(), import_files() (per root, follows the files), resolve() (entries → tracks)
 │   │   ├── user_playlists.py  Playlists made in BAMS (private per account): track_ids() (an artist/album/track → tracks in play order), create/update/add (each track once)/set_tracks/delete
 │   │   ├── music_match.py     Music identification: match_album/match_artist/match_music_library (MusicBrainz & co.),
+│   │   │                      _artist_by_songs (same-named artists told apart by their songs; ARTIST_RULES retries),
 │   │   │                      merge_same_release/merge_albums, refresh after REFRESH_AFTER
-│   │   ├── musicbrainz.py     HTTP clients: MusicBrainz (1 req/s, shared), Cover Art Archive, Wikidata/Wikipedia/Commons
+│   │   ├── musicbrainz.py     HTTP clients: MusicBrainz (1 req/s, shared; releases, artists, recordings), Cover Art Archive, ListenBrainz (top_recordings), Wikidata/Wikipedia/Commons
 │   │   ├── hls.py             HLS sessions of variants (sizes / copy): segments on demand, restarts, reaper (sleep/wake), limit,
 │   │   │                      copy runs' pieces published as segments (_publish), Keyframes cache
 │   │   ├── keyindex.py        Keyframe times from a file's own index (MKV Cues, MP4/MOV sample tables), for stream.keyframes
@@ -125,7 +126,8 @@ bams/
 │       │   ├── Cards.tsx      PosterCard (+ WatchMarks, hover bookmark), ListToggle (on/off the watch list: button / round icon / small icon), ListedCard + listedPage (a watch list entry), ContinueCard (picture → play, name → show, episode line →
 │       │   │                  its season; long press / right-click → ContinueMenu "Remove from Continue Watching",
 │       │   │                  useLongPress), AlbumCard, ArtistCard, ItemCard, PlayBadge
-│       │   ├── NowPlaying.tsx Bottom bar: track (+ quality line), prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop
+│       │   ├── NowPlaying.tsx Bottom bar: track (+ quality line), prev/play/next, seek, volume, queue panel (drag/arrow-key reorder), stop; on phones (≤720 px) tapping it opens FullPlayer
+│       │   ├── FullPlayer.tsx Full-screen player (phones): art, song/artist/album links, quality, add to playlist, queue, seek, controls; open = navigation state `player` (useFullPlayer, Back closes); shared by NowPlaying and the phone pages' bar
 │       │   ├── Playlists.tsx  Your own playlists: AddToPlaylist (button / small icon) → AddToPlaylistDialog (pick one or make one), NewPlaylistDialog, EditPlaylistDialog, PlaylistForm
 │       │   ├── Download.tsx   Android app only: DownloadButton (item / playlist / user_playlist; state from the app, audio warning, remove), useAppInfo
 │       │   ├── PhoneSettings.tsx  Android app only: Settings → This phone (storage volume, Wi-Fi only, space used, Downloads, Servers)
@@ -197,11 +199,11 @@ bams/
 │       ├── Updater.kt         the app updates itself: newest BAMS-Android-<v>.apk in the GitHub releases, checked against GitHub's digest, PackageInstaller; asked once a day; Downloads has a button (phone/pages.tsx AppUpdate)
 │       ├── Bridge.kt          window.bamsAndroid (origin rules: the app's servers + its own pages): download/status/remove/info/settings; own pages only: library, servers, playVideo, music
 │       ├── Servers.kt         servers by `/api/hello` id, each with every address (home/away), reach() tries them; cookie sign-in shared between addresses
-│       ├── Store.kt           downloads catalog: roots (what was asked for + manifest) and files (each once, ref-counted), status, library(); location / Wi-Fi only settings
+│       ├── Store.kt           downloads catalog: roots (what was asked for + manifest) and files (each once, ref-counted), status, library(); location / Wi-Fi only settings; targets() (many files' paths, storages asked once)
 │       ├── DownloadService.kt foreground service: one file at a time, HTTP Range resume, Wi-Fi only wait, pictures + subtitles, notification
 │       ├── PlayerActivity.kt  offline video (ExoPlayer + PlayerView, downloaded WebVTT subtitles, resume, next episode, picture-in-picture)
 │       ├── MusicService.kt · Music.kt  the app's one music player (Media3 session: screen off, lock screen): downloaded tracks (`play`) and music streamed from a server's page (`stream`); the pages' controller for it
-│       ├── Streams.kt         streamed tracks by queue key; Streams.Player (ForwardingPlayer): converted tracks seek by starting over (`?t=`), report time/length, not "live"; fallback to the conversion; SEEK session command
+│       ├── Streams.kt         streamed tracks by queue key; Streams.Player (ForwardingPlayer): converted tracks seek by starting over (`?t=`), report time/length, not "live"; fallback to the conversion; SEEK session command; shuffle plays the current song first (shuffleFromCurrent)
 │       ├── Progress.kt        where you stopped offline, sent to the server when reached
 │       └── Volumes.kt · Caps.kt · Http.kt · App.kt   storage volumes (phone / SD card), decoders, HTTP with cookie/bearer, singletons + events
 ├── web/public/help/tmdb.html   TMDB key guide with screenshots (img/), served at /help/tmdb.html; linked from TmdbSettings
@@ -551,7 +553,9 @@ Albums (pending, or unmatched on a rematch scan) first: a `musicbrainz_albumid` 
 count, + year, + official; `ACCEPT=0.85`) → `release` lookup (recordings + release-group url-rels) → CAA cover only
 if no local art → Wikidata → Wikipedia summary → one transaction: title, original year, overview, `mbid`, `extra`,
 track `mbid`s, titles for tracks whose `parse.source=="path"`, and the artist's MusicBrainz id when the credit is
-clearly them. Then artists: that id, or an exact, unambiguous name search → artist lookup (url-rels) → Wikidata
+clearly them (the first credit: albums are filed under the main artist). Then artists: that id, or an exact name
+search (several of that name: `_artist_by_songs` asks who recorded up to 3 of its songs; only one answer counts;
+`ARTIST_RULES` makes the next scan retry unmatched artists once) → artist lookup (url-rels) → Wikidata
 (P18 photo, sitelinks) → Wikipedia summary + Commons photo with credit (only if no local art) → `sort_title` =
 MusicBrainz sort name. "Various Artists"/"Unknown Artist" are never looked up. Five service errors in a row stop
 the run (rest waits for the next scan). All network calls happen outside transactions. MusicBrainz is throttled
@@ -773,6 +777,8 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 |---|---|
 | Theatre mode: a remote's key, the mouse, screen size | `tv/src/pckeys.ts` (+ a row in `tv/test/pckeys.test.ts`), `pointer.ts`, `scale.ts`; anything PC-only checks `platform.pc()` |
 | Theatre mode: what a PC's browser plays, the fallback order | `tv/src/plan.ts` (`pcCaps`), `screens/Player.tsx` `begin` / `fail` |
+| Top Played Songs: which songs match ListenBrainz's ranking | `music.top_tracks` (recording id, title, `song_key`), `app.artist_top_tracks`; artists without an id: `music_match.match_artist` / `_artist_by_songs` |
+| Phones' full-screen music player | `web/src/components/FullPlayer.tsx` (+ `.fp*` CSS); online `NowPlaying.tsx`, offline `phone/App.tsx` `NowPlaying` / `OfflineQueue` (play order from the app's `Music.state` `order`) |
 | Theatre mode: the Quality menu (sizes, Auto, remembered choice) | `tv/src/screens/Player.tsx` `QUALITIES` / `qualityFor` / `chooseQuality`, `prefs.quality` |
 | Recognise a new naming pattern | `parse.py` (+ a case in `test_parse.py`, bump `PARSER_VERSION`) |
 | How hyphenated names are read | `parse._read` / `_protect` / `_GLUED` (what the other half may have been read as) |
