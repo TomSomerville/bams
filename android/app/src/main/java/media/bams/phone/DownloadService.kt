@@ -103,8 +103,7 @@ class DownloadService : Service() {
     private fun nextReachable(skip: Set<String>): Store.FileEntry? {
         val store = app.store
         return synchronized(store) {
-            store.allRoots().flatMap { r -> (store.manifest(r.key)?.optJSONArray("files")?.let { a ->
-                List(a.length()) { store.file("${r.sid}|${a.getJSONObject(it).getInt("id")}") } } ?: emptyList()) }
+            store.allRoots().flatMap { r -> (store.summary(r.key)?.files?.map { store.file("${r.sid}|$it") } ?: emptyList()) }
                 .filterNotNull().firstOrNull { it.state == "queued" && it.sid !in skip }
         }
     }
@@ -120,8 +119,8 @@ class DownloadService : Service() {
         val store = app.store
         for (r in store.allRoots()) {
             if (r.sid in skip) continue
-            val imgs = store.manifest(r.key)?.optJSONArray("images") ?: continue
-            val missing = List(imgs.length()) { imgs.getString(it) }.filter { !store.image(r.sid, it).exists() && it !in failedImages }
+            val imgs = store.summary(r.key)?.images ?: continue
+            val missing = imgs.filter { !store.image(r.sid, it).exists() && it !in failedImages }
             if (missing.isEmpty()) continue
             val base = app.servers.reach(r.sid) ?: run { skip += r.sid; null } ?: continue
             val token = app.servers.get(r.sid)?.token

@@ -26,7 +26,8 @@ class App : Application() {
     /** background work that touches the network or the disk, one task at a time (keeps the catalog consistent) */
     val io = Executors.newSingleThreadExecutor()
 
-    /** finding a music queue's files: never behind `io`, which can be waiting on a server that's out of reach */
+    /** the pages' own disk reads (a music queue's files, manifests): never behind `io`, which can be waiting on a
+     *  server that's out of reach */
     val musicIo = Executors.newSingleThreadExecutor()
 
     override fun onCreate() {

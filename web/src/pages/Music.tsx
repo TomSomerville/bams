@@ -461,7 +461,7 @@ export function PlaylistPage() {
               <button className="btn primary" onClick={() => music.playTracks(p.tracks)}><Icon name="play" /> Play</button>
               <button className="btn ghost" onClick={() => music.playTracks(p.tracks, 0, true)}><Icon name="shuffle" /> Shuffle</button>
               <MakeCopy p={p} />
-              <DownloadButton kind="playlist" id={p.id} title={p.name} what=" playlist" />
+              <DownloadButton kind="playlist" id={p.id} title={p.name} what=" playlist" updatable />
             </div>
           )}
         </div>
@@ -536,7 +536,7 @@ export function UserPlaylistPage() {
               <button className="btn ghost" onClick={() => music.playTracks(p.tracks, 0, true)}><Icon name="shuffle" /> Shuffle</button>
             </>}
             <button className="btn ghost" onClick={() => setEditing(true)}><Icon name="edit" /> Edit</button>
-            {p.tracks.length > 0 && <DownloadButton kind="user_playlist" id={p.id} title={p.name} what=" playlist" />}
+            {p.tracks.length > 0 && <DownloadButton kind="user_playlist" id={p.id} title={p.name} what=" playlist" updatable />}
             {deleting ? (
               <span className="confirm">
                 Delete {p.name}? Its songs stay in your library.

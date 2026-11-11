@@ -1,12 +1,12 @@
 // The Android app's Downloads pages: what's on the phone, from the app's catalog (Store.kt `library`). Each download
-// carries its server's manifest (GET /api/items/{id}/download): the items as the API shows them, music's queue, the
-// files. Here they're merged per server into one library, with pictures served by the app (/dl/<server>/images/…).
+// has its server's manifest (GET /api/items/{id}/download): the items as the API shows them, music's queue, the
+// files; App.tsx `loadLibrary` fetches them one by one, in pieces (a big music library's are tens of MB). Here they're merged per server into one library, with pictures served by the app (/dl/<server>/images/…).
 
 import type { ItemDetail, ItemSummary, PlaylistSummary, QueueTrack, UserPlaylistSummary } from "../api";
 import type { DownloadState } from "../android";
 
 type ManifestFile = { id: number; name: string; size: number; items: number[]; audio: string[] };
-type Manifest = {
+export type Manifest = {
   root: { kind: string; id: number; title: string };
   items: ItemDetail[];
   tracks: QueueTrack[];
@@ -16,6 +16,8 @@ type Manifest = {
 export type RootRow = {
   key: string; sid: string; kind: RootKind; id: number; title: string; added: number;
   status: DownloadState; manifest: Manifest | null;
+  /** changes with the manifest: App.tsx asks the app for it (in pieces) only then */
+  stamp?: string;
 };
 type FileRow = { state: "queued" | "downloading" | "done" | "failed" | "missing"; size: number; got: number; audio: string[] };
 type Saved = { position: number; duration: number | null; at: number };

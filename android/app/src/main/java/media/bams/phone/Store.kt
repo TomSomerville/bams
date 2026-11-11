@@ -1,6 +1,8 @@
 package media.bams.phone
 
 import android.content.Context
+import android.util.JsonReader
+import android.util.JsonToken
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -55,7 +57,13 @@ class Store(private val context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val roots = linkedMapOf<String, Root>()
     private val files = linkedMapOf<String, FileEntry>()
-    private val manifests = mutableMapOf<String, JSONObject>()
+    /** What the app itself needs of each manifest (Summary), never the manifests themselves: a big music library's
+     *  manifests come to tens of MB of text, several times that parsed, and the app has 256 MB (0.2.6 ran out
+     *  opening Downloads). The pages get each manifest from its file, in pieces (manifestPiece). */
+    private val summaries = mutableMapOf<String, Summary>()
+
+    /** A manifest's files (ids), pictures, and each item's ancestors (a season/album inside a downloaded show/artist). */
+    class Summary(val files: List<Int>, val images: List<String>, val ancestors: Map<Int, List<Int>>)
 
     /** why queued files aren't moving ("wifi": waiting for Wi-Fi), set by DownloadService */
     @Volatile var waiting: String? = null
@@ -96,11 +104,72 @@ class Store(private val context: Context) {
         return File(File(manifestDir, sid), what.replace(':', '-') + ".json")
     }
 
-    fun manifest(key: String): JSONObject? = synchronized(this) {
-        manifests[key] ?: try { JSONObject(manifestFile(key).readText()).also { manifests[key] = it } } catch (e: Exception) { null }
+    /** Up to [max] bytes of a download's manifest from byte [at], and the file's size (the pages join the pieces). */
+    fun manifestPiece(key: String, at: Long, max: Int): Pair<Long, ByteArray> =
+        java.io.RandomAccessFile(manifestFile(key), "r").use { f ->
+            val size = f.length()
+            val n = maxOf(0L, minOf(max.toLong(), size - at)).toInt()
+            val buf = ByteArray(n)
+            f.seek(at)
+            f.readFully(buf)
+            Pair(size, buf)
+        }
+
+    /** Changes when the manifest does (an Update): the pages ask again only then. */
+    fun manifestStamp(key: String): String = manifestFile(key).let { "${it.lastModified()}-${it.length()}" }
+
+    fun summary(key: String): Summary? = synchronized(this) {
+        summaries[key] ?: try {
+            manifestFile(key).bufferedReader().use { summarize(JsonReader(it)) }.also { summaries[key] = it }
+        } catch (e: Exception) { null }
     }
 
-    /** Queue what [m] (a manifest from server [sid]) lists, as root [what] ("item:5"). Files already here are kept. */
+    /** Reads only the parts of a manifest the app needs, as a stream: a whole manifest is never held in memory. */
+    private fun summarize(r: JsonReader): Summary {
+        val files = mutableListOf<Int>()
+        val images = mutableListOf<String>()
+        val ancestors = mutableMapOf<Int, List<Int>>()
+        fun ids(): List<Int> {  // [{id, ...}, ...] -> ids
+            val out = mutableListOf<Int>()
+            r.beginArray()
+            while (r.hasNext()) {
+                r.beginObject()
+                while (r.hasNext()) if (r.nextName() == "id" && r.peek() == JsonToken.NUMBER) out += r.nextInt() else r.skipValue()
+                r.endObject()
+            }
+            r.endArray()
+            return out
+        }
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "files" -> files += ids()
+                "images" -> { r.beginArray(); while (r.hasNext()) images += r.nextString(); r.endArray() }
+                "items" -> {
+                    r.beginArray()
+                    while (r.hasNext()) {
+                        var id = -1
+                        var anc: List<Int> = emptyList()
+                        r.beginObject()
+                        while (r.hasNext()) when (r.nextName()) {
+                            "id" -> id = r.nextInt()
+                            "ancestors" -> if (r.peek() == JsonToken.BEGIN_ARRAY) anc = ids() else r.skipValue()
+                            else -> r.skipValue()
+                        }
+                        r.endObject()
+                        if (id >= 0) ancestors[id] = anc
+                    }
+                    r.endArray()
+                }
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+        return Summary(files, images, ancestors)
+    }
+
+    /** Queue what [m] (a manifest from server [sid]) lists, as root [what] ("item:5"). Files already here are kept;
+     *  asked again for a root it has, files the new manifest doesn't list any more are let go (Update). */
     @Synchronized
     fun add(sid: String, what: String, title: String, m: JSONObject): Root {
         val key = "$sid|$what"
@@ -109,7 +178,7 @@ class Store(private val context: Context) {
         root.error = null
         roots[key] = root
         manifestFile(key).apply { parentFile?.mkdirs() }.writeText(m.toString())
-        manifests[key] = m
+        summaries.remove(key)  // read again from the new file when needed
         val fs = m.getJSONArray("files")
         for (i in 0 until fs.length()) {
             val f = fs.getJSONObject(i)
@@ -121,6 +190,16 @@ class Store(private val context: Context) {
             e.items += ints(f.getJSONArray("items"))
             if (e.state == "failed") { e.state = "queued"; e.error = null }  // asked again: try again
         }
+        // Asked again (Update on a playlist that changed): what's no longer in it goes, unless another download
+        // wants it, the way remove() does it; what's still in it is kept, not fetched again.
+        val listed = (0 until fs.length()).map { "$sid|${fs.getJSONObject(it).getInt("id")}" }.toSet()
+        for (f in files.values.toList()) {
+            if (f.key in listed || !f.roots.remove(key) || f.roots.isNotEmpty()) continue
+            files.remove(f.key)
+            f.state = "removed"
+            deleteFiles(f)
+        }
+        pruneImages(sid)
         save()
         return root
     }
@@ -130,7 +209,7 @@ class Store(private val context: Context) {
     @Synchronized
     fun remove(key: String) {
         roots.remove(key) ?: return
-        manifests.remove(key)
+        summaries.remove(key)
         manifestFile(key).delete()
         for (f in files.values.toList()) {
             if (!f.roots.remove(key) || f.roots.isNotEmpty()) continue
@@ -150,8 +229,7 @@ class Store(private val context: Context) {
     private fun pruneImages(sid: String) {
         val keep = mutableSetOf<String>()
         for (r in roots.values.filter { it.sid == sid }) {
-            val a = manifest(r.key)?.optJSONArray("images") ?: continue
-            for (i in 0 until a.length()) keep += a.getString(i).removePrefix("/api/images/")
+            for (u in summary(r.key)?.images ?: continue) keep += u.removePrefix("/api/images/")
         }
         val base = File(imageDir, sid)
         base.walkBottomUp().filter { it.isFile }.forEach { if (it.relativeTo(base).invariantSeparatorsPath !in keep) it.delete() }
@@ -211,14 +289,8 @@ class Store(private val context: Context) {
         if (own.isNotEmpty()) return state(own, null).put("within", own.first().roots.firstOrNull()?.substringAfter("|"))
         // a season/album inside a downloaded show/artist
         for (r in roots.values.filter { it.sid == sid && it.kind == "item" }) {
-            val items = manifest(r.key)?.optJSONArray("items") ?: continue
-            for (i in 0 until items.length()) {
-                val d = items.getJSONObject(i)
-                if (d.optInt("id") != id) continue
-                val anc = d.optJSONArray("ancestors") ?: continue
-                val under = (0 until anc.length()).any { anc.getJSONObject(it).optInt("id") == r.id }
-                if (under) return rootState(r).put("within", r.key.substringAfter("|"))
-            }
+            val anc = summary(r.key)?.ancestors?.get(id) ?: continue
+            if (r.id in anc) return rootState(r).put("within", r.key.substringAfter("|"))
         }
         return none()
     }
@@ -253,7 +325,8 @@ class Store(private val context: Context) {
     fun library(servers: Servers): JSONObject {
         val rs = JSONArray()
         for (r in roots.values) {
-            rs.put(r.json().put("status", rootState(r)).put("manifest", manifest(r.key)))
+            // the manifests themselves: one at a time (Bridge "manifest"), only when `stamp` changed
+            rs.put(r.json().put("status", rootState(r)).put("stamp", manifestStamp(r.key)))
         }
         val fs = JSONObject()
         val mounted = Volumes.all(context).map { it.id }.toSet()  // once, not per file (see targets)

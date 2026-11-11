@@ -129,6 +129,16 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
                 }
             }.start()
             "library" -> done(app.store.library(app.servers).put("progress", app.progress.json()))
+            // A download's manifest, in pieces (`at`: a byte offset; base64 of up to MANIFEST_PIECE bytes, and the
+            // file's size): the pages ask for each one whose `stamp` changed and join the pieces. Never one big
+            // string: a big playlist's manifest alone can be tens of MB (0.2.6 ran out of memory).
+            "manifest" -> app.musicIo.execute {
+                val piece = try { app.store.manifestPiece(m.getString("key"), m.optLong("at"), MANIFEST_PIECE) } catch (e: Exception) { null }
+                app.onMain {
+                    if (piece == null) done(null)
+                    else done(JSONObject().put("size", piece.first).put("data", android.util.Base64.encodeToString(piece.second, android.util.Base64.NO_WRAP)))
+                }
+            }
             "removeDownload" -> later { app.store.remove(m.getString("key")); app.emit("downloads"); null }
             "servers" -> later { servers(m.optBoolean("check")) }
             "current" -> done(activity.lost?.let { JSONObject().put("lost", it) })
@@ -236,5 +246,6 @@ class Bridge(private val activity: MainActivity, private val web: WebView, priva
 
     companion object {
         const val NAME = "bamsAndroid"
+        const val MANIFEST_PIECE = 2 * 1024 * 1024
     }
 }

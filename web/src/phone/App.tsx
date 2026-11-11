@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { app, DOWNLOADS_CHANGED } from "../android";
 import { Poster } from "../components/Art";
@@ -6,7 +6,7 @@ import FullPlayer, { useFullPlayer, useNarrow } from "../components/FullPlayer";
 import Icon from "../components/Icon";
 import { fmtClock } from "../format";
 import { qualityLine } from "../quality";
-import { build, ik, type Library, type Raw, type Track } from "./lib";
+import { build, ik, type Library, type Manifest, type Raw, type Track } from "./lib";
 import { DownloadsPage, MoviesPage, MusicPage, PlaylistPage, ServersPage, ShowsPage, StartPage, TitlePage } from "./pages";
 
 // The Android app's own pages: what's on the phone (playable with no connection), and the app's server list.
@@ -218,11 +218,55 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+// Each download's manifest, kept here until the app says it changed (`stamp`): asked again on every download's
+// progress otherwise. The app sends it in pieces (Bridge "manifest"): one string of everything ran it out of memory.
+const manifests = new Map<string, { stamp: string; m: Manifest | null }>();
+
+async function fetchManifest(key: string): Promise<Manifest | null> {
+  const parts: Uint8Array[] = [];
+  let at = 0;
+  for (;;) {
+    const r = await app<{ size: number; data: string } | null>("manifest", { key, at });
+    if (!r) return null;
+    const bytes = Uint8Array.from(atob(r.data), (c) => c.charCodeAt(0));
+    parts.push(bytes);
+    at += bytes.length;
+    if (at >= r.size || !bytes.length) break;
+  }
+  const all = new Uint8Array(at);
+  let o = 0;
+  for (const p of parts) { all.set(p, o); o += p.length; }
+  try { return JSON.parse(new TextDecoder().decode(all)) as Manifest; } catch { return null; }
+}
+
+async function loadLibrary(): Promise<Library> {
+  const raw = await app<Raw>("library");
+  for (const r of raw.roots) {
+    const stamp = r.stamp ?? "";
+    let kept = manifests.get(r.key);
+    if (!kept || kept.stamp !== stamp) {
+      kept = { stamp, m: await fetchManifest(r.key) };
+      manifests.set(r.key, kept);
+    }
+    r.manifest = kept.m;
+  }
+  const keys = new Set(raw.roots.map((r) => r.key));
+  for (const k of [...manifests.keys()]) if (!keys.has(k)) manifests.delete(k);
+  return build(raw);
+}
+
 export default function App() {
   const [lib, setLib] = useState<Library | null>(null);
   const [music, setMusic] = useState<MusicState>({ ready: false });
+  const loading = useRef<Promise<void> | null>(null);
+  const again = useRef(false);
+  // one load at a time; a change meanwhile loads once more after it
   const reload = useCallback(() => {
-    app<Raw>("library").then((r) => setLib(build(r))).catch(() => {});
+    if (loading.current) { again.current = true; return; }
+    loading.current = loadLibrary().then(setLib).catch(() => {}).finally(() => {
+      loading.current = null;
+      if (again.current) { again.current = false; reload(); }
+    });
   }, []);
   useEffect(() => {
     reload();

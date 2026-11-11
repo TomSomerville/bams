@@ -53,10 +53,11 @@ function label(s: DownloadState | null, what: string): string {
 
 /** Download a title, season, show, album, artist or playlist to the phone (Android app only).
  *  `what`: added to the label (" season"); `audio`: the file's audio codecs, to warn when the phone can't play
- *  them offline; `small`: an icon button for episode and track rows. */
-export function DownloadButton({ kind = "item", id, title, what = "", audio, small }: {
+ *  them offline; `small`: an icon button for episode and track rows; `updatable`: once downloaded, an Update button
+ *  asks again (playlists that change: the phone gets the songs added, lets go of those taken out, keeps the rest). */
+export function DownloadButton({ kind = "item", id, title, what = "", audio, small, updatable }: {
   kind?: "item" | "playlist" | "user_playlist"; id: number; title: string; what?: string;
-  audio?: (string | null | undefined)[]; small?: boolean;
+  audio?: (string | null | undefined)[]; small?: boolean; updatable?: boolean;
 }) {
   const { user } = useAuth();
   const { rid, remote } = useScope();
@@ -65,6 +66,7 @@ export function DownloadButton({ kind = "item", id, title, what = "", audio, sma
   const info = useAppInfo();
   const [asking, setAsking] = useState<"remove" | "audio" | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [updated, setUpdated] = useState<"asking" | "done" | null>(null);
   // this server says whether we may; another server answers when the app asks it
   if (!inApp || (rid === null && !user.can_download) || (rid !== null && !remote?.signed_in)) return null;
 
@@ -76,6 +78,12 @@ export function DownloadButton({ kind = "item", id, title, what = "", audio, sma
     setAsking(null);
     setErr(null);
     if (server) appApi.download(server, key, path, title).catch((e) => setErr(e.message));
+  };
+  const update = () => {
+    setErr(null);
+    setUpdated("asking");
+    if (server) appApi.download(server, key, path, title).then(() => setUpdated("done"))
+      .catch((e) => { setUpdated(null); setErr(e.message); });
   };
   const remove = () => {
     setAsking(null);
@@ -125,6 +133,12 @@ export function DownloadButton({ kind = "item", id, title, what = "", audio, sma
         disabled={!!state?.within}>
         <Icon name={done ? "check" : "download"} /> {text}
       </button>
+      {updatable && done && !state?.within && (
+        <button className="btn ghost" onClick={update} disabled={updated === "asking"}
+          title="Get the songs added since it was downloaded; songs taken out leave the phone">
+          <Icon name="refresh" /> {updated === "asking" ? "Updating…" : updated === "done" ? "Up to date" : "Update"}
+        </button>
+      )}
       {confirm}
       {err && <p className="key-msg bad">{err}</p>}
     </>
