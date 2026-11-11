@@ -66,8 +66,10 @@ Be security-conscious by default: when in doubt, leave it out and ask the owner.
    - **TMDB:** each user pastes their **own** key in Settings. There is **no shared/project key** (user decision).
      Attribution text must stay, and cached TMDB data/images must be refreshed within 6 months
      (`matcher.REFRESH_AFTER`).
-   - **ListenBrainz** (Top Played Songs): no key, open CC0 listen data. At most **1 request/second**
+   - **ListenBrainz** (Top Played Songs): open CC0 listen data. At most **1 request/second**
      (`MusicBrainz.top_recordings`), send `USER_AGENT`, keep the "Listening stats from ListenBrainz" credit in the UI.
+     Since 0.24.1 each server's admin pastes their **own** free user token (`listenbrainz_token`): ListenBrainz
+     refuses (401) artists it hasn't cached without one. Never a shared/project token.
    - **OpenSubtitles:** each server's admin pastes their **own** API key too (owner's decision, 2026-10-11), although
      OpenSubtitles' terms ask for one key per app and say they may ban apps whose users bring their own. Send the
      `USER_AGENT` ("BAMS v<version>"), stay under 5 requests/second (`opensubtitles._throttle`), never retry a login
@@ -75,7 +77,7 @@ Be security-conscious by default: when in doubt, leave it out and ask the owner.
    - **FFmpeg is never bundled.** It's found on the system (`probe.ffprobe_path`, `stream.ffmpeg_path`).
    - Don't copy Jellyfin code (GPL).
    - The repo ships no copyrighted posters.
-4. **Never handle the user's TMDB or OpenSubtitles key (or OpenSubtitles password) yourself.** Don't read them from
+4. **Never handle the user's TMDB, OpenSubtitles or ListenBrainz key/token (or OpenSubtitles password) yourself.** Don't read them from
    the browser or DB and replay them. The user enters them in Settings (or `bams tmdb-key`). Test against a fake
    (`app.state.opensubtitles_transport`, see `tests/test_opensubtitles.py`).
 5. **No placeholder data in the UI.** Every page shows real server data, with empty states when there's none.

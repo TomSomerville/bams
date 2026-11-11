@@ -32,6 +32,14 @@ export const sortSingles = (list: SingleTrack[], by: SingleSort) => (by === "tit
 export const singleNote = (t: SingleTrack) =>
   [t.album.localeCompare(t.title, undefined, { sensitivity: "base" }) ? t.album : null, t.year].filter(Boolean).join(" · ") || null;
 
+/** What Top Played Songs says when it has no songs to show (shared with the TV app). */
+export const noTopSongs = (t: { token?: "missing" | "refused" | null }) =>
+  t.token === "missing"
+    ? "ListenBrainz now asks for a token before it shares listening stats. An admin can add one in Settings, under Music identification."
+    : t.token === "refused"
+      ? "ListenBrainz refused this server's token. An admin can replace it in Settings, under Music identification."
+      : "ListenBrainz has no listening stats for this artist's songs here.";
+
 export const subLabel = (i: ItemSummary) =>
   [i.year, i.kind === "show" ? seasonsLabel(i) : fmtRuntime(i.runtime)].filter(Boolean).join(" · ");
 

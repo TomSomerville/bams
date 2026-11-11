@@ -674,7 +674,8 @@ at once. The how-to-get-a-key guide is a static page, `web/public/help/tmdb.html
 | `GET /api/libraries/{id}/items?sort=&kind=&q=&match_status=` (comma list: `pending,unmatched` = Unidentified) | shows, movies, or (music) `kind=artist\|album\|track`; `sort=artist` for albums | Library, MusicLibrary |
 | `GET /api/libraries/{id}/genres` | a music library's genres `[{name, count}]` by name, count = artists (`?genre=` on `/items?kind=artist` lists them) | Music Genres tab |
 | `GET /api/items/{id}/singles` | an artist's singles' songs (`music.single_sql`), oldest single first, a play queue with each single's `year` | artist page Singles |
-| `GET /api/items/{id}/top-tracks?limit=` | an artist's songs in this library in ListenBrainz's order, a play queue with `listens`, + `total`; asks ListenBrainz when its ranking is missing or older than 30 days | artist page, Top Songs page |
+| `PUT`/`DELETE /api/settings/listenbrainz-token` | the admin's ListenBrainz user token (checked with ListenBrainz, never returned; `GET /api/settings` → `listenbrainz`) | Settings → Music identification |
+| `GET /api/items/{id}/top-tracks?limit=` | an artist's songs in this library in ListenBrainz's order, a play queue with `listens`, + `total`, + `token` ("missing"/"refused" when ListenBrainz wanted one); asks ListenBrainz when its ranking is missing or older than 30 days | artist page, Top Songs page |
 | `GET /api/genres` | every show/movie genre `[{name, count}]`, most titles first | Home, HomeSettings (genre rows) |
 | `GET /api/items?kind=show,movie&sort=&q=&genre=&limit=` | across all libraries; `kind` may also list artist/album/track | Home, Search, Detail ("more like this") |
 | `GET /api/items/{id}` | detail + `ancestors` + `children` (with `child_count`) + `files` (probe, playback; a movie's/episode's unprobed files are probed now) + `ids.musicbrainz` + `extra` | Detail, Player, Music pages |

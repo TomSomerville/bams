@@ -8,7 +8,7 @@ import {
   type TopTracks, type UserPlaylist, type UserPlaylistSummary,
 } from "../api";
 import { qualityLine } from "../../../web/src/quality";
-import { recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../../../web/src/format";
+import { noTopSongs, recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../../../web/src/format";
 import { AddToPlaylistMenu, EditPlaylistMenu, HoldMenu, NewPlaylistMenu, PlaylistTrackMenu } from "../PlaylistMenus";
 import { useFocusOnReady, useNav } from "../App";
 import { Square } from "../Cards";
@@ -246,7 +246,7 @@ export function MusicDetail({ item, rid }: { item: ItemDetail; rid?: number }) {
           <h2 className="list-head">Top Played Songs</h2>
           {top.tracks.length ? <TrackList tracks={top.tracks} rid={rid} numbered showAlbum
             onHold={(i) => setAdding({ items: [top.tracks[i].id], title: top.tracks[i].title, fid: `t-${top.tracks[i].id}-${i}` })} />
-            : <p className="muted big">ListenBrainz has no listening stats for this artist's songs here.</p>}
+            : <p className="muted big">{noTopSongs(top)}</p>}
           <p className="credit">Listening stats from ListenBrainz.</p>
           {top.total > TOP_SONGS && (
             <button className="chip see-more" data-fid="top-more" onClick={() => nav.push({ name: "top-songs", id: item.id, rid })}>See more</button>

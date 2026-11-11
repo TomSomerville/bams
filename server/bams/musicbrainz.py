@@ -7,7 +7,8 @@ No keys or accounts: all of these are open services. What their terms ask of us:
   - Cover Art Archive: images belong to their rights holders; BAMS caches them for the owner's own library,
     the same way it caches TMDB posters. Nothing is redistributed (the repo ships no artwork).
   - ListenBrainz (listenbrainz.readthedocs.io): listen data is CC0; at most 1 request/second, with a User-Agent. Top
-    Played Songs credits it in the UI.
+    Played Songs credits it in the UI. Since late 2026 its popularity endpoint wants a user token (theirs is free:
+    listenbrainz.org/settings): each server's admin pastes their own in Settings, like the TMDB key.
   - Wikipedia text is CC BY-SA and Commons photos carry their own licences: the UI shows a link to the
     article and the photo's author + licence next to them.
 """
@@ -40,6 +41,10 @@ _lb_last = [0.0]
 
 class MusicLookupError(Exception):
     """A metadata service couldn't be reached or answered with an error (try again on a later scan)."""
+
+
+class ListenBrainzRefused(MusicLookupError):
+    """ListenBrainz wants a token for this (none is set) or refused the one that is."""
 
 
 def lucene(s: str) -> str:
@@ -142,12 +147,33 @@ class MusicBrainz:
             return None
         return r.json() if r.status_code == 200 else None
 
-    def top_recordings(self, artist_mbid: str) -> list[dict] | None:
-        """ListenBrainz: the artist's recordings by listens worldwide, best first. None when it can't say right now."""
+    def _lb(self, path: str, token: str | None) -> httpx.Response | None:
+        """GET a ListenBrainz resource (1 request/second), with the admin's token when there is one."""
         with _lb_lock:
             time.sleep(max(0.0, _lb_last[0] + self.min_interval - time.monotonic()))
             _lb_last[0] = time.monotonic()
-        return self._json(f"{LB}/popularity/top-recordings-for-artist/{artist_mbid}")
+        try:
+            return self.http.get(LB + path, headers={"authorization": f"Token {token}"} if token else None)
+        except httpx.HTTPError as e:
+            log.info("ListenBrainz lookup failed %s: %s", path, e)
+            return None
+
+    def top_recordings(self, artist_mbid: str, token: str | None = None) -> list[dict] | None:
+        """ListenBrainz: the artist's recordings by listens worldwide, best first. None when it can't say right now;
+        ListenBrainzRefused when it wants a token (or a better one)."""
+        r = self._lb(f"/popularity/top-recordings-for-artist/{artist_mbid}", token)
+        if r is not None and r.status_code in (401, 403):
+            raise ListenBrainzRefused(f"ListenBrainz said {r.status_code}")
+        return r.json() if r is not None and r.status_code == 200 else None
+
+    def listenbrainz_user(self, token: str) -> str | None:
+        """The ListenBrainz account a token belongs to; None when ListenBrainz says it isn't valid.
+        MusicLookupError when ListenBrainz can't be reached."""
+        r = self._lb("/validate-token", token)
+        if r is None or r.status_code >= 500 or r.status_code == 429:
+            raise MusicLookupError("ListenBrainz couldn't be reached")
+        d = r.json() if r.status_code == 200 else {}
+        return (d.get("user_name") or "?") if d.get("valid") else None
 
     def wikidata(self, qid: str) -> dict | None:
         d = self._json(f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json")

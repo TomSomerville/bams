@@ -8,7 +8,7 @@ import { Backdrop, Poster } from "../components/Art";
 import { AlbumCard, ArtistCard } from "../components/Cards";
 import Icon from "../components/Icon";
 import MusicFixMatch from "../components/MusicFixMatch";
-import { fmtClock, fmtLength, plural, recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../format";
+import { fmtClock, fmtLength, noTopSongs, plural, recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../format";
 import { useScope } from "../servers";
 import { useMusic } from "../music";
 import { PlayRandomButton } from "../random";
@@ -277,7 +277,7 @@ function TopSongs({ item }: { item: ItemDetail }) {
         {data.total > TOP_SONGS && <Link to={to(`/top-songs/${item.id}`)} className="btn ghost small">See more</Link>}
       </div>
       {data.tracks.length ? <TrackList tracks={data.tracks} albumArtist={item.title} showAlbum numbered />
-        : <p className="muted">ListenBrainz has no listening stats for this artist's songs here.</p>}
+        : <p className={data.token ? "key-msg warn" : "muted"}>{noTopSongs(data)}</p>}
       <ListenBrainzCredit />
     </section>
   );
@@ -317,7 +317,7 @@ export function TopSongsPage() {
       </div>
       <section className="music-section">
         {data.tracks.length ? <TrackList tracks={data.tracks} albumArtist={artist.title} showAlbum numbered />
-          : <p className="muted">ListenBrainz has no listening stats for this artist's songs here.</p>}
+          : <p className={data.token ? "key-msg warn" : "muted"}>{noTopSongs(data)}</p>}
         <ListenBrainzCredit />
       </section>
     </div>

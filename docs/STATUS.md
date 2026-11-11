@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.24.0).
+Last updated: **2026-11-11** (release 0.24.1).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -468,6 +468,22 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-11: ListenBrainz token for Top Played Songs (release 0.24.1)
+- **What / why:** owner: Run The Jewels showed no Top Played Songs on the live server. ListenBrainz's
+  `popularity/top-recordings-for-artist` now answers 401 "you need to provide an Auth token" for artists it hasn't
+  cached (well-known ones it has cached still answer without; which ones changes). Owner chose a token setting, like
+  TMDB's: `PUT/DELETE /api/settings/listenbrainz-token` (admin; checked with `/1/validate-token`, an invalid token isn't
+  saved, unreachable = saved unchecked), `GET /api/settings` → `listenbrainz {configured, last4, user}` (account name
+  for admins only). `top_recordings(mbid, token)` sends `Authorization: Token …`, raises `ListenBrainzRefused` on
+  401/403; `top-tracks` returns `token: "missing" | "refused" | null` and the pages show why (`format.ts noTopSongs`,
+  web + TV).
+- **Files:** `server/bams/{musicbrainz,app}.py`, `server/tests/test_music_top.py`; `web/src/components/MusicSettings.tsx`,
+  `web/src/{format,api}.ts`, `web/src/pages/Music.tsx`; `tv/src/screens/Music.tsx`; `CLAUDE.md` (rules 3 and 4).
+- **Verified:** server tests (430); against the real ListenBrainz from a scratch server: an artist it refuses shows
+  "ListenBrainz now asks for a token…"; a made-up token was refused by ListenBrainz and not saved. Not tried with a
+  real token (the owner adds their own).
+- **Left open:** artists whose lookup was refused are asked again on each visit to their page until a token is set.
 
 ### 2026-11-11: Singles apart from albums (release 0.24.0)
 - **What / why:** owner: artist cards and pages should say "1 album, 3 singles", and the artist page should list the

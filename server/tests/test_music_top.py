@@ -153,11 +153,61 @@ def test_top_played_songs_without_an_identified_artist_or_lookups(api, monkeypat
     ar, _ = _album(con, lib_id, "Alpha", "A1", ["One"])
     calls = []
     lb(monkeypatch, (200, [rec("One", 5)]), calls)
-    assert c.get(f"/api/items/{ar}/top-tracks").json() == {"tracks": [], "total": 0}  # no MusicBrainz id yet
+    assert c.get(f"/api/items/{ar}/top-tracks").json() == {"tracks": [], "total": 0, "token": None}  # no id yet
     con.execute("UPDATE items SET mbid='artist-id' WHERE id=?", (ar,))
     set_setting(con, "music_lookup", "0")
     assert c.get(f"/api/items/{ar}/top-tracks").json()["total"] == 0
     assert calls == []  # the owner turned lookups off
+
+
+def test_top_played_songs_send_the_admins_listenbrainz_token(api, monkeypatch):
+    """ListenBrainz wants a token for its popularity data (401 without): the admin's own, saved in Settings."""
+    c, con, lib_id = api
+    ar, (one,) = _album(con, lib_id, "Alpha", "A1", ["One"])
+    con.execute("UPDATE items SET mbid='artist-id' WHERE id=?", (ar,))
+    good = "tok-1234"  # privacy-check: ok (made up)
+    seen = []
+
+    def handle(req):
+        auth = req.headers.get("authorization")
+        seen.append((req.url.path, auth))
+        if req.url.path == "/1/validate-token":
+            return httpx.Response(200, json={"valid": auth == f"Token {good}", "user_name": "someone"})
+        if auth != f"Token {good}":
+            return httpx.Response(401, json={"code": 401, "error": "you need to provide an Auth token"})
+        return httpx.Response(200, json=[rec("One", 7)])
+    monkeypatch.setattr(app_module, "MusicBrainz", lambda: MusicBrainz(transport=httpx.MockTransport(handle), min_interval=0))
+    url = f"/api/items/{ar}/top-tracks"
+
+    r = c.get(url).json()
+    assert (r["tracks"], r["token"]) == ([], "missing")  # the page says an admin can add one
+    assert seen[-1] == ("/1/popularity/top-recordings-for-artist/artist-id", None)
+
+    bad = c.put("/api/settings/listenbrainz-token", json={"key": "nope-0000"})
+    assert bad.status_code == 400 and "isn't valid" in bad.json()["detail"]
+    assert c.get("/api/settings").json()["listenbrainz"]["configured"] is False  # not saved
+    assert c.put("/api/settings/listenbrainz-token", json={"key": "has space"}).status_code == 400
+
+    saved = c.put("/api/settings/listenbrainz-token", json={"key": f"  {good} "}).json()
+    assert saved == {"configured": True, "last4": "1234", "user": "someone", "checked": True}
+    assert good not in c.get("/api/settings").text  # never sent back
+
+    r = c.get(url).json()
+    assert [(t["id"], t["listens"]) for t in r["tracks"]] == [(one, 7)] and r["token"] is None
+    assert seen[-1][1] == f"Token {good}"
+
+    # a token ListenBrainz stops accepting says so
+    con.execute("DELETE FROM artist_popularity")
+    set_setting(con, "listenbrainz_token", "old-9999")
+    assert c.get(url).json()["token"] == "refused"
+    assert c.delete("/api/settings/listenbrainz-token").json() == {"configured": False, "last4": None, "user": None}
+
+
+def test_listenbrainz_token_saved_unchecked_when_listenbrainz_is_down(api, monkeypatch):
+    c, con, lib_id = api
+    lb(monkeypatch, (503, {}))
+    r = c.put("/api/settings/listenbrainz-token", json={"key": "tok-5678"}).json()  # privacy-check: ok (made up)
+    assert (r["configured"], r["checked"], r["user"]) == (True, False, None)
 
 
 @pytest.mark.parametrize("title, key", [

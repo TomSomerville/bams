@@ -30,7 +30,7 @@ from . import devices, holidays, music, netflow, opensubtitles, security, update
 from .config import VERSION, Paths
 from .db import Tx, connect, get_setting, jdump, jload, migrate, set_setting
 from .jobs import Scheduler, language, music_lookup_enabled, tmdb_client
-from .musicbrainz import MusicBrainz, MusicLookupError
+from .musicbrainz import ListenBrainzRefused, MusicBrainz, MusicLookupError
 from .parse import guess, parse_episode, parse_movie, title_folder
 from .tmdb import InvalidKey, Tmdb, TmdbError, key_kind
 
@@ -1198,13 +1198,43 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 "last4": key[-4:] if key else None, "verified_at": get_setting(con, "tmdb_verified_at")}
 
     @app.get("/api/settings")
-    def get_settings(con=Depends(db)):
+    def get_settings(con=Depends(db), me=Depends(current_user)):
         return {"tmdb": _tmdb_status(con), "language": get_setting(con, "language", "en-US"),
                 "music_lookup": music_lookup_enabled(con), "music_output": music_output(con),
                 "autofill": identify.autofill_enabled(con),
                 "max_transcodes": int(get_setting(con, "max_transcodes", "0") or 0),
                 "max_transcodes_auto": auto_transcode_limit(), "watch": watch.thresholds(con),
-                "server_name": server_name(con), "opensubtitles": opensubtitles.status(con)}
+                "server_name": server_name(con), "opensubtitles": opensubtitles.status(con),
+                "listenbrainz": {**_listenbrainz_status(con), **({} if me["is_admin"] else {"user": None})}}
+
+    def _listenbrainz_status(con) -> dict:
+        token = get_setting(con, "listenbrainz_token")
+        return {"configured": bool(token), "last4": token[-4:] if token else None,
+                "user": get_setting(con, "listenbrainz_user") if token else None}
+
+    @app.put("/api/settings/listenbrainz-token", dependencies=ADMIN)
+    def put_listenbrainz_token(body: KeyIn, con=Depends(db)):
+        """The admin's own ListenBrainz token (Top Played Songs needs one). Checked with ListenBrainz first: a token it
+        calls invalid isn't saved; when it can't be reached the token is saved unchecked. Never returned."""
+        token = body.key.strip()
+        if not token or len(token) > 200 or any(c.isspace() for c in token):
+            raise HTTPException(400, "That doesn't look like a ListenBrainz token.")
+        try:
+            with MusicBrainz() as mb:
+                user = mb.listenbrainz_user(token)
+        except MusicLookupError:
+            user = ""
+        if user is None:
+            raise HTTPException(400, "ListenBrainz says this token isn't valid. Copy it again from listenbrainz.org/settings.")
+        set_setting(con, "listenbrainz_token", token)
+        set_setting(con, "listenbrainz_user", user or None)
+        return {**_listenbrainz_status(con), "checked": bool(user)}
+
+    @app.delete("/api/settings/listenbrainz-token", dependencies=ADMIN)
+    def delete_listenbrainz_token(con=Depends(db)):
+        set_setting(con, "listenbrainz_token", None)
+        set_setting(con, "listenbrainz_user", None)
+        return _listenbrainz_status(con)
 
     def os_client(con: sqlite3.Connection, key: str | None = None) -> opensubtitles.Client:
         """The OpenSubtitles API with this server's key, or `key` (409 when there's none). Tests set the transport."""
@@ -1756,13 +1786,19 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         r = con.execute("SELECT kind, mbid FROM items WHERE id=?", (item_id,)).fetchone()
         if not r or r["kind"] != "artist":
             raise HTTPException(404, "no such artist")
+        token = get_setting(con, "listenbrainz_token")
+        refused = None  # "missing" / "refused": ListenBrainz wants a token (Settings -> Music)
         if r["mbid"] and music_lookup_enabled(con) and music.popular_stale(con, item_id):
-            with MusicBrainz() as mb:
-                recordings = mb.top_recordings(r["mbid"])
+            try:
+                with MusicBrainz() as mb:
+                    recordings = mb.top_recordings(r["mbid"], token)
+            except ListenBrainzRefused:
+                recordings, refused = None, "refused" if token else "missing"
             if recordings is not None:
                 music.store_popular(con, item_id, recordings)
         listens, total = music.top_tracks(con, item_id, limit)
-        return {"tracks": [{**t, "listens": listens[t["id"]]} for t in _queue(con, list(listens))], "total": total}
+        return {"tracks": [{**t, "listens": listens[t["id"]]} for t in _queue(con, list(listens))], "total": total,
+                "token": refused}
 
     @app.get("/api/items/{item_id}/singles")
     def artist_singles(item_id: int, con=Depends(db)):

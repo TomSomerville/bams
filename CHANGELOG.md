@@ -3,6 +3,17 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.24.1 (2026-11-11)
+
+### Fixed
+- **Top Played Songs was empty for many artists.** ListenBrainz now refuses requests without a token for artists
+  it hasn't looked up lately ("Due to bad actors and AI scrapers…"). Settings → Music identification has a new
+  **ListenBrainz token** box: sign in at listenbrainz.org with a MusicBrainz account, copy your free "User token" from
+  listenbrainz.org/settings and paste it there. BAMS checks it with ListenBrainz before saving and never shows it
+  again. Until one is set, Top Played Songs says why it's empty instead of "no listening stats".
+
+Update the server with the new installer, then add the token. The phone and TV apps don't change.
+
 ## 0.24.0 (2026-11-11)
 
 ### Added

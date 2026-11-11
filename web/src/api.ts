@@ -380,7 +380,11 @@ export type MusicGenre = { name: string; count: number };
 
 /** GET /api/items/:id/top-tracks: the artist's songs in this library, most listened to worldwide first (ListenBrainz;
  *  `total`: all of them, the list stops at `limit`). */
-export type TopTracks = { tracks: (QueueTrack & { listens: number })[]; total: number };
+export type TopTracks = {
+  tracks: (QueueTrack & { listens: number })[]; total: number;
+  /** ListenBrainz wanted a token: none is set ("missing") or it refused the server's ("refused"). Older servers: absent. */
+  token?: "missing" | "refused" | null;
+};
 
 export type PlaylistSummary = {
   id: number;
