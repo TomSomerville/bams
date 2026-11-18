@@ -1,7 +1,7 @@
 # BAMS: build status, requirements and decisions
 
 The hand-over document for anyone (human or Claude session) picking up the project.
-Last updated: **2026-11-11** (release 0.24.3, Android 0.2.10).
+Last updated: **2026-11-18** (release 0.25.0, Android 0.2.11, TV apps 0.19.0).
 
 > **Several agents work on this repo, often at the same time, and none of them sees everything.** This file
 > (especially §8 **Work log**) and [CODEBASE.md](CODEBASE.md) are the shared memory between them. Before planning
@@ -468,6 +468,35 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-18: Music Home tab and the fireplace (release 0.25.0, Android 0.2.11, TV apps 0.19.0)
+- **What / why:** owner: a Home tab before Artists in Music (web, phone online + Downloads, TV/theatre): Recently
+  Added (20 albums), Released This Week (owner's pick: the calendar week Sun–Sat, any year), Upcoming Holiday (owner's
+  pick: every holiday of the coming weeks with songs, 45 days), each with Shuffle; and a fire button in the music
+  player that shows a looping yule log full screen (owner picked the clip: "Mount Rainier Holiday Hearth", Mount Rainier
+  National Park, CC BY 3.0 on Commons; 43 s cut from its close-up, end cross-faded into the start, 720p H.264, silent,
+  3.5 MB, in `web/public` and `tv/public` with `fireplace-CREDITS.txt`; the credit shows on screen).
+- **How:** albums' release day in `items.air_date` (`music_match` from the release group's first-release-date, else
+  `music.fill_release_dates` from tags in the album's year; v19 backfills identified albums from `extra.date`).
+  `holidays.songs()` (own cache) = song/album titles and genre tags through the holiday words + `SONG_WORDS` (carols);
+  `holidays.upcoming()`. Routes `/api/libraries/{id}/music-home` (+ `/{recent|week|<holiday>}/random`); manifests carry
+  each track's `holidays` and a `holidays` calendar (10 years of dates) for the phone (`phone/lib.ts musicHome`).
+  Fireplace: `web/src/components/Fireplace.tsx` (navigation state `fire`, Fullscreen API from the tap, wake lock, app
+  bridge `keepAwake`), `tv/src/Fireplace.tsx` (Back closes; Fire TV `BamsAndroid.keepAwake`, Samsung
+  `webapis.appcommon.setScreenSaver`, PC wake lock). Both portal into `<body>`.
+- **Files:** server `app.py`, `music.py`, `music_match.py`, `holidays.py`, `db.py`, `tests/test_music_home.py`; web
+  `pages/MusicHome.tsx`, `pages/Music.tsx`, `components/Fireplace.tsx`, `FullPlayer.tsx`, `NowPlaying.tsx`, `Row.tsx`,
+  `Cards.tsx`, `Icon.tsx`, `format.ts`, `phone/lib.ts`, `phone/pages.tsx`; tv `screens/Music.tsx`, `Fireplace.tsx`,
+  `Cards.tsx`, `random.tsx`; Android `Bridge.kt`, `MainActivity.kt`; Fire TV `Bridge.kt`.
+- **Verified:** 17 new server tests (dates, words, sections, shuffles, leap day, manifests), suite 447 passed (the known
+  Linux `test_encoder_choice_api` fails); TV tests 55 (new fireplace navigation case). Scratch server with tagged test
+  albums: web desktop and phone size (Home sections, holiday song plays, fireplace from the bar and the full-screen
+  player, Back and ✕ close it, music keeps playing), theatre mode (Home, Christmas Shuffle, fireplace, Esc closes and
+  focus returns). Release APKs build.
+- **Left open:** not tried on the Samsung TV (HTML5 `<video>` alongside the music's `<audio>`, and whether
+  `setScreenSaver` needs a privilege), the Fire TV or a real phone; songs have no admin holiday overrides
+  (`holiday_tags` is movies/episodes only); older phone downloads need Update for the offline sections; a matched
+  album with no MusicBrainz day gets its tag day only at the next scan.
 
 ### 2026-11-11: Android start screen without a white circle (Android 0.2.10, on the 0.24.3 release)
 - **What / why:** owner: the app's start screen showed the logo on a white circle. The app had only a legacy square

@@ -3,6 +3,28 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.0 (2026-11-18), Android app 0.2.11, TV apps 0.19.0
+
+### New
+- **Music Home.** Music libraries open on a new **Home** tab (Artists, Albums, Playlists and Genres are still there),
+  in the browser, the Android app (online and in Downloads) and the TV apps / theatre mode:
+  - **Recently Added**: the 20 albums added last.
+  - **Released This Week**: albums first released this week (Sunday to Saturday) in any year, with their day. The
+    day comes from MusicBrainz, or from the files' tags for albums that aren't identified; albums known only by
+    their year can't show here.
+  - **Upcoming Holiday**: one section for each holiday of the next 45 days that has songs, e.g. Thanksgiving and
+    Christmas. A song counts when its title, its album's title or its genre names the holiday, or when it's a carol
+    everyone knows ("Silent Night", "Jingle Bell Rock", "Feliz Navidad"…).
+  - Each section has a **Shuffle** of all its songs.
+- **The fireplace.** A new fire button in the music player (beside Add to playlist and Play queue; in the bar at the
+  bottom on computers and TVs) shows a crackling yule log full screen while the music goes on. Back closes it; the
+  screen stays on while it shows. The video is "Mount Rainier Holiday Hearth" by Mount Rainier National Park (CC BY
+  3.0).
+
+In the Android app's Downloads, Released This Week and the holiday sections need downloads made with this server:
+press **Update** on older music downloads. Update the server, the Android app (0.2.11: keeps the screen on for the
+fireplace) and the Fire TV app (0.19.0). The Samsung TV app (0.19.0) comes separately.
+
 ## Android app 0.2.10 (2026-11-11, on the 0.24.3 release)
 
 ### Changed

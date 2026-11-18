@@ -454,4 +454,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   scripted click (CDP, `el.click()`) are skipped by Back, which then leaves the app; real taps behave.
 - **Never `pkill -f` a pattern from a Bash tool call:** the pattern is in the shell's own command line, so it kills that
   shell and whatever it was about to start.
+- **A fixed layer inside the web's now-playing bar is held to the bar** (its `backdrop-filter` makes it the containing
+  block): overlays opened from it (the fireplace) render through `createPortal(…, document.body)`.
+- **Holiday songs are cached apart from holiday titles** (`holidays.songs`, keyed by album/track count, last change and
+  title/genre lengths). Song-only words go in `SONG_WORDS` (carols), never in a holiday's own words (movies use those).
+  Albums' release day is `items.air_date` ('YYYY-MM-DD', episodes use it for their air date).
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
