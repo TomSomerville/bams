@@ -262,7 +262,7 @@ function ContinueMenu({ path, rid, onClose, onRemoved }: {
 }
 
 /** Square album cover; the play button on hover starts the album without opening it. */
-export function AlbumCard({ item, showArtist = true }: { item: ItemSummary; showArtist?: boolean }) {
+export function AlbumCard({ item, showArtist = true, sub }: { item: ItemSummary; showArtist?: boolean; sub?: string }) {
   const music = useMusic();
   const { to, rid } = useItemServer(item);
   return (
@@ -277,7 +277,7 @@ export function AlbumCard({ item, showArtist = true }: { item: ItemSummary; show
         </div>
       </div>
       <div className="poster-title">{item.title}</div>
-      <div className="poster-sub">{[showArtist ? item.parent_title : null, item.year].filter(Boolean).join(" · ")}</div>
+      <div className="poster-sub">{sub ?? [showArtist ? item.parent_title : null, item.year].filter(Boolean).join(" · ")}</div>
     </Link>
   );
 }

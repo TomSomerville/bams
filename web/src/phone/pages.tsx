@@ -3,9 +3,9 @@ import { Link, useParams } from "react-router-dom";
 import { app } from "../android";
 import { Backdrop, Poster } from "../components/Art";
 import Icon from "../components/Icon";
-import { fmtClock, fmtLength, fmtRuntime, fmtSize, plural, sxe } from "../format";
+import { fmtClock, fmtLength, fmtRuntime, fmtSize, holidayDayLabel, plural, releasedLabel, sxe, weekLabel } from "../format";
 import { musicCmd, playTracks, useLib, useMusicState } from "./App";
-import { episodesOf, here, ik, rootOf, shelves, tracksOf, type Item, type Library, type Playlist, type RootKind, type RootRow, type Track } from "./lib";
+import { episodesOf, here, ik, musicHome, rootOf, shelves, songsOf, tracksOf, type Item, type Library, type Playlist, type RootKind, type RootRow, type Track } from "./lib";
 
 const base = import.meta.env.BASE_URL;
 
@@ -66,7 +66,7 @@ function RemoveButton({ root, small }: { root: RootRow; small?: boolean }) {
     : <button className="btn ghost" onClick={() => setAsking(true)}><Icon name="close" /> {busy ? "Stop download" : "Remove download"}</button>;
 }
 
-function Card({ it, square, round }: { it: Item; square?: boolean; round?: boolean }) {
+function Card({ it, square, round, sub }: { it: Item; square?: boolean; round?: boolean; sub?: string }) {
   const p = it.progress;
   const frac = p && !p.watched && p.duration ? p.position / p.duration : null;
   return (
@@ -76,7 +76,7 @@ function Card({ it, square, round }: { it: Item; square?: boolean; round?: boole
         {frac !== null && frac > 0 && <div className="progress"><div style={{ width: `${frac * 100}%` }} /></div>}
       </div>
       <div className="poster-title">{it.title}</div>
-      <div className="poster-sub">{[it.kind === "album" ? it.parent_title : null, it.year].filter(Boolean).join(" · ")}</div>
+      <div className="poster-sub">{sub ?? [it.kind === "album" ? it.parent_title : null, it.year].filter(Boolean).join(" · ")}</div>
     </Link>
   );
 }
@@ -244,11 +244,73 @@ export function ShowsPage() {
   );
 }
 
-const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
+const TABS = { home: "Home", artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
+
+/** A Music Home section: a shelf with its Shuffle (every song in it, shuffled from a random one). */
+function HomeShelf({ title, sub, songs, onError, children }: {
+  title: string; sub?: string; songs: Track[]; onError: (e: string) => void; children: React.ReactNode;
+}) {
+  return (
+    <section className="phone-shelf">
+      <div className="section-head">
+        <h2 className="section-title">{title}</h2>
+        {sub && <span className="row-sub">{sub}</span>}
+        {songs.length > 0 && (
+          <button className="btn ghost small row-shuffle" aria-label={`Shuffle ${title}`}
+            onClick={() => playTracks(songs, Math.floor(Math.random() * songs.length), true).catch((e) => onError(e.message))}>
+            <Icon name="shuffle" size={16} /> Shuffle
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** Music Home from the downloads (lib.ts `musicHome`; online, the server's own page shows it: pages/MusicHome.tsx). */
+function OfflineMusicHome({ lib, onError }: { lib: Library; onError: (e: string) => void }) {
+  const home = musicHome(lib);
+  const m = useMusicState();
+  const playing = m.queue && m.index !== undefined ? m.queue[m.index] : null;  // "<sid>|<track id>"
+  if (!home.recent.length) return <p className="muted">No music downloaded.</p>;
+  return (
+    <>
+      <HomeShelf title="Recently Added" songs={songsOf(lib, home.recent)} onError={onError}>
+        <div className="row-track">{home.recent.map((i) => <Card key={ik(i.sid, i.id)} it={i} square />)}</div>
+      </HomeShelf>
+      <HomeShelf title="Released This Week" sub={weekLabel(home.week.start, home.week.end)} songs={songsOf(lib, home.week.albums)} onError={onError}>
+        {home.week.albums.length
+          ? <div className="row-track">{home.week.albums.map((i) => (
+            <Card key={ik(i.sid, i.id)} it={i} square sub={[i.parent_title, i.released && releasedLabel(i.released)].filter(Boolean).join(" · ")} />
+          ))}</div>
+          : <p className="muted">No downloaded album first came out this week, in any year.</p>}
+      </HomeShelf>
+      {home.holidays.map((h) => (
+        <HomeShelf key={h.id} title={`Upcoming Holiday: ${h.name}`} sub={`${holidayDayLabel(h.date)} · ${plural(h.tracks.length, "song")}`}
+          songs={h.tracks} onError={onError}>
+          <div className="row-track">
+            {h.tracks.map((t, i) => {
+              const on = playing === `${t.sid}|${t.id}`;
+              return (
+                <button key={ik(t.sid, t.id)} className={`poster-card album-card song-card ${on ? "on" : ""}`} aria-label={`Play ${t.title}`}
+                  onClick={() => (on ? musicCmd("toggle") : playTracks(h.tracks, i).catch((e) => onError(e.message)))}>
+                  <div className="poster-frame square"><Poster src={t.poster} title={t.album} /></div>
+                  <div className="poster-title">{t.title}</div>
+                  <div className="poster-sub">{t.artist}</div>
+                </button>
+              );
+            })}
+          </div>
+        </HomeShelf>
+      ))}
+      {!home.holidays.length && <p className="muted music-home-empty">No downloaded songs for a holiday in the coming weeks.</p>}
+    </>
+  );
+}
 
 export function MusicPage() {
   const { lib } = useLib();
-  const [tab, setTab] = useState<keyof typeof TABS>("artist");
+  const [tab, setTab] = useState<keyof typeof TABS>("home");
   const [genre, setGenre] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   if (!lib) return <div className="page muted">Loading…</div>;
@@ -270,7 +332,7 @@ export function MusicPage() {
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{TABS[k]}</button>
           ))}
         </div>
-        <span className="count">{plural(n, tab)}</span>
+        {tab !== "home" && <span className="count">{plural(n, tab)}</span>}
       </div>
       {songs.length > 0 && (
         <div className="actions music-all">
@@ -279,7 +341,8 @@ export function MusicPage() {
         </div>
       )}
       {err && <p className="key-msg bad">{err}</p>}
-      {!n && <p className="muted">No {TABS[tab].toLowerCase()} downloaded.</p>}
+      {tab === "home" && <OfflineMusicHome lib={lib} onError={setErr} />}
+      {!n && tab !== "home" && <p className="muted">No {TABS[tab].toLowerCase()} downloaded.</p>}
       {tab === "genre" && n > 0 && (
         <div className="chips genre-list">
           {genres.map((g) => <button key={g} className={`chip ${genre === g ? "on" : ""}`} onClick={() => setGenre(g)}>{g}</button>)}

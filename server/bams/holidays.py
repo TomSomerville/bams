@@ -171,6 +171,13 @@ def next_and_recent(today: Date) -> tuple[tuple[Holiday, Date], tuple[Holiday, D
     return nxt, rec
 
 
+def upcoming(today: Date, days: int) -> list[tuple[Holiday, Date]]:
+    """Every holiday from today (included) to `days` days ahead, soonest first (Music Home, owner 2026-11-18)."""
+    end = today + dt.timedelta(days=days)
+    return sorted(((h, d) for h in HOLIDAYS if (d := occurrence(h, today, True)) and d <= end),
+                  key=lambda x: (x[1], x[0].id))
+
+
 def matches(text: str) -> set[str]:
     """The holidays a piece of text is about."""
     return {h.id for h in HOLIDAYS if h.words.search(text)} if text else set()
@@ -227,3 +234,56 @@ def set_tag(con: sqlite3.Connection, item_id: int, holiday: str, tagged: bool | 
         con.execute("""INSERT INTO holiday_tags (item_id, holiday, tagged) VALUES (?, ?, ?)
                        ON CONFLICT (item_id, holiday) DO UPDATE SET tagged=excluded.tagged""",
                     (item_id, holiday, int(tagged)))
+
+
+# ---- songs about a holiday (Music Home, owner 2026-11-18)
+
+# Songs that are about a holiday without naming it: carols and standards. Only for song and album titles (a film
+# named "Silent Night" is matched by its description). Specific titles only, never a bare word that is also a name
+# or a place ("Noel", "Santa Monica").
+SONG_WORDS: dict[str, re.Pattern] = {
+    "christmas": _words(
+        "jingle bells?", "jingle bell rock", "silent night", "stille nacht", "deck the halls?", "o holy night",
+        "feliz navidad", "joy to the world", f"o come,? all ye faithful", "adeste fideles", "hark!? the herald",
+        "the first no[eë]l", "away in a manger", "o little town of bethlehem", "red[- ]nosed reindeer",
+        "rudolph the", "frosty the snowman", "little drummer boy", "sleigh ride", "silver bells", "o tannenbaum",
+        "carol of the bells", "we wish you a merry", "god rest y[eo]u? merry", "good king wenceslas",
+        "angels we have heard on high", "twelve days of", "here comes santa", "santa baby",
+        f"santa{APOS}s? (?:claus|is coming|baby|bring|tell)", "holly jolly", "rockin['’g]? around the",
+        "it came upon the midnight clear", "do you hear what i hear", "what child is this", "ding dong merrily",
+        "nutcracker", "mistletoe", f"let it snow(?:,? let it snow)*",
+        "o come,? o come,? emmanuel", "white christmas", "navidad", "joyeux no[eë]l", "weihnacht\\w*"),
+    "halloween": _words("monster mash", "spooky scary skeletons"),
+    "hanukkah": _words("dreidel"),
+}
+
+_song_cache: dict[str, object] = {"key": None, "songs": {}}
+
+
+def song_matches(text: str) -> set[str]:
+    """The holidays a song or album title (or a genre tag) is about: the holiday's own words, or its songs'."""
+    if not text:
+        return set()
+    return matches(text) | {hid for hid, words in SONG_WORDS.items() if words.search(text)}
+
+
+def songs(con: sqlite3.Connection) -> dict[str, set[int]]:
+    """holiday id -> the tracks about it: by their own title or genre tags, or their album's title (a Christmas
+    album's songs are all Christmas songs). Kept in memory until a music title changes, like `titles()`."""
+    key = tuple(con.execute("""SELECT COUNT(*), MAX(updated_at), TOTAL(LENGTH(title)), TOTAL(LENGTH(genres))
+                               FROM items WHERE kind IN ('album','track')""").fetchone())
+    with _lock:
+        if _song_cache["key"] == key:
+            return _song_cache["songs"]  # type: ignore[return-value]
+    out: dict[str, set[int]] = {h.id: set() for h in HOLIDAYS}
+    albums: dict[int, set[str]] = {}
+    for r in con.execute("SELECT id, title FROM items WHERE kind='album'"):
+        if hit := song_matches(r["title"]):
+            albums[r["id"]] = hit
+    for r in con.execute("SELECT id, parent_id, title, genres FROM items WHERE kind='track'"):
+        genres = " \n".join(jload(r["genres"]) or []) if r["genres"] else ""
+        for hid in song_matches(r["title"]) | song_matches(genres) | albums.get(r["parent_id"], set()):
+            out[hid].add(r["id"])
+    with _lock:
+        _song_cache.update(key=key, songs=out)
+    return out

@@ -44,22 +44,27 @@ export function Wide({ img, title, sub, progress, fid, onPress, onFocus, onHold,
   );
 }
 
-/** A row of cards. `all`: "See all" beside its title and as a card at its end (the holiday rows). */
-export function Shelf({ title, children, all }: {
-  title: string; children: React.ReactNode; all?: { fid: string; onPress: () => void };
+/** A row of cards. `all`: "See all" beside its title and as a card at its end (the holiday rows). `head`: more beside
+ *  the title (Music Home: a note and its Shuffle); `empty`: shown instead of the row when there's nothing on it. */
+export function Shelf({ title, children, all, head, empty }: {
+  title: string; children: React.ReactNode; all?: { fid: string; onPress: () => void }; head?: React.ReactNode;
+  empty?: React.ReactNode;
 }) {
   return (
     <section className="shelf">
-      {all ? (
+      {all || head ? (
         <div className="shelf-head">
           <h2>{title}</h2>
-          <button className="chip" data-fid={`${all.fid}-head`} onClick={all.onPress}>See all</button>
+          {head}
+          {all && <button className="chip" data-fid={`${all.fid}-head`} onClick={all.onPress}>See all</button>}
         </div>
       ) : <h2>{title}</h2>}
-      <div className="shelf-row" data-row>
-        {children}
-        {all && <button className="card poster see-all" data-fid={all.fid} onClick={all.onPress}><span>See all</span></button>}
-      </div>
+      {empty || (
+        <div className="shelf-row" data-row>
+          {children}
+          {all && <button className="card poster see-all" data-fid={all.fid} onClick={all.onPress}><span>See all</span></button>}
+        </div>
+      )}
     </section>
   );
 }

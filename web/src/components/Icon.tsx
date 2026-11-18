@@ -18,6 +18,8 @@ const PATHS: Record<string, string> = {
   chevronUp: "M18 15l-6-6-6 6",
   chevronDown: "M6 9l6 6 6-6",
   calendar: "M4 6h16v14H4zM4 10h16M8 3v5M16 3v5",
+  // the fireplace: a flame over two crossed logs
+  fire: "M12 1.5c.8 3 4.6 4.7 4.6 8.8a4.6 4.6 0 0 1-9.2 0c0-2.1 1.1-3.4 2.2-4.3.1 1.7.9 2.7 1.9 3-.4-2.9.1-5.3.5-7.5zM3 21.5l18-4.3M21 21.5L3 17.2",
   users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M22 21v-1a6 6 0 0 0-4.5-5.8",
   folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   plus: "M12 5v14M5 12h14",

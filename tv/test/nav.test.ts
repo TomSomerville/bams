@@ -294,6 +294,20 @@ test("Up next (Queue.tsx): ▲▼ go row to row, ▶ reaches the move / remove b
   eq(focused(), "q-row-1", "not out to the rail");
 });
 
+test("the fireplace (Fireplace.tsx): its two buttons only, never out to the bar or the rail under it", () => {
+  mount(shell(home(2), { np: true }) + `<div class="fireplace shown" data-trap><video muted></video><div class="fireplace-foot">` +
+    `<div class="fireplace-song"><b>Song</b></div><div class="fireplace-buttons">` +
+    ["play", "close"].map((b) => `<button class="round" data-fid="fire-${b}"><svg width="40" height="40"></svg></button>`).join("") +
+    `</div><div class="fireplace-credit">credit</div></div></div>`);
+  focus(el("fire-close"));
+  press("left");
+  eq(focused(), "fire-play");
+  press("left", "up", "down", "down");
+  eq(focused(), "fire-play", "not out of the fireplace");
+  press("right", "right");
+  eq(focused(), "fire-close");
+});
+
 test("focusId restores a remembered element", () => {
   mount(shell(home(3)));
   ok(focusId("r2-5"), "found");

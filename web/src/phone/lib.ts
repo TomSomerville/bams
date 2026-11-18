@@ -4,14 +4,17 @@
 
 import type { ItemDetail, ItemSummary, PlaylistSummary, QueueTrack, UserPlaylistSummary } from "../api";
 import type { DownloadState } from "../android";
+import { isoDate, thisWeek } from "../format";
 
 type ManifestFile = { id: number; name: string; size: number; items: number[]; audio: string[] };
 export type Manifest = {
   root: { kind: string; id: number; title: string };
   items: ItemDetail[];
-  tracks: QueueTrack[];
+  tracks: (QueueTrack & { holidays?: string[] })[];
   files: ManifestFile[];
   playlist?: PlaylistSummary | UserPlaylistSummary;
+  /** the holidays its songs are about, with their dates for years ahead (servers since Music Home, 2026-11-18) */
+  holidays?: Record<string, { name: string; dates: string[] }>;
 };
 export type RootRow = {
   key: string; sid: string; kind: RootKind; id: number; title: string; added: number;
@@ -33,7 +36,7 @@ export type Raw = {
 export type RootKind = "item" | "playlist" | "user_playlist";
 
 export type Item = ItemDetail & { sid: string };
-export type Track = QueueTrack & { sid: string };
+export type Track = QueueTrack & { sid: string; holidays?: string[] };
 /** A downloaded playlist: an imported one, or one of yours (`own`, with its description). `ref` is its page's
  *  part of the address: "playlist:3" or "user_playlist:3". */
 export type Playlist = {
@@ -49,6 +52,10 @@ export type Library = {
   roots: RootRow[];
   /** "<sid>:<item id>" -> its file's state (movies, episodes, tracks) */
   fileOf: Map<string, FileRow & { key: string }>;
+  /** holiday id -> its name and dates, from every manifest */
+  holidays: Map<string, { name: string; dates: string[] }>;
+  /** "<sid>:<album id>" -> when the latest download with it was added (Music Home's Recently Added) */
+  albumAdded: Map<string, number>;
   used: number;
 };
 
@@ -68,6 +75,8 @@ export function build(raw: Raw): Library {
   const tracks = new Map<string, Track>();
   const fileOf = new Map<string, FileRow & { key: string }>();
   const playlists: Playlist[] = [];
+  const holidays = new Map<string, { name: string; dates: string[] }>();
+  const albumAdded = new Map<string, number>();
   // oldest first: a later download's copy of an item (newer metadata) wins
   for (const r of [...raw.roots].sort((a, b) => a.added - b.added)) {
     const m = r.manifest;
@@ -83,7 +92,11 @@ export function build(raw: Raw): Library {
         ...(prev ? { children: mergeChildren(prev.children, d.children.map((c) => pictures(r.sid, c))) } : {}),
       });
     }
-    for (const t of m.tracks) tracks.set(ik(r.sid, t.id), { ...t, poster: img(r.sid, t.poster), sid: r.sid });
+    for (const t of m.tracks) {
+      tracks.set(ik(r.sid, t.id), { ...t, poster: img(r.sid, t.poster), sid: r.sid });
+      albumAdded.set(ik(r.sid, t.album_id), r.added);  // oldest first: the latest download wins
+    }
+    for (const [id, h] of Object.entries(m.holidays ?? {})) holidays.set(id, h);
     for (const f of m.files) {
       const row = raw.files[`${r.sid}|${f.id}`];
       if (row) for (const i of f.items) fileOf.set(ik(r.sid, i), { ...row, key: `${r.sid}|${f.id}` });
@@ -109,7 +122,7 @@ export function build(raw: Raw): Library {
   }
   return {
     servers: new Map(raw.servers.map((s) => [s.id, s.name])),
-    items, tracks, playlists, roots: raw.roots, fileOf, used: raw.used,
+    items, tracks, playlists, roots: raw.roots, fileOf, used: raw.used, holidays, albumAdded,
   };
 }
 
@@ -169,3 +182,35 @@ export function tracksOf(lib: Library, it: Item): Track[] {
 /** The download that is this item (it can be removed from here), if any. */
 export const rootOf = (lib: Library, sid: string, kind: RootKind, id: number) =>
   lib.roots.find((r) => r.sid === sid && r.kind === kind && r.id === id) ?? null;
+
+/** Music Home offline (owner 2026-11-18), like the server's (app.py `music_home`) from what's on the phone: the albums
+ *  downloaded last (20), albums first out this Sunday-to-Saturday week in any year, and each holiday of the next 45
+ *  days with its songs. Downloads made before servers sent release days and holidays have neither (Update them). */
+export function musicHome(lib: Library, today = new Date()) {
+  const { albums } = shelves(lib);
+  const recent = albums.filter((a) => lib.albumAdded.has(ik(a.sid, a.id)))
+    .sort((a, b) => lib.albumAdded.get(ik(b.sid, b.id))! - lib.albumAdded.get(ik(a.sid, a.id))! || b.id - a.id)
+    .slice(0, 20);
+  const week = thisWeek(today);
+  const weekAlbums = albums.filter((a) => a.released && week.days.includes(a.released.slice(5)))
+    .sort((a, b) => a.released!.slice(5).localeCompare(b.released!.slice(5)) || b.released!.localeCompare(a.released!));
+  const from = isoDate(today);
+  const until = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 45));
+  const songs = [...lib.tracks.values()].filter((t) => t.holidays?.length && here(lib, t.sid, t.id));
+  const holidays = [...lib.holidays.entries()]
+    .map(([id, h]) => ({ id, name: h.name, date: h.dates.find((d) => d >= from) }))
+    .filter((h): h is { id: string; name: string; date: string } => !!h.date && h.date <= until)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+    .map((h) => ({
+      ...h,
+      tracks: songs.filter((t) => t.holidays!.includes(h.id)).sort((a, b) =>
+        a.album_artist.localeCompare(b.album_artist) || a.album.localeCompare(b.album)
+        || (a.disc_number ?? 1) - (b.disc_number ?? 1) || (a.track_number ?? 0) - (b.track_number ?? 0)),
+    }))
+    .filter((h) => h.tracks.length > 0);
+  return { recent, week: { start: week.start, end: week.end, albums: weekAlbums }, holidays };
+}
+
+/** The downloaded songs of some albums, in play order (a Music Home section's Shuffle). */
+export const songsOf = (lib: Library, albums: Item[]) => albums.flatMap((a) => tracksOf(lib, a)).filter((t) => here(lib, t.sid, t.id));
+

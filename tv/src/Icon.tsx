@@ -18,6 +18,8 @@ const PATHS = {
   prev: "M19 4v16L8 12zM4 4h2v16H4z",
   music: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
   shuffle: "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
+  // the fireplace: a flame over two crossed logs (the web's Icon has the same)
+  fire: "M12 1.5c.8 3 4.6 4.7 4.6 8.8a4.6 4.6 0 0 1-9.2 0c0-2.1 1.1-3.4 2.2-4.3.1 1.7.9 2.7 1.9 3-.4-2.9.1-5.3.5-7.5zM3 21.5l18-4.3M21 21.5L3 17.2",
   stop: "M6 6h12v12H6z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   up: "M6 15l6-6 6 6",

@@ -4,14 +4,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  apiFor, mediaFor, type ItemDetail, type ItemSummary, type MusicGenre, type Playlist, type PlaylistSummary, type QueueTrack,
+  apiFor, mediaFor, type ItemDetail, type ItemSummary, type MusicGenre, type MusicHome, type Playlist, type PlaylistSummary, type QueueTrack,
   type TopTracks, type UserPlaylist, type UserPlaylistSummary,
 } from "../api";
 import { qualityLine } from "../../../web/src/quality";
-import { noTopSongs, recordsLabel, singleNote, sortSingles, type SingleSort, type SingleTrack } from "../../../web/src/format";
+import {
+  holidayDayLabel, noTopSongs, recordsLabel, releasedLabel, singleNote, sortSingles, weekLabel, type SingleSort, type SingleTrack,
+} from "../../../web/src/format";
 import { AddToPlaylistMenu, EditPlaylistMenu, HoldMenu, NewPlaylistMenu, PlaylistTrackMenu } from "../PlaylistMenus";
 import { useFocusOnReady, useNav } from "../App";
-import { Square } from "../Cards";
+import { Shelf, Square } from "../Cards";
+import Fireplace from "../Fireplace";
 import { clock } from "../format";
 import Icon from "../Icon";
 import { useMusic } from "../music";
@@ -20,14 +23,16 @@ import { QueuePanel } from "../Queue";
 import { PlayRandomButton } from "../random";
 import { session } from "../platform";
 
-const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
+// Home first (owner 2026-11-18), as on the web
+const TABS = { home: "Home", artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
 type Tab = keyof typeof TABS;
 
 /** A music library: artists, albums, playlists, or a genre's artists under the list of genres. */
 export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name: string }) {
   const nav = useNav();
   const key = rid === undefined ? `${id}` : `r${rid}.${id}`;
-  const [tab, setTab] = useState<Tab>(() => (session.get(`bams.mtab.${key}`) as Tab) || "artist");
+  const [tab, setTab] = useState<Tab>(() => (session.get(`bams.mtab.${key}`) as Tab) || "home");
+  const [home, setHome] = useState<MusicHome | null>(null);
   const [items, setItems] = useState<ItemSummary[] | null>(null);
   const [lists, setLists] = useState<PlaylistSummary[] | null>(null);
   const [mine, setMine] = useState<UserPlaylistSummary[] | null>(null);
@@ -41,9 +46,11 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
     session.set(`bams.mtab.${key}`, tab);
     setItems(null);
     setLists(null);
+    setHome(null);
     setErr(null);
     const api = apiFor(rid);
-    if (tab === "genre") {
+    if (tab === "home") api.get<MusicHome>(`/api/libraries/${id}/music-home`).then(setHome).catch((e) => setErr(e.message));
+    else if (tab === "genre") {
       api.get<MusicGenre[]>(`/api/libraries/${id}/genres`).then(setGenres).catch((e) => setErr(e.message));
       if (genre) {
         session.set(`bams.mgenre.${key}`, genre);
@@ -65,8 +72,8 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
     focusId(`m-${items[0].id}`);
   }, [items]);
 
-  useFocusOnReady(items !== null || lists !== null || genres !== null);
-  const count = tab === "playlist" ? (lists && mine ? lists.length + mine.length : undefined)
+  useFocusOnReady(items !== null || lists !== null || genres !== null || home !== null);
+  const count = tab === "home" ? undefined : tab === "playlist" ? (lists && mine ? lists.length + mine.length : undefined)
     : tab === "genre" && !genre ? genres?.length : items?.length;
 
   return (
@@ -82,7 +89,8 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
         <PlayRandomButton chip path={`/api/libraries/${id}/random`} rid={rid} />
       </div>
       {err && <p className="error big">{err}</p>}
-      {items === null && lists === null && !err && (tab !== "genre" || !genres || genre) && <div className="spinner" />}
+      {items === null && lists === null && home === null && !err && (tab !== "genre" || !genres || genre) && <div className="spinner" />}
+      {tab === "home" && home && <MusicHomeShelves home={home} id={id} rid={rid} />}
       {tab === "genre" && genres && !genres.length && <p className="muted big">None of this library's songs have a genre in their tags.</p>}
       {tab === "genre" && !!genres?.length && (
         <>
@@ -119,7 +127,7 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
             created={(p) => { setMaking(false); nav.push({ name: "my-playlist", id: p.id, rid }); }} />}
         </>
       )}
-      {tab !== "playlist" && (tab !== "genre" || genre) && items && !items.length && <p className="muted big">Nothing here yet.</p>}
+      {tab !== "playlist" && tab !== "home" && (tab !== "genre" || genre) && items && !items.length && <p className="muted big">Nothing here yet.</p>}
       <div className="grid squares">
         {tab !== "playlist" && (tab !== "genre" || genre) && items?.map((it) => (
           <Square key={it.id} fid={`m-${it.id}`} rid={rid} img={it.poster} title={it.title} round={it.kind === "artist"}
@@ -131,6 +139,47 @@ export function MusicLibrary({ id, rid, name }: { id: number; rid?: number; name
             sub={`${p.track_count} tracks`} onPress={() => nav.push({ name: "playlist", id: p.id, rid })} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** A music library's Home tab (web: pages/MusicHome.tsx): Recently Added, Released This Week, each holiday of the
+ *  coming weeks with its songs; each with a Shuffle of all its songs. */
+function MusicHomeShelves({ home, id, rid }: { home: MusicHome; id: number; rid?: number }) {
+  const nav = useNav();
+  const music = useMusic();
+  const base = `/api/libraries/${id}/music-home`;
+  const album = (a: ItemSummary, sub?: string | null) => (
+    <Square key={a.id} fid={`m-${a.id}`} rid={rid} img={a.poster} title={a.title}
+      sub={sub ?? [a.parent_title, a.year].filter(Boolean).join(" · ")} onPress={() => nav.push({ name: "detail", id: a.id, rid })} />
+  );
+  if (!home.recent.length) return <p className="muted big">No music found in this library yet.</p>;
+  return (
+    <div className="music-home">
+      <Shelf title="Recently Added" head={<PlayRandomButton chip label="Shuffle" fid="home-recent-shuffle" path={`${base}/recent/random`} rid={rid} />}>
+        {home.recent.map((a) => album(a))}
+      </Shelf>
+      <Shelf title="Released This Week"
+        head={<>
+          <span className="muted big">{weekLabel(home.week.start, home.week.end)}</span>
+          {home.week.albums.length > 0 && <PlayRandomButton chip label="Shuffle" fid="home-week-shuffle" path={`${base}/week/random`} rid={rid} />}
+        </>}
+        empty={!home.week.albums.length && <p className="muted big shelf-empty">No album here first came out this week, in any year.</p>}>
+        {home.week.albums.map((a) => album(a, [a.parent_title, a.released && releasedLabel(a.released)].filter(Boolean).join(" · ")))}
+      </Shelf>
+      {home.holidays.map((h) => (
+        <Shelf key={h.id} title={`Upcoming Holiday: ${h.name}`}
+          head={<>
+            <span className="muted big">{holidayDayLabel(h.date)} · {h.tracks.length} songs</span>
+            <PlayRandomButton chip label="Shuffle" fid={`home-${h.id}-shuffle`} path={`${base}/${h.id}/random`} rid={rid} />
+          </>}>
+          {h.tracks.map((t, i) => (
+            <Square key={`${t.id}-${i}`} fid={`hs-${h.id}-${i}`} rid={rid} img={t.poster} title={t.title} sub={t.artist}
+              onPress={() => music.playTracks(h.tracks, rid, i)} />
+          ))}
+        </Shelf>
+      ))}
+      {!home.holidays.length && <p className="muted big shelf-empty">No holiday songs for the coming weeks.</p>}
     </div>
   );
 }
@@ -470,6 +519,7 @@ export function UserPlaylistScreen({ id, rid }: { id: number; rid?: number }) {
 export function NowPlaying() {
   const m = useMusic();
   const [queue, setQueue] = useState(false);
+  const [fire, setFire] = useState(false);
   const t = m.current;
   if (!t) return null;
   const media = mediaFor(t.rid);
@@ -491,12 +541,17 @@ export function NowPlaying() {
       </button>
       <button className="round" data-fid="np-next" onClick={m.next} disabled={m.index + 1 >= m.queue.length} aria-label="Next"><Icon name="next" /></button>
       <button className="round" data-fid="np-queue" onClick={() => setQueue(true)} aria-label="Up next"><Icon name="list" /></button>
+      <button className="round" data-fid="np-fire" onClick={() => setFire(true)} aria-label="Fireplace"><Icon name="fire" /></button>
       <button className="round" data-fid="np-stop" onClick={m.stop} aria-label="Stop"><Icon name="stop" /></button>
     </div>
     {queue && (
       <QueuePanel at={m.index} onJump={m.jump} onMove={m.move} onRemove={m.remove}
         rows={m.queue.map((x, i) => ({ key: `${x.id}-${i}`, title: x.title, sub: [x.artist, x.album].filter(Boolean).join("  ·  ") }))}
         onClose={() => { setQueue(false); setTimeout(() => focusId("np-queue")); }} />
+    )}
+    {fire && (
+      <Fireplace title={t.title} artist={t.artist} playing={m.playing} onToggle={m.toggle}
+        onClose={() => { setFire(false); setTimeout(() => focusId("np-fire")); }} />
     )}
     </>
   );

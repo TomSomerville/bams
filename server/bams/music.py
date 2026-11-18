@@ -21,6 +21,7 @@ added later replaces embedded or downloaded art.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import logging
 import os
@@ -315,6 +316,7 @@ def rollup(con: sqlite3.Connection, lib_id: int) -> None:
                                  ELSE (SELECT MIN(t.year) FROM items t WHERE t.parent_id = items.id) END,
                      duration = (SELECT SUM(t.duration) FROM items t WHERE t.parent_id = items.id)
                    WHERE library_id=? AND kind='album'""", (lib_id,))
+    fill_release_dates(con, lib_id)
     for parent_kind, child_kind in (("album", "track"), ("artist", "album")):
         genres: dict[int, list[str]] = {}
         for r in con.execute("""SELECT c.parent_id p, c.genres g FROM items c
@@ -323,6 +325,58 @@ def rollup(con: sqlite3.Connection, lib_id: int) -> None:
             acc.extend(g for g in jload(r["g"]) if g not in acc)
         con.execute("UPDATE items SET genres=NULL WHERE library_id=? AND kind=?", (lib_id, parent_kind))
         con.executemany("UPDATE items SET genres=? WHERE id=?", [(jdump(g[:5]), p) for p, g in genres.items()])
+
+
+# ------------------------------------------------------------------ release dates (Music Home "Released This Week")
+
+_DATE_RE = re.compile(r"\s*(\d{4})-(\d{2})-(\d{2})")
+
+
+def full_date(v: object) -> str | None:
+    """'1994-11-21' (also the start of '1994-11-21T00:00:00') -> '1994-11-21'; a year or year-month alone -> None."""
+    m = _DATE_RE.match(str(v or ""))
+    if not m or not _YEAR_RE.match(m.group(1)):
+        return None
+    try:
+        return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
+    except ValueError:
+        return None
+
+
+def release_date(year: int | None, *candidates: object) -> str | None:
+    """The first full date among `candidates` in the album's `year` (a date from another year is a reissue's)."""
+    for c in candidates:
+        d = full_date(c)
+        if d and (year is None or int(d[:4]) == year):
+            return d
+    return None
+
+
+def fill_release_dates(con: sqlite3.Connection, lib_id: int | None = None) -> None:
+    """Albums' release dates (`items.air_date`, 'YYYY-MM-DD'): identified albums keep MusicBrainz's (`match_album`);
+    the others, and identified ones MusicBrainz gave no day for, take the commonest full date in their tracks' tags
+    (originaldate first), in the album's year. None when no tag has a whole date."""
+    where, args = ("AND t.library_id=?", (lib_id,)) if lib_id is not None else ("", ())
+    found: dict[int, dict[str, int]] = {}
+    keep: set[int] = set()
+    for r in con.execute(f"""
+            SELECT al.id, al.year, al.match_status, al.air_date,
+                   json_extract(f.probe, '$.tags.originaldate') od, json_extract(f.probe, '$.tags.date') d
+            FROM items t JOIN items al ON al.id=t.parent_id
+            JOIN file_items fi ON fi.item_id=t.id JOIN files f ON f.id=fi.file_id
+            WHERE t.kind='track' AND json_valid(f.probe) {where}""", args):
+        if r["match_status"] in ("matched", "manual") and r["air_date"]:
+            keep.add(r["id"])  # MusicBrainz's date
+            continue
+        d = release_date(r["year"], r["od"], r["d"])
+        if d:
+            counts = found.setdefault(r["id"], {})
+            counts[d] = counts.get(d, 0) + 1
+    if lib_id is not None:
+        con.execute("""UPDATE items SET air_date=NULL WHERE library_id=? AND kind='album' AND air_date IS NOT NULL
+                       AND match_status NOT IN ('matched', 'manual')""", (lib_id,))
+    con.executemany("UPDATE items SET air_date=? WHERE id=?",
+                    [(max(c, key=lambda k: (c[k], k)), a) for a, c in found.items() if a not in keep])
 
 
 # ------------------------------------------------------------------ genres and popularity

@@ -73,3 +73,30 @@ export const PLAY_LABEL: Record<PlayMethod, string> = {
   direct_stream: "Direct Stream",
   transcode: "Transcode",
 };
+
+// ---- Music Home dates (shared with the TV app and the phone's offline pages: no React or storage here)
+
+/** "YYYY-MM-DD" as a local date (new Date("YYYY-MM-DD") would be UTC midnight: the day before, west of Greenwich). */
+export const localDate = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
+export const isoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const md = (d: Date, opts: Intl.DateTimeFormatOptions = {}) => d.toLocaleDateString(undefined, { month: "short", day: "numeric", ...opts });
+/** "Nov 15 – 21", "Dec 28 – Jan 3": a Music Home week. */
+export const weekLabel = (start: string, end: string) => {
+  const a = localDate(start), b = localDate(end);
+  return `${md(a)} – ${a.getMonth() === b.getMonth() ? b.getDate() : md(b)}`;
+};
+/** "Nov 15, 1984": an album's release day. */
+export const releasedLabel = (iso: string) => md(localDate(iso), { year: "numeric" });
+/** "Thu, Dec 25" (or "Today"): a holiday's day. */
+export const holidayDayLabel = (iso: string, today = new Date()) =>
+  iso === isoDate(today) ? "Today" : md(localDate(iso), { weekday: "short" });
+/** This calendar week, Sunday to Saturday, and its days as "MM-DD" (29 Feb counts in other years' week of 28 Feb), as
+ *  the server's Music Home works it out (app.py `_this_week`): the phone's offline pages use it. */
+export const thisWeek = (today = new Date()) => {
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
+  const days = Array.from({ length: 7 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+  const mds = days.map((d) => isoDate(d).slice(5));
+  if (mds.includes("02-28") && !mds.includes("02-29")) mds.push("02-29");
+  return { start: isoDate(days[0]), end: isoDate(days[6]), days: mds };
+};

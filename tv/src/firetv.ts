@@ -41,6 +41,8 @@ declare global {
       seek(ms: number): void;
       stop(): void;
       selectAudio(n: number): boolean;
+      /** keep the screen on (the fireplace); Fire TV apps before Music Home don't have it */
+      keepAwake?(on: boolean): void;
     };
     bamsHost?: (e: HostEvent) => void;
   }

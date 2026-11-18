@@ -20,6 +20,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
@@ -119,6 +120,7 @@ class MainActivity : Activity() {
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 videoFullscreen(false)  // a new page: whatever asked for full screen is gone
+                keepAwake(false)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -269,6 +271,12 @@ class MainActivity : Activity() {
         requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         bars(!on)
         root.requestApplyInsets()
+    }
+
+    /** Keep the screen on while a page asks (bridge "keepAwake": the fireplace); a new page lets it sleep again. */
+    fun keepAwake(on: Boolean) {
+        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun bars(show: Boolean) {

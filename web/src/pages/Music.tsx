@@ -16,20 +16,22 @@ import { DownloadButton } from "../components/Download";
 import { AddToPlaylist, EditPlaylistDialog, NewPlaylistDialog } from "../components/Playlists";
 import { useReorder } from "../components/useReorder";
 import { useApi } from "../useApi";
+import MusicHome from "./MusicHome";
 
 // ------------------------------------------------------------------ library
 
 const ALBUM_SORTS = { artist: "Artist", title: "Title", year: "Year", added: "Recently added" } as const;
 const ARTIST_SORTS = { title: "Name", added: "Recently added" } as const;
 
-const TABS = { artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
+// Home first (owner 2026-11-18); with no `view` in the address the page opens on it
+const TABS = { home: "Home", artist: "Artists", album: "Albums", playlist: "Playlists", genre: "Genres" } as const;
 type Tab = keyof typeof TABS;
 
 export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
   const { libName } = useScope();
   // the tab and the genre are in the address: Back from an artist comes back to them
   const [params, setParams] = useSearchParams();
-  const tab: Tab = (params.get("view") as Tab) in TABS ? params.get("view") as Tab : "artist";
+  const tab: Tab = (params.get("view") as Tab) in TABS ? params.get("view") as Tab : "home";
   const genre = tab === "genre" ? params.get("genre") : null;
   const [albumSort, setAlbumSort] = useState<keyof typeof ALBUM_SORTS>("artist");
   const [artistSort, setArtistSort] = useState<keyof typeof ARTIST_SORTS>("title");
@@ -47,7 +49,7 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
 
   const list = listed ? items ?? [] : [];
   const sorts = tab === "album" ? ALBUM_SORTS : ARTIST_SORTS;
-  const pick = (next: Tab, g?: string) => setParams({ ...(next === "artist" ? {} : { view: next }), ...(g ? { genre: g } : {}) }, { replace: true });
+  const pick = (next: Tab, g?: string) => setParams({ ...(next === "home" ? {} : { view: next }), ...(g ? { genre: g } : {}) }, { replace: true });
 
   return (
     <div className="page">
@@ -63,7 +65,7 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
         </div>
         {tab === "playlist" ? (lists && mine && <span className="count">{plural(lists.length + mine.length, "playlist")}</span>)
           : listed ? items && <span className="count">{plural(list.length, kind)}</span>
-          : genres && <span className="count">{plural(genres.length, "genre")}</span>}
+          : tab === "genre" && genres && <span className="count">{plural(genres.length, "genre")}</span>}
         <PlayRandomButton className="btn ghost small page-random" path={`/api/libraries/${lib.id}/random`} />
         {listed && <label className="sort">
           Sort
@@ -74,6 +76,7 @@ export function MusicLibrary({ lib }: { lib: ServerLibrary }) {
           </select>
         </label>}
       </div>
+      {tab === "home" && <MusicHome libId={lib.id} />}
       {tab === "playlist" && (
         <>
           <div className="section-head playlists-head">

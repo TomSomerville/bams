@@ -146,6 +146,8 @@ export type ItemSummary = {
   parent_title?: string | null;
   /** seconds */
   duration?: number | null;
+  /** albums: the day it first came out, "YYYY-MM-DD", when known (MusicBrainz or the tags) */
+  released?: string | null;
   /** albums: a single (MusicBrainz says so, or it has at most 2 tracks and MusicBrainz doesn't know it) */
   single?: boolean;
   /** artists: how many of their albums (child_count) are singles */
@@ -353,6 +355,16 @@ export type MbResult = {
 };
 
 /** One playable track, as /api/items/{id}/tracks returns them (an artist's, an album's, or one track). */
+/** A music library's Home tab (`GET /api/libraries/{id}/music-home`). */
+export type MusicHome = {
+  /** the latest albums added, newest first (20 at most) */
+  recent: ItemSummary[];
+  /** albums first released this calendar week (Sunday to Saturday, dates "YYYY-MM-DD"), any year */
+  week: { start: string; end: string; albums: ItemSummary[] };
+  /** each holiday of the coming weeks that has songs here, soonest first */
+  holidays: { id: string; name: string; date: string; tracks: QueueTrack[] }[];
+};
+
 export type QueueTrack = {
   id: number;
   title: string;

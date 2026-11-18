@@ -92,8 +92,8 @@ export function entrySub(e: VideoEntry): string {
 }
 
 /** The "Play Random" button of a library, show or artist (`path`: its /random endpoint on server `rid`). */
-export function PlayRandomButton({ path, rid, fid = "random", chip = false }: {
-  path: string; rid?: number; fid?: string; chip?: boolean;
+export function PlayRandomButton({ path, rid, fid = "random", chip = false, label = "Play Random" }: {
+  path: string; rid?: number; fid?: string; chip?: boolean; label?: string;
 }) {
   const nav = useNav();
   const music = useMusic();
@@ -117,7 +117,7 @@ export function PlayRandomButton({ path, rid, fid = "random", chip = false }: {
   };
   return (
     <button className={chip ? "chip" : "btn"} data-fid={fid} onClick={() => void go()}>
-      <Icon name="shuffle" size={chip ? 26 : 30} /> {failed ? "Try again" : busy ? "Loading…" : "Play Random"}
+      <Icon name="shuffle" size={chip ? 26 : 30} /> {failed ? "Try again" : busy ? "Loading…" : label}
     </button>
   );
 }

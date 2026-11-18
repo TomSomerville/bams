@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import mimetypes
 import os
+import random
 import socket
 import sqlite3
 import subprocess
@@ -84,6 +86,8 @@ def item_summary(r: sqlite3.Row) -> dict:
     if r["kind"] in ("album", "track"):
         d.update(parent_id=r["parent_id"], parent_title=r["parent_title"] if "parent_title" in keys else None,
                  duration=r["duration"])
+    if r["kind"] == "album":
+        d["released"] = r["air_date"]  # 'YYYY-MM-DD' when known (music.fill_release_dates)
     if r["kind"] == "album" and "single" in keys:
         d["single"] = bool(r["single"])
     if r["kind"] == "artist" and "single_count" in keys:
@@ -1615,6 +1619,82 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                                (jdump(sorted(ids)), kind), limit, specials=True) if ids else []
         return {"type": "video", "items": items}
 
+    # -- Music Home (owner 2026-11-18): a music library's first tab on web, phone and TV
+    MUSIC_HOME_RECENT = 20      # albums in Recently Added
+    MUSIC_HOME_HOLIDAY_DAYS = 45  # holidays this close get a section of their songs
+
+    def _music_lib(con, lib_id: int) -> dict:
+        lib = library.get(con, lib_id)
+        if lib["type"] != "music":
+            raise HTTPException(400, "not a music library")
+        return lib
+
+    def _this_week() -> tuple[dt.date, dt.date, list[str]]:
+        """This calendar week (Sunday to Saturday) and its days as 'MM-DD' (29 February counts on 28 February's week
+        in other years)."""
+        today = holidays.today()
+        start = today - dt.timedelta(days=(today.weekday() + 1) % 7)
+        days = [start + dt.timedelta(days=i) for i in range(7)]
+        md = [d.strftime("%m-%d") for d in days]
+        if "02-28" in md and not any(d.month == 2 and d.day == 29 for d in days):
+            md.append("02-29")
+        return start, days[-1], md
+
+    def _home_albums(con, lib_id: int, section: str) -> list[sqlite3.Row]:
+        if section == "recent":
+            return con.execute(f"""{ITEM_SELECT} WHERE library_id=? AND kind='album'
+                                   ORDER BY added_at DESC, id DESC LIMIT ?""", (lib_id, MUSIC_HOME_RECENT)).fetchall()
+        _, _, md = _this_week()
+        return con.execute(f"""{ITEM_SELECT} WHERE library_id=? AND kind='album' AND air_date IS NOT NULL
+                               AND substr(air_date, 6, 5) IN ({','.join('?' * len(md))})
+                               ORDER BY substr(air_date, 6, 5), air_date DESC, title COLLATE NOCASE""",
+                           (lib_id, *md)).fetchall()
+
+    def _holiday_tracks(con, lib_id: int, holiday_id: str) -> list[int]:
+        ids = holidays.songs(con).get(holiday_id) or set()
+        if not ids:
+            return []
+        return [r[0] for r in con.execute("""
+            SELECT t.id FROM items t JOIN items al ON al.id=t.parent_id JOIN items ar ON ar.id=al.parent_id
+            WHERE t.library_id=? AND t.id IN (SELECT value FROM json_each(?))
+            ORDER BY ar.title COLLATE NOCASE, al.year, al.title COLLATE NOCASE, t.disc_number, t.track_number""",
+                                            (lib_id, jdump(sorted(ids))))]
+
+    @app.get("/api/libraries/{lib_id}/music-home")
+    def music_home(lib_id: int, con=Depends(db), me=Depends(current_user)):
+        """A music library's Home tab: the latest albums added (`recent`), albums first released this calendar week
+        in any year (`week`), and each holiday of the next weeks with its songs (`holidays`, a play queue each; only
+        holidays with songs here)."""
+        _music_lib(con, lib_id)
+        start, end, _ = _this_week()
+        out_holidays = []
+        for h, date in holidays.upcoming(holidays.today(), MUSIC_HOME_HOLIDAY_DAYS):
+            tracks = [t for t in _queue(con, _holiday_tracks(con, lib_id, h.id)) if t["available"]]
+            if tracks:
+                out_holidays.append({"id": h.id, "name": h.name, "date": date, "tracks": tracks})
+        return {
+            "recent": watch.annotate(con, me["id"], [item_summary(r) for r in _home_albums(con, lib_id, "recent")]),
+            "week": {"start": start, "end": end,
+                     "albums": watch.annotate(con, me["id"], [item_summary(r) for r in _home_albums(con, lib_id, "week")])},
+            "holidays": out_holidays,
+        }
+
+    @app.get("/api/libraries/{lib_id}/music-home/{section}/random")
+    def music_home_random(lib_id: int, section: str, limit: int = Query(1000, ge=1, le=5000), con=Depends(db)):
+        """Shuffle a Music Home section: every song of its albums (`recent`, `week`) or a holiday's songs (its id),
+        in random order."""
+        _music_lib(con, lib_id)
+        if section in ("recent", "week"):
+            albums = [r["id"] for r in _home_albums(con, lib_id, section)]
+            ids = [t for a in albums for t in user_playlists.track_ids(con, a)]
+        elif section in holidays.BY_ID:
+            ids = _holiday_tracks(con, lib_id, section)
+        else:
+            raise HTTPException(404, "no such section")
+        ids = list(dict.fromkeys(ids))
+        random.shuffle(ids)
+        return {"type": "music", "tracks": [t for t in _queue(con, ids[:limit]) if t["available"]]}
+
     @app.get("/api/items/{item_id}/holidays", dependencies=ADMIN)
     def item_holidays(item_id: int, con=Depends(db)):
         """Admins: every holiday, whether this movie/episode is in it, and whether that was set by hand."""
@@ -2325,8 +2405,20 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
                 files[t["file_id"]]["items"].append(t["id"])
         images: set[str] = set()
         _images_in([details, tracks or []], images)
+        # Music Home offline (owner 2026-11-18): each song's holidays, and those holidays' dates for years ahead
+        # (the phone can't work them out: Easter, Hanukkah, Lunar New Year)
+        calendar: dict[str, dict] = {}
+        if tracks:
+            songs = holidays.songs(con)
+            tracks = [{**t, "holidays": [h for h, ids in songs.items() if t["id"] in ids]} for t in tracks]
+            this_year = holidays.today().year
+            for hid in sorted({h for t in tracks for h in t["holidays"]}):
+                h = holidays.BY_ID[hid]
+                calendar[hid] = {"name": h.name, "dates": [d.isoformat() for y in range(this_year, this_year + 10)
+                                                           if (d := h.date(y))]}
         return {"root": root, "items": details, "tracks": tracks or [], "files": list(files.values()),
-                "images": sorted(images), "bytes": sum(f["size"] or 0 for f in files.values())}
+                "images": sorted(images), "bytes": sum(f["size"] or 0 for f in files.values()),
+                "holidays": calendar}
 
     @app.get("/api/items/{item_id}/download")
     def item_download(item_id: int, con=Depends(db), me=Depends(current_user)):

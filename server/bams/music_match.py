@@ -204,6 +204,7 @@ def match_album(con: sqlite3.Connection, mb: MusicBrainz, images: Path, album_id
     extra = {"release_group": rg.get("id"), "type": rg.get("primary-type"),
              "secondary_types": rg.get("secondary-types") or [],
              "country": rel.get("country"), "date": rel.get("date"),
+             "first_release": rg.get("first-release-date"),
              "musicbrainz_url": f"https://musicbrainz.org/release/{mbid}",
              "wikipedia": {"url": wiki["url"], "title": wiki["title"]} if wiki else None,
              "matched_by": matched_by}
@@ -212,10 +213,13 @@ def match_album(con: sqlite3.Connection, mb: MusicBrainz, images: Path, album_id
     credit = rel.get("artist-credit") or []
 
     with Tx(con):
-        con.execute("""UPDATE items SET title=?, year=?, overview=?, mbid=?, extra=?, poster=COALESCE(?, poster),
-                       poster_src=CASE WHEN ? IS NULL THEN poster_src ELSE ? END,
+        year = _year(rg.get("first-release-date")) or _year(rel.get("date")) or f["year"]
+        # The day it first came out (Music Home "Released This Week"); None: music.fill_release_dates tries the tags.
+        released = music.release_date(year, rg.get("first-release-date"), rel.get("date"))
+        con.execute("""UPDATE items SET title=?, year=?, air_date=?, overview=?, mbid=?, extra=?,
+                       poster=COALESCE(?, poster), poster_src=CASE WHEN ? IS NULL THEN poster_src ELSE ? END,
                        match_status=?, match_score=?, metadata_at=?, updated_at=? WHERE id=?""", (
-            rel.get("title") or f["title"], _year(rg.get("first-release-date")) or _year(rel.get("date")) or f["year"],
+            rel.get("title") or f["title"], year, released,
             wiki["extract"] if wiki else None, mbid, jdump(extra), cover, cover, jdump({"from": "caa"}),
             "manual" if manual else "matched", score, now(), now(), album_id))
         # Tracks: MusicBrainz ids, and real titles for files whose name was all we had.

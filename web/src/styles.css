@@ -980,3 +980,31 @@ html.fp-open, html.fp-open body { overflow: hidden; }
 .fp-queue li .np-q-row.on .np-q-title { color: var(--cyan); }
 .fp-queue li .np-q-row .muted { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-height: 640px) { .fp { gap: 8px; } .fp-title { font-size: 18px; } .icon-btn.fp-play { width: 62px; height: 62px; } }
+
+/* the fireplace (components/Fireplace.tsx): a yule-log video over everything; its buttons and credit fade when idle */
+.fireplace { position: fixed; inset: 0; z-index: 120; background: #000; cursor: none; }
+.fireplace.shown { cursor: auto; }
+.fireplace video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fireplace-close, .fireplace-foot { opacity: 0; transition: opacity .6s; }
+.fireplace.shown .fireplace-close, .fireplace.shown .fireplace-foot { opacity: 1; }
+.fireplace-close {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); right: calc(env(safe-area-inset-right, 0px) + 14px);
+  width: 48px; height: 48px; color: #fff; background: rgba(0, 0, 0, .45); border-radius: 50%;
+}
+.fireplace-foot {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center; color: #fff; pointer-events: none;
+  padding: 40px 16px calc(env(safe-area-inset-bottom, 0px) + 14px); background: linear-gradient(transparent, rgba(0, 0, 0, .6));
+}
+.fireplace-song { font-size: 16px; text-shadow: 0 1px 3px #000; }
+.fireplace-song span { color: rgba(255, 255, 255, .8); }
+.fireplace-credit { font-size: 11px; color: rgba(255, 255, 255, .65); margin-top: 4px; }
+
+/* Music Home (pages/MusicHome.tsx): shelves inside a page, which has its own side padding */
+.music-home.rows { margin: 4px calc(-1 * var(--gutter)) 0; padding-bottom: 0; }
+.row-sub { color: var(--muted); font-size: 13px; font-weight: 600; }
+.row-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.row-head .btn.row-shuffle { align-self: center; }
+.music-home-empty { padding: 0 var(--gutter); margin: 0; }
+button.song-card { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.song-card.on .poster-title { color: var(--cyan); }
+.section-head .row-shuffle { margin-left: auto; }

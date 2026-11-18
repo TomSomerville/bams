@@ -4,6 +4,7 @@ import { fmtClock } from "../format";
 import { useMusic } from "../music";
 import { ridOf, scopeLink, ScopeFor } from "../servers";
 import { Poster } from "./Art";
+import Fireplace, { FireplaceButton, useFireplace } from "./Fireplace";
 import FullPlayer, { useFullPlayer, useNarrow } from "./FullPlayer";
 import Icon from "./Icon";
 import { AddToPlaylist } from "./Playlists";
@@ -53,6 +54,7 @@ export default function NowPlaying() {
   const m = useMusic();
   const [showQueue, setShowQueue] = useState(false);
   const full = useFullPlayer();
+  const fire = useFireplace();
   const narrow = useNarrow();
   const t = m.current;
   if (!t) return null;
@@ -144,8 +146,10 @@ export default function NowPlaying() {
         <button className={`icon-btn ${showQueue ? "active" : ""}`} onClick={() => setShowQueue(!showQueue)} aria-label="Queue">
           <Icon name="list" size={20} />
         </button>
+        <FireplaceButton onClick={fire.show} size={20} />
         <button className="icon-btn" onClick={m.stop} aria-label="Stop and clear the queue"><Icon name="close" size={18} /></button>
       </div>
+      {fire.open && <Fireplace title={t.title} artist={t.artist} onClose={fire.hide} />}
     </div>
   );
 }

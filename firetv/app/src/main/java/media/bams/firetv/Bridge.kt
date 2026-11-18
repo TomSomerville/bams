@@ -33,6 +33,15 @@ class Bridge(private val activity: MainActivity, private val video: Video) {
     @JavascriptInterface
     fun info(): String = info
 
+    /** The fireplace (tv/src/Fireplace.tsx): keep the screen on (no screensaver) while it shows. */
+    @JavascriptInterface
+    fun keepAwake(on: Boolean) {
+        main.post {
+            val flag = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            if (on) activity.window.addFlags(flag) else activity.window.clearFlags(flag)
+        }
+    }
+
     @JavascriptInterface
     fun exit() {
         main.post { activity.finish() }

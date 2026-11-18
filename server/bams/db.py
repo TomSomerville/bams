@@ -14,7 +14,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # The first schema. New databases are created at v1 and then migrated like any old one, so every
 # migration step runs on every install (and in every test).
@@ -400,8 +400,19 @@ def _v18(con: sqlite3.Connection) -> None:
         fetched_at REAL NOT NULL)""")
 
 
+def _v19(con: sqlite3.Connection) -> None:
+    """v19: albums' release dates in `items.air_date` (Music Home "Released This Week", owner 2026-11-18). Identified
+    albums take the day MusicBrainz gave their release when it is in their (original) year; the rest come from tags."""
+    from . import music  # here: music imports this module
+    rows = con.execute("""SELECT id, year, json_extract(extra, '$.date') d FROM items
+                           WHERE kind='album' AND match_status IN ('matched', 'manual') AND json_valid(extra)""").fetchall()
+    con.executemany("UPDATE items SET air_date=? WHERE id=?",
+                    [(d, r["id"]) for r in rows if (d := music.release_date(r["year"], r["d"]))])
+    music.fill_release_dates(con)
+
+
 MIGRATIONS = {2: _v2, 3: _v3, 4: _v4, 5: _v5, 6: _v6, 7: _v7, 8: _v8, 9: _v9, 10: _v10, 11: _v11,
-              12: _v12, 13: _v13, 14: _v14, 15: _v15, 16: _v16, 17: _v17, 18: _v18}  # target version -> step
+              12: _v12, 13: _v13, 14: _v14, 15: _v15, 16: _v16, 17: _v17, 18: _v18, 19: _v19}  # target version -> step
 
 
 def migrate(con: sqlite3.Connection, backup_dir: Path | None = None) -> None:

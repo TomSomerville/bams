@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fmtClock } from "../format";
 import { Poster } from "./Art";
+import Fireplace, { FireplaceButton, useFireplace } from "./Fireplace";
 import Icon from "./Icon";
 
 // The full-screen player of phones: tapping the now-playing bar opens it. Shared by the web UI's player (also what the
@@ -64,6 +65,7 @@ export type FullPlayerProps = {
 
 export default function FullPlayer(p: FullPlayerProps) {
   const [showQueue, setShowQueue] = useState(false);
+  const fire = useFireplace();
   const pct = p.duration ? Math.min(100, (p.time / p.duration) * 100) : 0;
   const left = p.duration ? Math.max(0, p.duration - p.time) : 0;
 
@@ -73,10 +75,11 @@ export default function FullPlayer(p: FullPlayerProps) {
     return () => document.documentElement.classList.remove("fp-open");
   }, []);
   useEffect(() => {
+    if (fire.open) return;  // the fireplace has Escape then
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") (showQueue ? setShowQueue(false) : onClose()); };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [showQueue, onClose]);
+  }, [showQueue, onClose, fire.open]);
   // the queue opens at the song playing
   useEffect(() => {
     if (showQueue) document.querySelector(".fp-queue .on")?.scrollIntoView({ block: "center" });
@@ -105,7 +108,9 @@ export default function FullPlayer(p: FullPlayerProps) {
         <button className={`icon-btn ${showQueue ? "active" : ""}`} onClick={() => setShowQueue(true)} aria-label="Play queue" title="Play queue">
           <Icon name="list" size={22} />
         </button>
+        <FireplaceButton onClick={fire.show} />
       </div>
+      {fire.open && <Fireplace title={p.title} artist={p.artist} onClose={fire.hide} />}
 
       <div className="fp-seek">
         <input type="range" className="timeline" min={0} max={p.duration || 1} step={0.5} value={Math.min(p.time, p.duration || 1)}
