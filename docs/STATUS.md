@@ -469,6 +469,16 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-11-19: The fireplace closed itself after a second (release 0.25.2, Android 0.2.13)
+- **What / why:** owner: on the phone (app and browser) the fireplace showed for a second and went away.
+  `web/src/components/Fireplace.tsx` had `onClose` as its effect's dependency; the players pass a new function at
+  every render (their clock redraws them every second), so the cleanup ran, left full screen, and leaving full screen
+  closes the fireplace. Now `onClose` is read through a ref and the effect runs once. TV `Fireplace.tsx` already did so.
+- **Verified:** scratch server at phone size with the Fullscreen API stubbed (the preview pane refuses real full
+  screen, which is why 0.25.0 testing missed it): the released build closed ~0.1 s after entering full screen; the fix
+  stayed open 10 s with music playing; leaving full screen, ✕ and Esc still close it.
+- **Left open:** not tried on a real phone before release.
+
 ### 2026-11-19: New fireplace clip (release 0.25.1, Android 0.2.12, TV apps 0.19.1)
 - **What / why:** the owner disliked the Mount Rainier clip (odd shadows and bars in front); of four free-licensed
   options shown side by side they picked "Kaminfeuer" (Larvis, CC BY-SA 4.0, Wikimedia Commons).

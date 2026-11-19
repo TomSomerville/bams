@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.2 (2026-11-19), Android app 0.2.13
+
+### Fixed
+- **The fireplace closed itself after a second** on phones, in the Android app and wherever it went full screen: the
+  player's clock redrawing the screen made it leave full screen, which closes the fireplace. It now stays until you
+  close it.
+
+Update the server and the Android app (0.2.13, for the fireplace in Downloads). The TV apps didn't have the problem.
+
 ## 0.25.1 (2026-11-19), Android app 0.2.12, TV apps 0.19.1
 
 ### Changed

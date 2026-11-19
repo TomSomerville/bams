@@ -456,6 +456,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
   shell and whatever it was about to start.
 - **A fixed layer inside the web's now-playing bar is held to the bar** (its `backdrop-filter` makes it the containing
   block): overlays opened from it (the fireplace) render through `createPortal(…, document.body)`.
+- **Effects that leave full screen in their cleanup must not depend on a callback prop** (`Fireplace.tsx`): the players
+  re-render every second, a new `onClose` re-ran the cleanup, left full screen and closed the fireplace at once. Read
+  callbacks through a ref. The preview pane refuses the Fullscreen API: stub it to test such code.
 - **Holiday songs are cached apart from holiday titles** (`holidays.songs`, keyed by album/track count, last change and
   title/genre lengths). Song-only words go in `SONG_WORDS` (carols), never in a holiday's own words (movies use those).
   Albums' release day is `items.air_date` ('YYYY-MM-DD', episodes use it for their air date).

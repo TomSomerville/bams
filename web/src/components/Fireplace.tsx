@@ -54,14 +54,19 @@ export default function Fireplace({ title, artist, onClose }: { title: string | 
     timer.current = window.setTimeout(() => setShown(false), 3500);
   };
 
+  // onClose is a new function at every render of the player (its clock redraws it every second): read it through a ref.
+  // As a dependency, every redraw ran the cleanup, which left full screen, and that closed the fireplace.
+  const close = useRef(onClose);
+  close.current = onClose;
+
   useEffect(() => {
     wake();
     document.documentElement.classList.add("fp-open");
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); else wake(); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") close.current(); else wake(); };
     // leaving full screen (Esc in a browser, Back in the app) closes the fireplace too
     let wasFull = !!document.fullscreenElement;
     const full = () => {
-      if (wasFull && !document.fullscreenElement) onClose();
+      if (wasFull && !document.fullscreenElement) close.current();
       wasFull = !!document.fullscreenElement;
     };
     window.addEventListener("keydown", key);
@@ -73,7 +78,7 @@ export default function Fireplace({ title, artist, onClose }: { title: string | 
       document.removeEventListener("fullscreenchange", full);
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     };
-  }, [onClose]);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // the screen stays on while the fire burns
   useEffect(() => {
