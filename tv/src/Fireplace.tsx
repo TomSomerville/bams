@@ -12,7 +12,7 @@ import { keyHandler, setKeyHandler } from "./keys";
 import { focus } from "./nav";
 import { isBack, KEY } from "./tizen";
 
-const CREDIT = "Fire: “Mount Rainier Holiday Hearth”, Mount Rainier National Park, CC BY 3.0";
+const CREDIT = "Fire: “Kaminfeuer” by Larvis, CC BY-SA 4.0";
 
 type WakeLock = { release: () => Promise<void> };
 

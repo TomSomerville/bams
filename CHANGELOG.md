@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.1 (2026-11-19), Android app 0.2.12, TV apps 0.19.1
+
+### Changed
+- **A new fireplace video.** The fireplace now shows logs burning behind a fireplace's glass ("Kaminfeuer" by Larvis,
+  CC BY-SA 4.0), without the shadows and bars in front of the old clip. The loop is shared under the same license.
+
+Update the server, the Android app (0.2.12) and the Fire TV app (0.19.1): each carries its own copy of the video. The
+Samsung TV app (0.19.1) comes separately.
+
 ## 0.25.0 (2026-11-18), Android app 0.2.11, TV apps 0.19.0
 
 ### New

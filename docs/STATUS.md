@@ -469,6 +469,15 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-11-19: New fireplace clip (release 0.25.1, Android 0.2.12, TV apps 0.19.1)
+- **What / why:** the owner disliked the Mount Rainier clip (odd shadows and bars in front); of four free-licensed
+  options shown side by side they picked "Kaminfeuer" (Larvis, CC BY-SA 4.0, Wikimedia Commons).
+- **How:** 9.4 s cut, end cross-faded into the start (ffmpeg `xfade`, `fps` after each trim), 1280×720 H.264, silent,
+  2.9 MB. Same file in `web/public/fireplace.mp4` and `tv/public/fireplace.mp4`; `fireplace-CREDITS.txt` (changes made,
+  shared under CC BY-SA 4.0) and the credit string in both `Fireplace.tsx` updated.
+- **Verified:** scratch server: plays full screen, loops, music goes on, new credit on screen.
+- **Left open:** as for 0.25.0 (Samsung TV, Fire TV, real phone untried).
+
 ### 2026-11-18: Music Home tab and the fireplace (release 0.25.0, Android 0.2.11, TV apps 0.19.0)
 - **What / why:** owner: a Home tab before Artists in Music (web, phone online + Downloads, TV/theatre): Recently
   Added (20 albums), Released This Week (owner's pick: the calendar week Sun–Sat, any year), Upcoming Holiday (owner's

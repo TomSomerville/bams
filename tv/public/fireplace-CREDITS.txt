@@ -1,4 +1,5 @@
-fireplace.mp4: a 43-second loop cut from "Mount Rainier Holiday Hearth" by Mount Rainier National Park,
-licensed under Creative Commons Attribution 3.0 Unported (https://creativecommons.org/licenses/by/3.0/).
-Source: https://commons.wikimedia.org/wiki/File:Mount_Rainier_Holiday_Hearth.webm
-Changes: cut to 43 seconds, scaled to 1280x720, sound removed, the end blended into the start so it loops.
+fireplace.mp4: a 9-second loop made from "Kaminfeuer" by Larvis, licensed under Creative Commons
+Attribution-ShareAlike 4.0 International (https://creativecommons.org/licenses/by-sa/4.0/).
+Source: https://commons.wikimedia.org/wiki/File:Kaminfeuer.webm
+Changes: trimmed, sound removed, the end blended into the start so it loops, re-encoded as H.264.
+This loop is shared under the same license, CC BY-SA 4.0.

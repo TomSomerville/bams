@@ -13,7 +13,7 @@ import Icon from "./Icon";
 // the tap that opened it (the Android app shows it through its WebView's full-screen view; Back there leaves full
 // screen, which closes it), and keeps the screen awake while it's open.
 
-export const FIREPLACE_CREDIT = "Fire: “Mount Rainier Holiday Hearth”, Mount Rainier National Park, CC BY 3.0";
+export const FIREPLACE_CREDIT = "Fire: “Kaminfeuer” by Larvis, CC BY-SA 4.0";
 const SRC = `${import.meta.env.BASE_URL}fireplace.mp4`;
 
 /** The Android app (0.2.11+) keeps the screen on for the page (bridge "keepAwake"). */
