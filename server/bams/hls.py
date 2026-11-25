@@ -163,6 +163,7 @@ class Session:
     burn: int | tuple | None = None  # image subtitle painted on: n-th subtitle stream, or (sidecar .idx, n)
     video_codec: str | None = None
     copy_audio: bool = False     # copy variant: Dolby audio passed through as-is (the player's device decodes it)
+    split_audio: bool = False    # the file stores its audio far from the video: read through its own input
     closed: bool = False
     asleep: bool = False         # idle: nothing running or kept on disk until the player asks again
     last_access: float = field(default_factory=time.monotonic)
@@ -236,7 +237,7 @@ def _default_cmd(s: Session, v: Variant, k: int) -> list[str]:
         return stream.hls_copy_cmd(s.path, 0, v.seek, s.video_codec, v.run.dir, s.audio, s.channels, s.copy_audio,
                                    ts=v.ts)
     return stream.hls_cmd(s.path, k, s.video, v.dir, s.audio, max_height=v.height, channels=s.channels,
-                          burn=s.burn, gpu=v.gpu)
+                          burn=s.burn, gpu=v.gpu, split_audio=s.split_audio)
 
 
 class Transcodes:
@@ -328,7 +329,8 @@ class Transcodes:
             v.wanted = v.at(start)
             v.job_start = v.wanted
         s = Session(sid, file_id, path, video, audio, duration, d, variants, channels=channels, burn=burn,
-                    video_codec=video_codec, copy_audio=copy and copy_audio)
+                    video_codec=video_codec, copy_audio=copy and copy_audio,
+                    split_audio=not copy and stream.audio_lags(path, audio, start))
         with self._lock:
             self._sessions[sid] = s
         log.info("HLS %s: file %s, %.0f s, %s", sid, file_id, duration,

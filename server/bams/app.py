@@ -2619,8 +2619,9 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             transcodes.check()
         except hls.Busy as e:
             raise HTTPException(503, str(e)) from None
-        return _pipe(stream.transcode_cmd, (p, t, pr.get("video"), audio, None, h, _channels(pr, audio, ch), burn),
-                     "video/mp4", on_start=transcodes.add_pipe)
+        split = await anyio.to_thread.run_sync(stream.audio_lags, p, audio, t)
+        return _pipe(stream.transcode_cmd, (p, t, pr.get("video"), audio, None, h, _channels(pr, audio, ch), burn,
+                                            split), "video/mp4", on_start=transcodes.add_pipe)
 
     @app.post("/api/files/{file_id}/hls")
     def hls_start(file_id: int, body: HlsIn, con=Depends(db)):

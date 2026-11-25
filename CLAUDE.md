@@ -462,4 +462,9 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Holiday songs are cached apart from holiday titles** (`holidays.songs`, keyed by album/track count, last change and
   title/genre lengths). Song-only words go in `SONG_WORDS` (carols), never in a holiday's own words (movies use those).
   Albums' release day is `items.air_date` ('YYYY-MM-DD', episodes use it for their air date).
+- **Some files store their sound far from the picture** (converters: the sound for 0:00 minutes into the file). FFmpeg
+  reads in file order, so a conversion wrote silent HLS segments. `stream.audio_lags` spots them and `split_audio` reads
+  the sound through its own input; any new conversion command must take `split_audio` too. Test such files with
+  `test_audio_lag.make_clip`. A plain `ffmpeg -c copy` remux doesn't repair such a file (FFmpeg only waits ~10 s for the
+  late stream); one with the file as two inputs (`-map 0:v -map 1:a`) does.
 - **Commit/push only when the user asks.** Repo: github.com/TomSomerville/bams (private).
