@@ -481,19 +481,26 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Fix:** `stream.audio_lags(path, audio, start)` reads packets with ffprobe until both streams show up (or one runs
   5 s ahead alone), cached per file + track; when it says so, `hls_cmd` / `transcode_cmd(split_audio=True)` open the
   same file again for the sound (`_with_audio_input`: after a subtitle input, before the output options, same `-ss` and
-  clock). Set per HLS session (`Session.split_audio`, conversions only) and per live `/transcode` request. Other files
-  get the same commands as before; remux, copy-HLS and direct play untouched.
+  clock). Set per HLS session (`Session.split_audio`) and per live `/transcode` request. Then, at the owner's request,
+  the TV apps' copy-HLS too (Samsung's MPEG-TS, Fire TV's fMP4: same problem, first segments silent):
+  `hls_copy_cmd(split_audio, landed)` seeks the sound's input exactly to `Variant.landed`, the keyframe the picture's
+  run starts on (the `remux_start` dry run). And the browsers' live remux (`remux_cmd(split_audio)`, `/remux`): its
+  stream sent the sound ~20 s behind the picture; the sound's input is seeked to the same landing keyframe and moved
+  onto the picture's clock (`-itsoffset landed - start`). Other files get the same commands as before; direct play
+  untouched.
 - **Files:** `server/bams/stream.py`, `hls.py`, `app.py`; `server/tests/test_audio_lag.py`.
 - **Verified:** the owner's samples (first 60 MB of three files): old commands → no audio packets in segments 0–33;
   new → every segment's sound covers its picture, from the start and from a later run. Scratch server in the preview
   browser with HEVC turned off: plays with sound (audio bytes decoding), also after a seek. `test_audio_lag.py` (HEVC
   clips with the sound stored 20 s late: 5.1 with a PCE, mono, stereo with no language and default=0; HLS from 0 and
-  after a seek, the live stream, through the API; fails with detection off). Full suite on Linux: all pass but the
-  known `test_encoder_choice_api`.
+  after a seek, the live stream, copy-HLS in MPEG-TS and fMP4 from 0 and from a seeked run, through the API; fails
+  with detection off), the live remux (sound in the stream's first seconds, in step with the picture after a seek by
+  correlation; fails without the separate input or without the clock offset). Copy-HLS with the owner's sample: sound
+  covers the picture from 0 and from a seek to 30 s. Full
+  suite on Linux: all pass but the known `test_encoder_choice_api`.
 - **Left open:** where the sound starts in two of the full files is unknown (the samples had none): if it's at the
-  very end, the second input has to read through the whole file first. The TV apps' copy-HLS (`hls_copy_cmd`) and the
-  live remux probably have the same problem with such files; not changed (owner: leave those paths). Not tried on the
-  owner's server (FFmpeg 6.1, VAAPI).
+  very end, the second input has to read through the whole file first. Not tried on the owner's server (FFmpeg 6.1,
+  VAAPI) or on the TVs.
 
 ### 2026-11-19: The fireplace closed itself after a second (release 0.25.2, Android 0.2.13)
 - **What / why:** owner: on the phone (app and browser) the fireplace showed for a second and went away.
