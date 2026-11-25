@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from conftest import signed_in
-from bams import jobs, probe, readonly, stream
+from bams import hls, jobs, probe, readonly, stream
 from bams.app import create_app
 from bams.config import Paths
 
@@ -138,6 +138,94 @@ def test_hls_segments_carry_the_sound(clips, tmp_path):
     out = tmp_path / "surround-51"
     _hls(clips["surround"], out, 0, split=True, channels=6)  # the viewer asked for 5.1
     assert_has_sound(out / "1.ts", channels=6)
+
+
+def test_copy_hls_without_its_own_audio_input_loses_the_sound(clips, tmp_path):
+    """The TV apps' copy (video copied, sound converted) had the same problem."""
+    out = tmp_path / "old"
+    out.mkdir()
+    subprocess.run(stream.hls_copy_cmd(clips["mono"], 0, 0.0, "HEVC", out, ts=True), check=True, capture_output=True,
+                   cwd=out)
+    assert packets(out / "0.ts", "v") and not packets(out / "0.ts", "a")
+
+
+@pytest.mark.parametrize("ts", [True, False], ids=["samsung-mpegts", "firetv-fmp4"])
+def test_copy_hls_carries_the_sound(clips, tmp_path, ts):
+    """Through an HLS session as the TV apps get it: the session finds out by itself, and a run after a seek (whose
+    picture starts at the keyframe its seek lands on: `remux_start`) gets its sound from that very point."""
+    for kind in ("surround", "stereo"):
+        src = clips[kind]
+        kf = stream.keyframes(src)
+        t = hls.Transcodes(tmp_path / f"transcode-{kind}-{ts}", lambda: 0)
+        try:
+            s = t.create(1, src, None, float(LENGTH), keyframes=kf, video_codec="HEVC", ts=ts)
+            assert s.split_audio
+            init = b"" if ts else t.init(s, 0).read_bytes()
+
+            def check(k: int) -> None:
+                f = tmp_path / f"{kind}-{ts}-{k}.{'ts' if ts else 'mp4'}"
+                f.write_bytes(init + t.segment(s, 0, k).read_bytes())
+                assert_has_sound(f)
+
+            for k in (0, 1, 2):
+                check(k)
+            s.last_access -= hls.IDLE + 1  # paused past the idle limit: asleep, segments deleted
+            t.reap()
+            assert s.asleep
+            for k in (8, 9):  # then a seek to 16 s: a new FFmpeg run with a real seek
+                check(k)
+            v = s.variants[0]
+            assert v.runs == 2 and v.seek > 15 and v.landed > 0
+        finally:
+            t.shutdown()
+
+
+def _pcm(f: Path, at: float, length: float, rate: int = 2000):
+    import array
+    return array.array("h", subprocess.run([stream.ffmpeg_path(), "-v", "error", "-ss", f"{at:.3f}", "-i", str(f),
+                                            "-t", str(length), "-vn", "-ac", "1", "-ar", str(rate), "-f", "s16le", "-"],
+                                           capture_output=True, check=True).stdout)
+
+
+def _found_at(a, b) -> int:
+    """Where (in samples) `a` best matches inside `b` (normalized correlation)."""
+    na = sum(x * x for x in a) ** .5
+    score = [sum(x * y for x, y in zip(a, b[s:])) / (na * sum(y * y for y in b[s:s + len(a)]) ** .5 + 1e-9)
+             for s in range(len(b) - len(a))]
+    return max(range(len(score)), key=score.__getitem__)
+
+
+def test_live_remux_carries_the_sound_in_step(clips, tmp_path):
+    """The browsers' live remux (video copied from the keyframe at/before the seek, sound converted): the sound must
+    come with the picture in the stream, not 20 s behind it, and match it (the copied picture starts a keyframe
+    early; the sound's own input has to start exactly there)."""
+    src = clips["surround"]
+    assert stream.audio_lags(src)
+    old = tmp_path / "old.mp4"
+    old.write_bytes(subprocess.run(stream.remux_cmd(src, 0, "HEVC"), capture_output=True, check=True).stdout)
+    assert loudest_in_first(old, 4) < -60  # the old stream: the first seconds came without sound
+    for start in (0.0, 9.5):
+        landed = stream.remux_start(src, start, zero=True)
+        out = tmp_path / f"remux-{start}.mp4"
+        out.write_bytes(subprocess.run(stream.remux_cmd(src, start, "HEVC", split_audio=True),
+                                       capture_output=True, check=True).stdout)
+        assert loudest_in_first(out, 4) > -30
+        video, audio = packets(out, "v"), packets(out, "a")
+        assert abs(audio[0] - video[0]) < 0.2 and abs(audio[-1] - video[-1]) < 0.2
+        # 3 s in, the sound is the source's at landed + 3 s (a wrong clock would be off by start - landed, ~1.5 s)
+        s = _found_at(_pcm(out, 3, 0.25), _pcm(src, landed + 3 - 0.3, 0.85))
+        assert abs((landed + 3 - 0.3 + s / 2000) - (landed + 3)) < 0.15, s
+
+
+def loudest_in_first(f: Path, seconds: float) -> float:
+    """The loudest sound in the first `seconds` of the file *as it streams*: read as a pipe, so a player that
+    gets the sound only later (stored late in the stream) hears nothing here."""
+    data = f.read_bytes()
+    r = subprocess.run([stream.ffmpeg_path(), "-hide_banner", "-nostdin", "-f", "mp4", "-i", "pipe:0", "-t",
+                        str(seconds), "-map", "0:a:0?", "-af", "volumedetect", "-f", "null", "-"],
+                       input=data[:len(data) * seconds // LENGTH], capture_output=True)
+    line = next((x for x in r.stderr.decode(errors="replace").splitlines() if "max_volume" in x), None)
+    return float(line.split("max_volume:")[1].split("dB")[0]) if line else -999.0
 
 
 def test_live_transcode_carries_the_sound(clips, tmp_path):

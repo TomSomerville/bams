@@ -2601,8 +2601,9 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         p, info = await anyio.to_thread.run_sync(_probe_of, file_id)
         pr = info["probe"]
         vcodec = stream.plan(pr, info["parse"])["video_codec"]
+        split = await anyio.to_thread.run_sync(stream.audio_lags, p, audio, t)
         return _pipe(stream.remux_cmd, (p, t, vcodec, audio, _channels(pr, audio, ch),
-                                        _copy_audio(pr, audio, passthrough)), "video/mp4")
+                                        _copy_audio(pr, audio, passthrough), split), "video/mp4")
 
     @app.get("/api/files/{file_id}/transcode")
     async def transcode_file(file_id: int, t: float = Query(0, ge=0), audio: int = Query(0, ge=0, le=31),

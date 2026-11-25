@@ -148,7 +148,11 @@ def _aac(channels: int = 2, copy: bool = False) -> list[str]:
 
 
 def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: int = 0, channels: int = 2,
-              copy_audio: bool = False) -> list[str]:
+              copy_audio: bool = False, split_audio: bool = False) -> list[str]:
+    """The live remux: video copied, audio converted (or copied: `copy_audio`), as fragmented MP4 on stdout, from the
+    keyframe at/before `start`. `split_audio`: the sound is read through an input of its own (`audio_lags`), seeked
+    exactly to that keyframe (`remux_start`, the same dry run `/seek` answers from) and moved onto the picture's
+    clock, so both start together."""
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -158,9 +162,17 @@ def remux_cmd(path: Path, start: float, video_codec: str | None, audio_index: in
         # audio starts there too; by default FFmpeg trims it to `start` exactly and both begin at 0, so the
         # picture ran behind the sound by the distance back to that keyframe (seconds)
         cmd += ["-noaccurate_seek", "-ss", f"{start:.3f}"]
-    cmd += ["-i", str(path),
-            "-map", "0:v:0", "-map", f"0:a:{audio_index}?",
-            "-c:v", "copy"]
+    cmd += ["-i", str(path)]
+    src = "0"
+    if split_audio:
+        if start > 0:
+            # the picture's times count from `start` (it starts a little before, at `landed`); an accurate seek
+            # (the default) trims the sound to `landed`, and the offset puts it on the picture's clock
+            landed = remux_start(path, start, zero=True)
+            cmd += ["-itsoffset", f"{landed - start:.3f}", "-ss", f"{landed:.3f}"]
+        cmd += ["-i", str(path)]
+        src = "1"
+    cmd += ["-map", "0:v:0", "-map", f"{src}:a:{audio_index}?", "-c:v", "copy"]
     if video_codec == "HEVC":
         cmd += ["-tag:v", "hvc1"]  # the tag browsers expect for HEVC in MP4
     cmd += [*_aac(channels, copy_audio),
@@ -849,7 +861,8 @@ def _index_agrees(exe: str, path: Path, times: list[float], flags: int) -> bool:
 
 
 def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None, out_dir: Path,
-                 audio_index: int = 0, channels: int = 2, copy_audio: bool = False, ts: bool = False) -> list[str]:
+                 audio_index: int = 0, channels: int = 2, copy_audio: bool = False, ts: bool = False,
+                 split_audio: bool = False, landed: float = 0.0) -> list[str]:
     """The audio-only remux as HLS: video copied, audio -> AAC (or copied too: `copy_audio`, Dolby pass-through),
     one fMP4 segment per source keyframe (`{n}.m4s`, with `init_{segment}.mp4`), numbered from `segment`.
 
@@ -861,7 +874,8 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
     muxer cut at every keyframe, which are exactly the boundaries the playlist lists. fMP4 rather than
     MPEG-TS so HEVC/AV1 copy cleanly for MSE. `ts`: MPEG-TS segments (`{n}.ts`, no init file) for players that
     take no fMP4 HLS (Samsung's AVPlay); TS packets carry their own timestamps, so runs line up without
-    frag_discont."""
+    frag_discont. `split_audio`: the sound is read through an input of its own (`audio_lags`), seeked exactly to
+    `landed`, the keyframe the picture's seek lands on (`remux_start(zero=True)`), so both start together."""
     exe = ffmpeg_path()
     if not exe:
         raise RuntimeError("FFmpeg not found")
@@ -871,8 +885,12 @@ def hls_copy_cmd(path: Path, segment: int, seek: float, video_codec: str | None,
         # (B-frames), lands a keyframe or more before `seek`, and by default trims the sound to `seek`: the run's
         # first segment had seconds of picture with no sound (heard after a skip, or Play after a long pause)
         cmd += ["-noaccurate_seek", "-ss", f"{seek:.3f}"]
-    cmd += ["-copyts", "-start_at_zero", "-i", str(path), "-map", "0:v:0", "-map", f"0:a:{audio_index}?",
-            "-c:v", "copy"]
+    cmd += ["-copyts", "-start_at_zero", "-i", str(path)]
+    src = "0"
+    if split_audio:  # an accurate seek (the default): the sound is trimmed to where the copied picture starts
+        cmd += [*(["-ss", f"{landed:.3f}"] if seek > 0 and landed > 0 else []), "-i", str(path)]
+        src = "1"
+    cmd += ["-map", "0:v:0", "-map", f"{src}:a:{audio_index}?", "-c:v", "copy"]
     if video_codec == "HEVC" and not ts:
         cmd += ["-tag:v", "hvc1"]  # the MP4 tag browsers expect; TS has no such tag
     cmd += [*_aac(channels, copy_audio), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",

@@ -93,6 +93,7 @@ class Variant:
     gpu: bool = True             # the all-GPU path may be used (off after an FFmpeg run failed)
     seek: float = 0.0            # copy: the input seek of the current run (see stream.hls_copy_cmd)
     first_key: float = 0.0       # copy: the first keyframe (bounds[0] is 0 whatever it is): a run from 0 starts here
+    landed: float = 0.0          # copy: where the current run's picture starts (the keyframe its seek lands on)
     run: Run | None = None       # copy: the current run's pieces
     runs: int = 0                # copy: runs so far (each gets its own folder)
     proc: subprocess.Popen | None = None
@@ -235,7 +236,7 @@ class Keyframes:
 def _default_cmd(s: Session, v: Variant, k: int) -> list[str]:
     if v.copy:  # pieces numbered from 0 in the run's folder; _publish names them
         return stream.hls_copy_cmd(s.path, 0, v.seek, s.video_codec, v.run.dir, s.audio, s.channels, s.copy_audio,
-                                   ts=v.ts)
+                                   ts=v.ts, split_audio=s.split_audio, landed=v.landed)
     return stream.hls_cmd(s.path, k, s.video, v.dir, s.audio, max_height=v.height, channels=s.channels,
                           burn=s.burn, gpu=v.gpu, split_audio=s.split_audio)
 
@@ -330,7 +331,7 @@ class Transcodes:
             v.job_start = v.wanted
         s = Session(sid, file_id, path, video, audio, duration, d, variants, channels=channels, burn=burn,
                     video_codec=video_codec, copy_audio=copy and copy_audio,
-                    split_audio=not copy and stream.audio_lags(path, audio, start))
+                    split_audio=stream.audio_lags(path, audio, start))
         with self._lock:
             self._sessions[sid] = s
         log.info("HLS %s: file %s, %.0f s, %s", sid, file_id, duration,
@@ -465,6 +466,7 @@ class Transcodes:
                 start = self._copy_start(s.path, v.seek, zero=True)
                 k = min(k, v.at(start))
             v.runs += 1
+            v.landed = start
             v.run = Run(v.dir / f"run{v.runs}", k, start)
             v.run.dir.mkdir()
         # the copy's init file is a bare name (hls_copy_cmd): FFmpeg runs in the folder it writes to
