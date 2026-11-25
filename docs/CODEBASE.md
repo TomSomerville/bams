@@ -64,7 +64,7 @@ bams/
 │   │   ├── stream.py          Playback plan (direct play / direct stream file|remux / transcode), FFmpeg remux,
 │   │   │                      video transcode (encoder detection, GPU decode, all-GPU filters for NVENC/QSV/
 │   │   │                      VAAPI/AMF + failure memory, output_size, filter chain, tone-mapping, subtitle burn-in,
-│   │   │                      transcode_cmd, hls_cmd), keyframes() (index + _index_agrees, else a full read) + hls_copy_cmd; Dolby pass-through (PASSTHROUGH_AUDIO);
+│   │   │                      transcode_cmd, hls_cmd; audio_lags() → split_audio), keyframes() (index + _index_agrees, else a full read) + hls_copy_cmd; Dolby pass-through (PASSTHROUGH_AUDIO);
 │   │   │                      music: plan_audio() + audio_cmd() (any audio → AAC fMP4, or FLAC)
 │   │   ├── music.py           Music: parse_track() (tags + folder layout), parse_cue_tracks(), link_tracks(), album_alias(),
 │   │   │                      rollup(), fill_artwork() (folder art wins, picked up when added later; poster_src)
@@ -384,6 +384,11 @@ runs on the file-name guess with no duration (no HLS, no timeline, no saved posi
 - Audio: `file_info.audio_tracks` (labels via `subtitles.language`); every converting endpoint takes the track
   (`audio`) and a channel wish (`ch`/`channels` 6 → `stream.audio_channels`: 5.1 AAC 384k if the track has ≥ 6
   channels, else stereo 192k). The player picks: remembered language → browser language → default-flagged track.
+- Sound stored far from its picture (some converters' files: the sound for 0:00 minutes into the file):
+  `stream.audio_lags()` (ffprobe packet read, > `AUDIO_LAG_LIMIT` 5 s, cached per file + track) → `hls_cmd` /
+  `transcode_cmd(split_audio=True)` read the sound through a second input of the same file (`_with_audio_input`).
+  Set per HLS conversion session (`Session.split_audio`) and per live `/transcode` request. Without it the HLS
+  segments had no sound (FFmpeg reads in file order). Copy-HLS and the live remux don't do this.
 - GPU: `stream.gpu_filters()` keeps SDR, non-burn conversions of GPU-decodable codecs on the GPU. NVENC:
   `-hwaccel cuda` + `bwdif_cuda`/`scale_cuda` (size and pixel shape worked out per frame). Quick Sync: `-hwaccel qsv`
   + `vpp_qsv`; VAAPI: `-hwaccel vaapi` + `deinterlace_vaapi=auto=1`/`scale_vaapi`; AMF (Windows): `-hwaccel d3d11va
@@ -769,6 +774,7 @@ Errors: `library.LibraryError` → 400 `{detail}`; the UI shows `detail` verbati
 | `test_matcher.py` | fake TMDB (httpx.MockTransport): match, merge of two folders, episode fill, unmatched, no key sent to the image CDN, exact title beats a wrong year, franchise-prefix tail rule |
 | `test_api.py` | library CRUD/validation, fs browse, SPA fallback, key never returned, saving a key queues TV/movie libraries, cross-thread connection, movie-in-TV-library hint, library order + v7 migration, files are streamed but never offered for download (no route, no `download_url`, no file name) |
 | `test_stream.py` | audio channels, burn-in + GPU filter commands (NVENC; QSV/VAAPI/AMF chains, interlaced/unknown, failure memory), output_size with SAR, probe sar/field_order, copy-HLS command (temp_file, audio copy), a real remux over HLS (+ AC3 pass-through over HLS and live) through the API (5.1 AAC, segments from two runs line up); playback plan table (incl. transcode cases, Hi10P, no FFmpeg); encoder detection (order, platform, override, cache; the test uses the real options, VAAPI falls back to constant QP), encoder choice (fallback, env wins, API, restart); transcode filter chain + command, tone-map choice, GPU decode args, HLS command, DV profile from ffprobe; a real FFmpeg remux of a generated AC3 file, the live remux's audio starting at the keyframe (correlation with the original), an unprobed file probed when its episode is opened, and a real Xvid → H.264 transcode through the API (skipped if FFmpeg/an encoder is missing) |
+| `test_audio_lag.py` | files storing their sound 20 s behind the picture (HEVC; AAC 5.1 with a PCE = "unknown" layout, mono, stereo with no language and default=0): `audio_lags` finds them (not interleaved files), the old HLS command loses the sound, HLS segments from 0 and after a seek + the live stream carry it, through the API (real FFmpeg) |
 | `test_keyindex.py` | index keyframes = a full ffprobe read (MKV, MP4, faststart MP4, MOV; B-frames, a delayed video track), sparse Cues used and played as real TS copy-HLS (every segment exactly its frames, a seek first), an index listing a non-keyframe refused, a long file checked in three stretches, no index (piped MKV, fragmented MP4, AVI) → full read |
 | `test_copy_hls_playback.py` | what the TV apps get, real FFmpeg, MPEG-TS (Samsung) and fMP4 (Fire TV): an AC3 episode with sparse Cues played, paused past `IDLE` (asleep, segments gone), resumed, re-made and seeked; every segment exactly its frames, one clock for all runs (subtitle timing), sound covering each segment (incl. the first of a run started mid-file) and continuous within a run |
 | `test_hls.py` | playlists (master, copy), ladder; sessions against a fake FFmpeg (on-demand restarts, start position, superseded requests, failure → GPU-less retry, stop-ahead + pruning, Auto switch, copy numbering from the dry run + runs in their own folder, pieces at keyframes the list lacks joined to their segment, the last segment of a finished run (also from a leftover `.tmp` list), idle sleep + wake, a sleeping conversion gives its place up, limit), keyframe cache, a real Xvid HLS conversion through the API, settings API |

@@ -585,14 +585,116 @@ def _transcode_parts(video: dict | None, encoder: str | None, max_height: int | 
 
 _NO_EXTRAS = ["-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1"]
 
+# ------------------------------------------------------------------ audio stored far from its video
+
+AUDIO_LAG_LIMIT = 5.0  # seconds apart (in file order) that audio and video may be before conversions read them apart
+_lags: dict[tuple, bool] = {}
+_lags_lock = threading.Lock()
+
+
+def audio_lags(path: Path, audio_index: int = 0, start: float = 0.0) -> bool:
+    """Whether the file stores the audio track far (over AUDIO_LAG_LIMIT s) from the video it plays with.
+
+    Some files do: the sound for 0:00 sits next to the picture for 2:21 (seen after a remux that fixed a timestamp
+    problem, and from a converter). FFmpeg reads a file in order and its muxer waits ~10 s for a late stream, then
+    writes the video alone: the HLS segments had no sound at all, and the sound came later with times that belong to
+    segments long gone, so the browser played silence (players reading the file itself cope). Such files are
+    converted with the audio read through a second input of the same file (`split_audio`), each at its own place.
+    Checked once per file and track (from `start`, the first time); unknown (no ffprobe, an error) counts as no."""
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    key = (str(path), st.st_size, st.st_mtime_ns, audio_index)
+    with _lags_lock:
+        if key in _lags:
+            return _lags[key]
+    lags = _measure_lag(path, audio_index, start)
+    if lags is None:
+        return False
+    with _lags_lock:
+        if len(_lags) > 2000:
+            _lags.clear()
+        _lags[key] = lags
+    if lags:
+        log.info("%s: audio track %d is stored far from its video; conversions read it separately", path.name,
+                 audio_index)
+    return lags
+
+
+def _measure_lag(path: Path, audio_index: int, start: float) -> bool | None:
+    exe = probe.ffprobe_path()
+    if not exe:
+        return None
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    try:
+        r = subprocess.run([exe, "-v", "error", "-show_entries", "stream=index,codec_type", "-of", "csv=p=0",
+                            str(path)], capture_output=True, timeout=30, stdin=subprocess.DEVNULL, creationflags=flags)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    kinds = [line.split(",")[:2] for line in r.stdout.decode(errors="replace").splitlines() if "," in line]
+    video = next((int(i) for i, kind in kinds if kind == "video"), None)  # 0:v:0, the stream conversions map
+    audios = [int(i) for i, kind in kinds if kind == "audio"]
+    if video is None or audio_index >= len(audios):
+        return False
+    audio = audios[audio_index]
+    cmd = [exe, "-v", "error", *(["-read_intervals", f"{start:.3f}%"] if start > 0 else []),
+           "-show_entries", "packet=stream_index,pts_time", "-of", "csv=p=0", str(path)]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                                creationflags=flags)
+    except OSError:
+        return None
+    timer = threading.Timer(30, proc.kill)  # a stalled network share mustn't hold a conversion up for long
+    timer.start()
+    try:
+        first: dict[int, float] = {}
+        last: dict[int, float] = {}
+        # packets in file order: stop once both streams have shown up, or one has run far ahead alone
+        for line in proc.stdout:
+            parts = line.decode(errors="replace").strip().split(",")
+            try:
+                idx, t = int(parts[0]), float(parts[1])
+            except (IndexError, ValueError):  # no timestamp ("N/A"), or a line of something else
+                continue
+            if idx not in (video, audio):
+                continue
+            other = audio if idx == video else video
+            if idx not in first:
+                first[idx] = t
+                if other in last:
+                    return abs(last[other] - t) > AUDIO_LAG_LIMIT
+            last[idx] = max(last.get(idx, t), t)
+            if other not in first and last[idx] - first[idx] > AUDIO_LAG_LIMIT:
+                return True
+        return False if timer.is_alive() else None
+    finally:
+        timer.cancel()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
+def _with_audio_input(cmd: list[str], out: list[str], path: Path, start: float, split: bool) -> tuple[list[str], str]:
+    """(`cmd` + `out`, the input the audio is mapped from). `split`: the same file opened again for its audio, seeked
+    to the same place (`audio_lags`), as the last input: after a subtitle input `out` may begin with, before the
+    output options. Otherwise the audio comes from the main input, 0."""
+    if not split:
+        return [*cmd, *out], "0"
+    at = len(out) - out[::-1].index("-i") + 1 if "-i" in out else 0  # just past the subtitle input's file name
+    src = str(cmd.count("-i") + out[:at].count("-i"))
+    extra = [*(["-ss", f"{start:.3f}"] if start > 0 else []), "-i", str(path)]
+    return [*cmd, *out[:at], *extra, *out[at:]], src
+
 
 def transcode_cmd(path: Path, start: float, video: dict | None, audio_index: int = 0,
                   encoder: str | None = None, max_height: int | None = None, channels: int = 2,
-                  burn=None) -> list[str]:
+                  burn=None, split_audio: bool = False) -> list[str]:
     """Video -> H.264, audio -> AAC, as fragmented MP4 on stdout. Re-encoding makes the seek
     frame-accurate: the stream really starts at `start` (no keyframe dance like the remux).
     The player uses HLS (`hls_cmd`) when it can; this is for browsers without it.
-    Only NVIDIA's all-GPU path is used here: this stream can't retry on the hybrid path if a GPU run fails."""
+    Only NVIDIA's all-GPU path is used here: this stream can't retry on the hybrid path if a GPU run fails.
+    `split_audio`: the audio is read through an input of its own (`audio_lags`)."""
     # Burning in from mid-film: both inputs keep the file's own clock (-copyts, like `hls_cmd`), the subtitles
     # read from SUB_LEAD earlier, and the output is moved back to start at 0. (Shifting the subtitle input with
     # -itsoffset instead lost a line that was already on screen.) A sidecar is always the second input.
@@ -611,7 +713,8 @@ def transcode_cmd(path: Path, start: float, video: dict | None, audio_index: int
     if clock:
         cmd += ["-copyts", "-start_at_zero"]
         out = [*out, "-output_ts_offset", f"{-start:.3f}"]
-    cmd += ["-i", str(path), *out, "-map", f"0:a:{audio_index}?",
+    cmd, src = _with_audio_input([*cmd, "-i", str(path)], out, path, start, split_audio)
+    cmd += ["-map", f"{src}:a:{audio_index}?",
             # a keyframe every 2 s: each one closes an MP4 fragment the browser can play
             "-force_key_frames", "expr:gte(t,n_forced*2)",
             *_aac(channels), *_NO_EXTRAS, "-avoid_negative_ts", "make_zero", "-max_muxing_queue_size", "1024",
@@ -625,7 +728,7 @@ SEGMENT = 4.0  # HLS segment length, seconds
 
 def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_index: int = 0,
             encoder: str | None = None, max_height: int | None = None, channels: int = 2,
-            burn=None, gpu: bool = True) -> list[str]:
+            burn=None, gpu: bool = True, split_audio: bool = False) -> list[str]:
     """HLS segments `{n}.ts` in `out_dir` (the data dir, never a media folder) from segment `segment` on.
 
     Segments from different runs must line up, because the player seeks by asking for any segment and
@@ -634,7 +737,8 @@ def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_i
     periodic keyframes in between), and the muxer cuts at those keyframes (hls_time a hair under SEGMENT,
     because the first frame can sit a few ms after the start). Segment n always covers n*SEGMENT onwards.
     Every run's timestamps are pushed 10 s later: a run from 0 would otherwise start with negative
-    timestamps (B-frames, AAC priming), which the muxer fixes by shifting that run only."""
+    timestamps (B-frames, AAC priming), which the muxer fixes by shifting that run only.
+    `split_audio`: the audio is read through an input of its own (`audio_lags`), on the same clock (-copyts)."""
     start = segment * SEGMENT
     # -copyts keeps both inputs on the file's own clock, so the earlier subtitle input lines up by itself
     # (a sidecar .idx counts from the film's start too, and has no start time for -start_at_zero to take off)
@@ -645,7 +749,8 @@ def hls_cmd(path: Path, segment: int, video: dict | None, out_dir: Path, audio_i
     cmd = [exe, "-hide_banner", "-loglevel", "error", "-nostdin", *pre]
     if start > 0:
         cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-copyts", "-start_at_zero", "-i", str(path), *out, "-map", f"0:a:{audio_index}?",
+    cmd, src = _with_audio_input([*cmd, "-copyts", "-start_at_zero", "-i", str(path)], out, path, start, split_audio)
+    cmd += ["-map", f"{src}:a:{audio_index}?",
             "-g", "9999", "-force_key_frames", f"expr:gte(t,n_forced*{SEGMENT})",  # t counts from `start`
             *_aac(channels), *_NO_EXTRAS, "-avoid_negative_ts", "disabled", "-output_ts_offset", "10",
             "-max_muxing_queue_size", "1024",

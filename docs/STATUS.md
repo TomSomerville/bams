@@ -187,6 +187,7 @@ working title on 2026-10-07). Owner: Tom Somerville. A friend contributed requir
 | 10-19 | **Unidentified filter is web only** (admins; reuses `match_status` + Fix match) | The TV apps have no Fix match screen; it's for fast identification at a computer |
 | 10-19 | **Quick account switching with no PIN/password** between accounts already signed in on that browser (web) or PC (theatre mode); at most 5; web keeps the others' tokens in an **HttpOnly cookie** (`bams_others`), never in page storage; signing out moves to the next account. Not on the Samsung/Fire TV apps | Owner chose "Nothing" for switching; the cookie keeps tokens out of reach of page scripts. Theatre mode already keeps its own bearer token in `bams.theatre.*` storage, so its other accounts live there too |
 | 10-22 | **The Fire TV app releases its player whenever it isn't in front** (rebuilt paused at the same place on return), and Dolby sound that won't start is retried **as AAC from the server before a full conversion** | A player only paused in the background held the TV's one Dolby output through a day of standby; it stayed stuck and every later Dolby video hung (sound never started) or was refused. Converting only the sound keeps the picture as-is and costs the server little |
+| 11-25 | **Conversions read the sound through a second input of the same file only when it's stored far from its picture** (`stream.audio_lags`, a short ffprobe read, cached per file), not for every conversion | Files from a converter (and remuxes of them) kept the sound for 0:00 next to the picture minutes later; FFmpeg reads in file order, so HLS segments came out silent. A second input fixes it, but reads the file twice: not worth it for the files that are fine |
 | 10-19 | **No personal or machine-specific content in git** ([SECURITY-PRACTICES.md](SECURITY-PRACTICES.md)): the owner's machine details live in git-ignored `CLAUDE.local.md`; skills and `launch.json` are local only; `tools/privacy_check.py` runs as the pre-commit hook; commits use the GitHub no-reply email; history rewritten once to remove what had been committed | Owner's request, so the repo can be public |
 
 ## 4. Built so far
@@ -468,6 +469,31 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** tests run, manual checks (what was actually observed).
 - **Left open:** follow-ups, known gaps, or "none".
 ```
+
+### 2026-11-25: Converted videos silent when the file stores its sound far from the picture (not released yet)
+- **What / why:** owner: HEVC + AAC files from a converter played without sound in Helium (no HEVC decoding, so the
+  transcode path) but fine on Android. Cause: those files store the sound minutes (tens of MB) away from the picture it
+  plays with (the sound for 0:00 next to the picture for 2:21; in some, none in the first 60 MB). FFmpeg reads a file in
+  order and its muxer waits ~10 s for a late stream, so `hls_cmd` wrote the first segments with no sound and the sound
+  later, with times belonging to other segments: hls.js decoded no audio at all (`webkitAudioDecodedByteCount` 0, not
+  muted). Players reading the file itself cope. The AAC details the owner suspected (5.1 with an "unknown" layout = a
+  PCE, mono, no language / default=0, `-ac`, the `?` map) were all fine.
+- **Fix:** `stream.audio_lags(path, audio, start)` reads packets with ffprobe until both streams show up (or one runs
+  5 s ahead alone), cached per file + track; when it says so, `hls_cmd` / `transcode_cmd(split_audio=True)` open the
+  same file again for the sound (`_with_audio_input`: after a subtitle input, before the output options, same `-ss` and
+  clock). Set per HLS session (`Session.split_audio`, conversions only) and per live `/transcode` request. Other files
+  get the same commands as before; remux, copy-HLS and direct play untouched.
+- **Files:** `server/bams/stream.py`, `hls.py`, `app.py`; `server/tests/test_audio_lag.py`.
+- **Verified:** the owner's samples (first 60 MB of three files): old commands → no audio packets in segments 0–33;
+  new → every segment's sound covers its picture, from the start and from a later run. Scratch server in the preview
+  browser with HEVC turned off: plays with sound (audio bytes decoding), also after a seek. `test_audio_lag.py` (HEVC
+  clips with the sound stored 20 s late: 5.1 with a PCE, mono, stereo with no language and default=0; HLS from 0 and
+  after a seek, the live stream, through the API; fails with detection off). Full suite on Linux: all pass but the
+  known `test_encoder_choice_api`.
+- **Left open:** where the sound starts in two of the full files is unknown (the samples had none): if it's at the
+  very end, the second input has to read through the whole file first. The TV apps' copy-HLS (`hls_copy_cmd`) and the
+  live remux probably have the same problem with such files; not changed (owner: leave those paths). Not tried on the
+  owner's server (FFmpeg 6.1, VAAPI).
 
 ### 2026-11-19: The fireplace closed itself after a second (release 0.25.2, Android 0.2.13)
 - **What / why:** owner: on the phone (app and browser) the fireplace showed for a second and went away.
