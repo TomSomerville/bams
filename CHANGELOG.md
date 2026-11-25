@@ -3,6 +3,17 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.3 (2026-11-25)
+
+### Fixed
+- **Some videos played without sound when the server converted them.** Files that keep their sound far from the
+  picture inside the file (some converters write them that way) lost their sound whenever BAMS converted them: in
+  browsers that can't play the video as it is (for example HEVC in a browser without HEVC), on the Samsung and Fire TV
+  apps, and in the browser's fallback stream. Playing the file directly (the Android app) was fine. BAMS now spots
+  such files and reads their sound separately, from the start and after a seek.
+
+Update the server only: the TV and Android apps get the fix from it.
+
 ## 0.25.2 (2026-11-19), Android app 0.2.13
 
 ### Fixed

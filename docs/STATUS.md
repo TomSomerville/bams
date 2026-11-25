@@ -470,7 +470,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
-### 2026-11-25: Converted videos silent when the file stores its sound far from the picture (not released yet)
+### 2026-11-25: Converted videos silent when the file stores its sound far from the picture (release 0.25.3)
 - **What / why:** owner: HEVC + AAC files from a converter played without sound in Helium (no HEVC decoding, so the
   transcode path) but fine on Android. Cause: those files store the sound minutes (tens of MB) away from the picture it
   plays with (the sound for 0:00 next to the picture for 2:21; in some, none in the first 60 MB). FFmpeg reads a file in
