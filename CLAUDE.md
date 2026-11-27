@@ -459,6 +459,8 @@ server\.venv\Scripts\python deploy\build.py all               # dist\BAMS-Setup-
 - **Effects that leave full screen in their cleanup must not depend on a callback prop** (`Fireplace.tsx`): the players
   re-render every second, a new `onClose` re-ran the cleanup, left full screen and closed the fireplace at once. Read
   callbacks through a ref. The preview pane refuses the Fullscreen API: stub it to test such code.
+- **The web player's full screen is `.player-stage` in `PlayerPage`, never the keyed `Player`:** each episode remounts
+  `Player`, and a full-screen element leaving the page ends full screen (it dropped out at every next episode).
 - **Holiday songs are cached apart from holiday titles** (`holidays.songs`, keyed by album/track count, last change and
   title/genre lengths). Song-only words go in `SONG_WORDS` (carols), never in a holiday's own words (movies use those).
   Albums' release day is `items.air_date` ('YYYY-MM-DD', episodes use it for their air date).

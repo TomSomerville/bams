@@ -1,5 +1,5 @@
 import type Hls from "hls.js"; // loaded on demand (it's most of the bundle), only when a video goes over HLS
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, type ItemDetail, type Probe, type ServerStatus, type SubtitleTrack } from "../api";
 import FindSubtitles from "../components/FindSubtitles";
@@ -148,20 +148,21 @@ function VideoQueueList({ at, jump }: { at: number; jump: (id: number) => void }
   );
 }
 
-/** /play/:id. Keyed by id, so going on to the next episode starts a fresh player. */
+/** /play/:id. Keyed by id, so going on to the next episode starts a fresh player. Full screen is the stage around
+ *  it, which stays: a full-screen element that leaves the page ends full screen, so the next episode would drop out. */
 export default function PlayerPage() {
   const { id } = useParams();
-  return <Player key={id} id={id!} />;
+  const stage = useRef<HTMLDivElement>(null);
+  return <div ref={stage} className="player-stage"><Player key={id} id={id!} stage={stage} /></div>;
 }
 
-function Player({ id }: { id: string }) {
+function Player({ id, stage }: { id: string; stage: RefObject<HTMLDivElement | null> }) {
   const nav = useNavigate();
   const { call, media, to, rid } = useScope();  // this server, or another one (/r/:rid/play/:id)
   const [search] = useSearchParams();
   const location = useLocation();
   const { data: item, error } = useApi<ItemDetail>(`/api/items/${id}`);
   const video = useRef<HTMLVideoElement>(null);
-  const shell = useRef<HTMLDivElement>(null);
   const [t, setT] = useState(0);             // video.currentTime
   const [fileDur, setFileDur] = useState(0); // duration as the browser reports it (file and HLS)
   const [offset, setOffset] = useState(0);   // live modes: media time the current stream starts at
@@ -592,7 +593,7 @@ function Player({ id }: { id: string }) {
   const fullscreen = () => {
     if (appVideoFullscreen) return;  // the app is full screen already (below)
     if (document.fullscreenElement) document.exitFullscreen();
-    else shell.current?.requestFullscreen?.();
+    else stage.current?.requestFullscreen?.();
   };
   // In the Android app (0.2.2+) a video plays full screen from the start: the app hides its bars and turns to
   // landscape; its Back leaves full screen (the player stays), a second Back leaves the player.
@@ -662,7 +663,7 @@ function Player({ id }: { id: string }) {
   const nextUp = upNext !== null && nextId;
 
   return (
-    <div ref={shell} className={`player ${idle && playing && !menu && !finding && !showQueue ? "idle" : ""}`}>
+    <div className={`player ${idle && playing && !menu && !finding && !showQueue ? "idle" : ""}`}>
       {file ? (
         <video
           // a new element per stream: hls.js detaching must not wipe the next stream's src

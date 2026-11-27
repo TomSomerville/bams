@@ -152,7 +152,7 @@ bams/
 │           ├── MusicHome.tsx  A music library's Home tab: Recently Added, Released This Week, Upcoming Holiday sections (GET …/music-home), each with Shuffle (…/music-home/<section>/random → playRandom)
 │           ├── Music.tsx      MusicLibrary (Home (default, no `view`)/Artists/Albums/Playlists/Genres tabs, kept in the address as `view`/`genre`; TopSongs + `/top-songs/:id`: your playlists + New playlist, then imported), artist page, album page + TrackList (add-to-playlist / download icons; `edit`: drag + take out), Fix match,
 │           │                  PlaylistPage (/playlist/:id, Make a copy), UserPlaylistPage (/my-playlist/:id), PlaylistCard + cover Mosaic
-│           ├── Player.tsx     /play/:id (keyed by id): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
+│           ├── Player.tsx     /play/:id (keyed by id, inside a lasting `.player-stage` that is what goes full screen): file/remux/transcode, HLS (copy remux, Auto ABR), resume + progress, up-next
 │           │                  (at the end and CREDITS = 30 s before it; next-episode button), skip +30 / −10 s (SKIP_*),
 │           │                  sound / subtitles / quality menus, canDecode() fallback, keyboard; sleep mode (SLEEP_MORE,
 │           │                  location.state.sleep), "Check OpenSubtitles…" (FindSubtitles, found/dropped tracks)
