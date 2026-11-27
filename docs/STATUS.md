@@ -470,7 +470,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
-### 2026-11-27: Web player stays full screen into the next episode
+### 2026-11-27: Web player stays full screen into the next episode (release 0.25.4)
 - **What / why:** owner: watching a show in the browser, the player left full screen when the next episode started.
   `PlayerPage` keys `Player` by id, so the element that was full screen (the player's outer div) left the page and the
   browser ended full screen. Full screen is now `.player-stage`, a wrapper in `PlayerPage` that stays across episodes.
@@ -478,7 +478,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** scratch server, two mock episodes, Fullscreen API stubbed (the preview pane refuses it): full screen on
   episode 1, Next episode → episode 2 played with the same stage element full screen and no exit; the button still
   leaves full screen. `npx tsc -p .` and `npm run build` pass.
-- **Left open:** not tried in a real full-screen browser window; reaches the live server with the next release.
+- **Left open:** not tried in a real full-screen browser window.
 
 ### 2026-11-25: Converted videos silent when the file stores its sound far from the picture (release 0.25.3)
 - **What / why:** owner: HEVC + AAC files from a converter played without sound in Helium (no HEVC decoding, so the

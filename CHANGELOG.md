@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.4 (2026-11-27)
+
+### Fixed
+- **The browser left full screen when the next episode started.** Watching a show full screen in the browser, the
+  player dropped out of full screen whenever it went on to the next episode, on its own or with Next episode. It now
+  stays full screen.
+
+Update the server only: the TV and Android apps aren't affected.
+
 ## 0.25.3 (2026-11-25)
 
 ### Fixed
