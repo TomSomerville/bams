@@ -1495,10 +1495,11 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     @app.get("/api/libraries/{lib_id}/items")
     def library_items(lib_id: int, sort: str = "title", kind: str | None = None, match_status: str | None = None,
-                      q: str | None = None, genre: str | None = None, limit: int = Query(500, le=5000), offset: int = 0,
+                      q: str | None = None, genre: str | None = None, limit: int | None = Query(None, ge=1), offset: int = 0,
                       con=Depends(db), me=Depends(current_user)):
         """Top-level items of a library: shows, movies, or (music, `kind=artist|album|track`) artists by default.
-        `genre`: a music library's artists with a track in that genre."""
+        `genre`: a music library's artists with a track in that genre. Without `limit`, every one: the web Library page
+        asks without one, and a default of 500 cut a big Movies library off partway through the alphabet."""
         lib = library.get(con, lib_id)
         allowed = _LIB_KINDS[lib["type"]]
         if kind is not None and kind not in allowed:
@@ -1517,7 +1518,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
             where.append(music.GENRE_ARTISTS)
             args += [lib_id, genre]
         rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {_SORTS.get(sort, _SORTS['title'])} "
-                           "LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
+                           "LIMIT ? OFFSET ?", (*args, -1 if limit is None else limit, offset)).fetchall()
         return watch.annotate(con, me["id"], [item_summary(r) for r in rows])
 
     @app.get("/api/libraries/{lib_id}/genres")

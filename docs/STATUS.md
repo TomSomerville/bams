@@ -470,6 +470,17 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-11-27: Movies library lists every title, not the first 500
+- **What / why:** owner: the web Movies page stopped partway through the alphabet (around "L"), while search found
+  later titles. The web Library page asks `/api/libraries/{id}/items` without `limit`, and the server defaulted it to
+  500, so any library over 500 titles was cut off by sort order (the TV app and Music page pass `limit=5000`). Now no
+  `limit` means every title; `limit`/`offset` still page.
+- **Files:** `server/bams/app.py` (`library_items`), `server/tests/test_api.py`.
+- **Verified:** new `test_library_lists_every_title_without_a_limit` (1,200 titles); full suite passes on Linux except
+  the known `test_encoder_choice_api`. Scratch server with 1,300 movies A–Z: the page shows "1300 movies" and scrolls
+  to the last Z title. Not yet on the owner's server (needs a release).
+- **Left open:** a server release; `/api/holidays/{which}/items` still defaults to 500 (unlikely to matter).
+
 ### 2026-11-27: Web player stays full screen into the next episode (release 0.25.4)
 - **What / why:** owner: watching a show in the browser, the player left full screen when the next episode started.
   `PlayerPage` keys `Player` by id, so the element that was full screen (the player's outer div) left the page and the

@@ -206,3 +206,19 @@ def test_migration_orders_existing_libraries_by_name(tmp_path):
         con.execute("INSERT INTO libraries (name, type, scan_interval_hours, created_at) VALUES (?, 'show', 6, 0)", (n,))
     db.migrate(con)
     assert [r["name"] for r in library.listed(con)] == ["Alpha", "middle", "zebra"]
+
+
+def test_library_lists_every_title_without_a_limit(tmp_path):
+    """The web Library page asks without `limit`: a default of 500 cut a big Movies library off at "L"."""
+    from bams import db
+    (tmp_path / "media").mkdir()
+    c = client(tmp_path)
+    lib = c.post("/api/libraries", json={"name": "Movies", "type": "movie", "paths": [str(tmp_path / "media")]}).json()
+    con = db.connect(Paths(tmp_path / "data").db)
+    con.executemany("INSERT INTO items (library_id, kind, title, match_status, added_at, updated_at) "
+                    "VALUES (?, 'movie', ?, 'matched', 0, 0)", [(lib["id"], f"Movie {n:04}") for n in range(1200)])
+    con.commit()
+    con.close()
+    items = c.get(f"/api/libraries/{lib['id']}/items").json()
+    assert len(items) == 1200 and items[-1]["title"] == "Movie 1199"
+    assert len(c.get(f"/api/libraries/{lib['id']}/items?limit=10&offset=1195").json()) == 5  # paging still works
