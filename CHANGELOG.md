@@ -3,6 +3,15 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.5 (2026-11-27)
+
+### Fixed
+- **A library with more than 500 titles stopped partway through.** In the browser, a big Movies (or TV) library page
+  only scrolled as far as its 500th title, partway through the alphabet, although search found the rest. It now lists
+  every title.
+
+Update the server only: the TV and Android apps aren't affected.
+
 ## 0.25.4 (2026-11-27)
 
 ### Fixed
