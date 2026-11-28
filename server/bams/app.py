@@ -1592,9 +1592,10 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
 
     @app.get("/api/holidays/{which}/items")
     def holiday_items(which: str, library: int | None = None, sort: str = Query("title", pattern="^(title|random)$"),
-                      limit: int = Query(500, ge=1, le=5000), con=Depends(db), me=Depends(current_user)):
+                      limit: int | None = Query(None, ge=1), con=Depends(db), me=Depends(current_user)):
         """The movies and episodes about a holiday (`which`: next, recent or a holiday id), every library or one;
-        by title (episodes under their show, in order) or at random (Home)."""
+        by title (episodes under their show, in order) or at random (Home). Without `limit`, every one (the holiday
+        page and the Library filter ask without one; a default of 500 cut them off)."""
         h, _ = _holiday_pick(which)
         ids = holidays.titles(con)[h.id]
         if not ids:
@@ -1606,7 +1607,7 @@ def create_app(paths: Paths, *, start_scheduler: bool = True, web_dir: Path | No
         order = "RANDOM()" if sort == "random" else (
             "COALESCE((SELECT sh.title FROM items se JOIN items sh ON sh.id=se.parent_id WHERE se.id=items.parent_id), "
             "title) COLLATE NOCASE, season_number, episode_number, title COLLATE NOCASE")
-        rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?", (*args, limit)).fetchall()
+        rows = con.execute(f"{ITEM_SELECT} WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?", (*args, -1 if limit is None else limit)).fetchall()
         return watch.annotate(con, me["id"], _with_show(con, rows))
 
     @app.get("/api/holidays/{which}/random")

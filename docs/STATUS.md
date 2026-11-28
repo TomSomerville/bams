@@ -470,6 +470,15 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Left open:** follow-ups, known gaps, or "none".
 ```
 
+### 2026-11-28: Holiday lists show every title, not the first 500
+- **What / why:** owner, after 0.25.5: fix the same cut-off for holidays. The holiday page and the Library page's
+  holiday filter ask `/api/holidays/{which}/items` without `limit`, which defaulted to 500; now no `limit` means every
+  title. Home's holiday row still asks for `ROW_SIZE`.
+- **Files:** `server/bams/app.py` (`holiday_items`), `server/tests/test_holidays.py`.
+- **Verified:** new `test_holiday_lists_every_title_without_a_limit` (601 Christmas titles, all and per library; Home's
+  `limit` still honoured); full suite passes on Linux except the known `test_encoder_choice_api`.
+- **Left open:** reaches the live server with the next release.
+
 ### 2026-11-27: Movies library lists every title, not the first 500 (release 0.25.5)
 - **What / why:** owner: the web Movies page stopped partway through the alphabet (around "L"), while search found
   later titles. The web Library page asks `/api/libraries/{id}/items` without `limit`, and the server defaulted it to
@@ -479,7 +488,7 @@ agents did. Keep entries short; link to files instead of repeating them. Templat
 - **Verified:** new `test_library_lists_every_title_without_a_limit` (1,200 titles); full suite passes on Linux except
   the known `test_encoder_choice_api`. Scratch server with 1,300 movies A–Z: the page shows "1300 movies" and scrolls
   to the last Z title.
-- **Left open:** `/api/holidays/{which}/items` still defaults to 500 (unlikely to matter).
+- **Left open:** the same limit on holiday lists, fixed the next day (entry above).
 
 ### 2026-11-27: Web player stays full screen into the next episode (release 0.25.4)
 - **What / why:** owner: watching a show in the browser, the player left full screen when the next episode started.

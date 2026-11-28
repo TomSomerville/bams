@@ -90,6 +90,20 @@ def test_routes(lib):
     assert c.get("/api/holidays/nope/items").status_code == 404
 
 
+def test_holiday_lists_every_title_without_a_limit(lib):
+    """The holiday page and Library filter ask without `limit`: a default of 500 cut a big holiday off."""
+    app, c, paths, libs, ids, eps = lib
+    con = connect(paths.db)
+    with Tx(con):
+        con.executemany("INSERT INTO items (library_id, kind, title, overview, match_status, added_at, updated_at) "
+                        "VALUES (?, 'movie', ?, 'Santa Claus is lost.', 'matched', 0, 0)",
+                        [(libs["movie"], f"Snow {n:04}") for n in range(600)])
+    con.close()
+    assert len(c.get("/api/holidays/christmas/items").json()) == 601  # with Elf
+    assert len(c.get(f"/api/holidays/christmas/items?library={libs['movie']}").json()) == 601
+    assert len(c.get("/api/holidays/christmas/items?sort=random&limit=20").json()) == 20  # Home's row
+
+
 def test_admin_override(lib):
     app, c, paths, libs, ids, eps = lib
     # Heat isn't a Christmas film by its words: an admin puts it in; Elf is, and is taken out
