@@ -3,6 +3,14 @@
 What changed in each BAMS release. To update, run the newer installer over the old one: it keeps your libraries,
 accounts, watch history and settings ([docs/INSTALL.md](docs/INSTALL.md#updating)).
 
+## 0.25.6 (2026-11-28)
+
+### Fixed
+- **A holiday with more than 500 titles stopped partway through.** A holiday's page, and a library's holiday filter,
+  only listed its first 500 movies and episodes. They now list every one.
+
+Update the server only: the TV and Android apps aren't affected.
+
 ## 0.25.5 (2026-11-27)
 
 ### Fixed
